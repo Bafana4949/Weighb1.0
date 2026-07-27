@@ -1,5 +1,10 @@
+import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { authConfig } from "@/auth.config";
+
+// Deliberately built from the edge-safe authConfig (no providers, no Prisma,
+// no bcrypt) rather than importing the full auth.ts — see auth.config.ts.
+const { auth } = NextAuth(authConfig);
 
 export default auth((request) => {
   const path = request.nextUrl.pathname;

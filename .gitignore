@@ -19,3 +19,5 @@ mosquitto/data/*
 !mosquitto/data/.gitkeep
 pgadmin-data/
 package-lock.json.bak-corrupted
+
+*.tsbuildinfo
