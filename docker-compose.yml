@@ -1,0 +1,115 @@
+name: weighbridge-system
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-weighbridge}
+      POSTGRES_USER: ${POSTGRES_USER:-weighbridge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-weighbridge_dev_change_me}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-weighbridge} -d ${POSTGRES_DB:-weighbridge}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/data:/mosquitto/data
+      - mosquitto-logs:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -t '$$SYS/broker/version' -C 1 -W 3 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    restart: unless-stopped
+    profiles: ["admin-tools"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@weighbridge.local
+      PGADMIN_DEFAULT_PASSWORD: admin-change-me
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    profiles: ["cloud"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-weighbridge}:${POSTGRES_PASSWORD:-weighbridge_dev_change_me}@postgres:5432/${POSTGRES_DB:-weighbridge}?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:-development-secret-change-before-production}
+      AUTH_TRUST_HOST: "true"
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_SOCKET_URL: http://localhost:3000
+      SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-dev-site-key-change-me}
+      MQTT_URL: mqtt://mosquitto:1883
+      SITE_DAEMON_URL: http://site-daemon:8000
+      SMTP_HOST: ${SMTP_HOST:-smtp.ethereal.email}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-Weighbridge Platform <noreply@example.test>}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
+  site-daemon:
+    build:
+      context: ./apps/site-daemon
+    restart: unless-stopped
+    profiles: ["edge"]
+    environment:
+      WB_CONFIG_PATH: /app/config.docker.yaml
+      WB_EDGE_DB_PATH: /data/edge.db
+      SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-dev-site-key-change-me}
+    volumes:
+      - edge-data:/data
+      - ./apps/site-daemon/config.docker.yaml:/app/config.docker.yaml:ro
+      - ./apps/site-daemon/test_plates:/app/test_plates:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      mosquitto:
+        condition: service_started
+
+  hardware-simulator:
+    build:
+      context: ./apps/hardware-simulator
+    profiles: ["edge"]
+    command: ["python", "simulator.py", "--headless", "--tcp-host", "0.0.0.0", "--tcp-port", "7001"]
+    ports:
+      - "7001:7001"
+      - "7002:7002"
+
+volumes:
+  postgres-data:
+  pgadmin-data:
+  mosquitto-logs:
+  edge-data:

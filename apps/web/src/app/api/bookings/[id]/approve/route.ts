@@ -1,0 +1,8 @@
+import { UserRole } from "@prisma/client";
+import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { evaluateBookingPolicy } from "@/lib/booking-service";
+import { fail,ok,requireRole } from "@/lib/api";
+import { routeNotification } from "@/lib/notifications";
+const schema=z.object({reason:z.string().max(500).optional()});
+export async function PUT(request:Request,{params}:{params:Promise<{id:string}>}){const a=await requireRole([UserRole.ADMIN,UserRole.OPERATOR]);if(a.error)return a.error;const parsed=schema.safeParse(await request.json().catch(()=>({})));if(!parsed.success)return fail("Invalid approval reason",422);const {id}=await params;const row=await prisma.booking.findUnique({where:{id},include:{site:true}});if(!row)return fail("Booking not found",404);if(!["PENDING","REJECTED"].includes(row.status))return fail("Booking cannot be approved from its current status",409);const policy=await evaluateBookingPolicy(row);if(!policy.approved&&!parsed.data.reason)return fail(`Policy checks failed: ${policy.reasons.join("; ")}. An override reason is required.`,409);const booking=await prisma.booking.update({where:{id},data:{status:"APPROVED",approvedById:a.session!.user.id,approvedAt:new Date(),approvalReason:parsed.data.reason??"Manual approval after policy validation",rejectionReason:null}});await routeNotification({event:"BOOKING_APPROVED",severity:"LOW",subject:`Booking ${booking.reference} approved`,body:`Journey token ${booking.journeyToken} is ready for use.`,organisationId:booking.transporterOrganisationId,metadata:{booking_id:id,site_id:row.site.code}});return ok(booking)}

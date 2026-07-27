@@ -1,0 +1,5 @@
+import { UserRole } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { ok,requireRole } from "@/lib/api";
+import { parsePagination,siteIdentifierWhere } from "@/lib/utils";
+export async function GET(request:Request){const a=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const url=new URL(request.url);const {page,limit,skip}=parsePagination(url);const from=url.searchParams.get("from"),to=url.searchParams.get("to"),site=url.searchParams.get("site"),vehicle=url.searchParams.get("vehicle");const where={...(a.session!.user.role==="TRANSPORTER"?{booking:{transporterOrganisationId:a.session!.user.organisationId!}}:{}),...(site?{site:siteIdentifierWhere(site)}:{}),...(vehicle?{vehicleId:vehicle}:{}),...((from||to)?{capturedAt:{...(from?{gte:new Date(from)}:{}),...(to?{lte:new Date(to)}:{})}}:{})};const [rows,total]=await Promise.all([prisma.weighbridgeTransaction.findMany({where,include:{vehicle:true,driver:true,site:true,booking:true},orderBy:{capturedAt:"desc"},skip,take:limit}),prisma.weighbridgeTransaction.count({where})]);return ok(rows,200,{page,total,limit})}

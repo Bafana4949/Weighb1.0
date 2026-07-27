@@ -1,0 +1,8 @@
+import { redirect } from "next/navigation";
+import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
+import { AppShell } from "@/components/app-shell";
+import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table,TableBody,TableCell,TableHead,TableHeader,TableRow } from "@/components/ui/table";
+export default async function Incidents(){const s=await auth();if(!s?.user)redirect("/login");const rows=await prisma.incident.findMany({include:{site:true,vehicle:true},orderBy:{createdAt:"desc"},take:100});return <AppShell role={s.user.role} userName={s.user.name??"Operator"}><Card><CardHeader><CardTitle>Incident register</CardTitle></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Site</TableHead><TableHead>Type</TableHead><TableHead>Details</TableHead><TableHead>Severity</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>{rows.map(x=><TableRow key={x.id}><TableCell className="font-mono text-xs">{x.createdAt.toLocaleString("en-ZA")}</TableCell><TableCell>{x.site.code}</TableCell><TableCell>{x.type}</TableCell><TableCell><p>{x.title}</p><p className="max-w-xl text-xs text-muted-foreground">{x.description}</p></TableCell><TableCell><Badge variant={x.severity==="HIGH"||x.severity==="CRITICAL"?"destructive":x.severity==="MEDIUM"?"warning":"muted"}>{x.severity}</Badge></TableCell><TableCell><Badge variant={x.status==="RESOLVED"?"default":"warning"}>{x.status}</Badge></TableCell></TableRow>)}</TableBody></Table></CardContent></Card></AppShell>}

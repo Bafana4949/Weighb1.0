@@ -1,0 +1,6 @@
+import { UserRole } from "@prisma/client";
+import { z } from "zod";
+import { fail,ok,requireRole } from "@/lib/api";
+import { audit } from "@/lib/audit";
+const schema=z.object({action:z.enum(["GATE_OPEN","GATE_CLOSE","LIGHT","BUZZER"]),target:z.enum(["ENTRY","EXIT"]).optional(),value:z.enum(["RED","GREEN","ON","OFF"]).optional(),reason:z.string().min(10).optional()});
+export async function POST(request:Request){const a=await requireRole([UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const parsed=schema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return fail("Invalid hardware command",422);try{const response=await fetch(`${process.env.SITE_DAEMON_URL??"http://localhost:8000"}/edge/command`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(parsed.data),signal:AbortSignal.timeout(3000)});const body=await response.json();if(!response.ok)throw new Error(body.detail??"daemon rejected command");await audit({userId:a.session!.user.id,action:"HARDWARE_COMMAND",entityType:"edge_hardware",afterData:parsed.data});return ok(body)}catch(error){return fail(`Site daemon unavailable: ${String(error)}`,503)}}

@@ -1,0 +1,8 @@
+import { UserRole } from "@prisma/client";
+import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { fail,ok,requireRole } from "@/lib/api";
+import { normalisePlate } from "@/lib/utils";
+import { vehicleSchema } from "@/lib/validation";
+const bulkSchema=z.object({rows:z.array(z.record(z.unknown())).min(1).max(500)});
+export async function POST(request:Request){const a=await requireRole([UserRole.TRANSPORTER,UserRole.ADMIN]);if(a.error)return a.error;const parsed=bulkSchema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return fail("Invalid CSV payload",422);const errors:{row:number;message:string}[]=[];let created=0;for(let i=0;i<parsed.data.rows.length;i++){const rowNumber=i+2;const raw=parsed.data.rows[i] as Record<string,unknown>;const row=vehicleSchema.safeParse({...raw,year:raw.year?Number(raw.year):undefined,tareWeightKg:Number(raw.tareWeightKg),legalMaxGvwKg:Number(raw.legalMaxGvwKg)});if(!row.success){errors.push({row:rowNumber,message:row.error.issues[0]?.message??"Invalid row"});continue}const organisationId=a.session!.user.role==="TRANSPORTER"?a.session!.user.organisationId:row.data.organisationId;if(!organisationId){errors.push({row:rowNumber,message:"Organisation is required"});continue}if(row.data.tareWeightKg>=row.data.legalMaxGvwKg){errors.push({row:rowNumber,message:"Tare weight must be below legal maximum GVW"});continue}try{await prisma.vehicle.create({data:{...row.data,organisationId,plate:row.data.plate.toUpperCase(),plateNormalized:normalisePlate(row.data.plate)}});created++}catch{errors.push({row:rowNumber,message:"Vehicle plate or VIN is already registered"})}}return ok({created,errors})}

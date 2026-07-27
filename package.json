@@ -1,0 +1,23 @@
+{
+  "name": "weighbridge-system",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/web",
+    "packages/database",
+    "packages/shared-types",
+    "packages/mqtt-topics"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace @weighbridge/web run dev",
+    "build": "npm --workspace @weighbridge/database run generate && npm --workspace @weighbridge/web run build",
+    "db:generate": "npm --workspace @weighbridge/database run generate",
+    "db:migrate": "npm --workspace @weighbridge/database run migrate:dev",
+    "db:seed": "npm --workspace @weighbridge/database run seed",
+    "test": "npm --workspace @weighbridge/web run test",
+    "preflight": "node preflight.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

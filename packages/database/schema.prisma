@@ -1,0 +1,672 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrganisationType {
+  MINING_COMPANY
+  HAULIER
+  SERVICE_PROVIDER
+}
+
+enum SiteType {
+  MINE
+  WEIGHBRIDGE
+  DEPOT
+  CUSTOMER_SITE
+}
+
+enum OrderType {
+  DISPATCH
+  RECEIPT
+}
+
+enum OrderStatus {
+  DRAFT
+  ACTIVE
+  FULFILLED
+  CANCELLED
+}
+
+enum UserRole {
+  TRANSPORTER
+  OPERATOR
+  ADMIN
+  SECURITY
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  INVITED
+}
+
+enum VehicleStatus {
+  ACTIVE
+  SUSPENDED
+  MAINTENANCE
+  EXPIRED_DOCUMENTS
+}
+
+enum BookingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  ACTIVE
+  COMPLETED
+  EXPIRED
+}
+
+enum TransactionStatus {
+  IN_PROGRESS
+  COMPLETED
+  HELD
+  VOIDED
+  MANUAL_REVIEW
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCING
+  SYNCED
+  FAILED
+}
+
+enum GateDirection {
+  ENTRY
+  EXIT
+}
+
+enum GateEventType {
+  ANPR_CAPTURE
+  AUTHORISATION_CHECK
+  GATE_OPEN
+  GATE_CLOSE
+  VEHICLE_ENTERED
+  VEHICLE_EXITED
+  MANUAL_OVERRIDE
+}
+
+enum IncidentType {
+  UNAUTHORISED_ACCESS
+  OVERLOAD
+  FRAUD_ALERT
+  SENSOR_FAULT
+  DRIVER_MISMATCH
+  ANPR_FAILURE
+  CLOUD_SYNC_FAILURE
+  SCALE_FAULT
+  ROUTE_DEVIATION
+  CLONE_DETECTION
+  TARE_DRIFT
+  CALIBRATION_EXPIRY
+  POWER_RECOVERY
+  MANUAL_OVERRIDE
+  UNDERWEIGHT_EMPTY
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+}
+
+enum HardwareDeviceType {
+  SCALE
+  POSITION_SENSOR
+  RFID_READER
+  ANPR_CAMERA
+  ENTRY_GATE
+  EXIT_GATE
+  TRAFFIC_LIGHT
+  BUZZER
+  EDGE_DAEMON
+}
+
+enum HardwareHealth {
+  ONLINE
+  DEGRADED
+  OFFLINE
+  FAULT
+}
+
+enum QueueOperation {
+  TRANSACTION_RECONCILE
+  GATE_EVENT_UPLOAD
+  INCIDENT_UPLOAD
+  HARDWARE_STATUS_UPLOAD
+}
+
+enum NotificationChannel {
+  DASHBOARD
+  EMAIL
+  SMS
+  AUDIBLE
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Organisation {
+  id              String             @id @default(uuid()) @db.Uuid
+  name            String
+  registrationNo  String?            @unique @map("registration_no")
+  type            OrganisationType
+  contactEmail    String?            @map("contact_email")
+  contactPhone    String?            @map("contact_phone")
+  isActive        Boolean            @default(true) @map("is_active")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  deletedAt       DateTime?          @map("deleted_at")
+  users           User[]
+  vehicles        Vehicle[]
+  drivers         Driver[]
+  sites           Site[]             @relation("SiteOwner")
+  transporterBookings Booking[]      @relation("TransporterOrganisation")
+
+  @@index([type, isActive])
+  @@map("organisations")
+}
+
+model Site {
+  id                    String               @id @default(uuid()) @db.Uuid
+  organisationId        String               @db.Uuid @map("organisation_id")
+  code                  String               @unique
+  name                  String
+  type                  SiteType             @default(MINE)
+  address               String
+  latitude              Decimal              @db.Decimal(10, 7)
+  longitude             Decimal              @db.Decimal(10, 7)
+  timezone              String               @default("Africa/Johannesburg")
+  geofenceRadiusM       Int                  @default(500) @map("geofence_radius_m")
+  isActive              Boolean              @default(true) @map("is_active")
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+  organisation          Organisation         @relation("SiteOwner", fields: [organisationId], references: [id])
+  config                SiteConfig?
+  bookings              Booking[]
+  transactions          WeighbridgeTransaction[]
+  gateEvents            GateEvent[]
+  incidents             Incident[]
+  hardwareDevices       HardwareDevice[]
+  hardwareStatuses      HardwareStatus[]
+  syncQueue             SyncQueue[]
+  calibrationCertificates CalibrationCertificate[]
+  systemLogs            SystemLog[]
+  weighbridgeOrders     WeighbridgeOrder[]   @relation("OrderWeighbridge")
+  originOrders          WeighbridgeOrder[]   @relation("OrderOrigin")
+  destinationOrders     WeighbridgeOrder[]   @relation("OrderDestination")
+
+  @@index([organisationId, isActive])
+  @@map("sites")
+}
+
+model SiteConfig {
+  id                        String   @id @default(uuid()) @db.Uuid
+  siteId                    String   @unique @db.Uuid @map("site_id")
+  operatingStart            String   @default("05:00") @map("operating_start")
+  operatingEnd              String   @default("22:00") @map("operating_end")
+  maxCapacityKg             Int      @default(80000) @map("max_capacity_kg")
+  stabilityThresholdKg      Int      @default(20) @map("stability_threshold_kg")
+  stabilityDurationSeconds  Int      @default(3) @map("stability_duration_seconds")
+  overloadTolerancePercent  Decimal  @default(5) @db.Decimal(5, 2) @map("overload_tolerance_percent")
+  emptyVehicleMaxKg        Int      @default(18500) @map("empty_vehicle_max_kg")
+  loadedVehicleMaxKg       Int      @default(70000) @map("loaded_vehicle_max_kg")
+  positioningHoldSeconds    Int      @default(2) @map("positioning_hold_seconds")
+  turnaroundThresholdMinutes Int     @default(45) @map("turnaround_threshold_minutes")
+  journeyWindowGraceMinutes Int      @default(120) @map("journey_window_grace_minutes")
+  autoApprovalEnabled       Boolean  @default(true) @map("auto_approval_enabled")
+  requireInsuranceValid     Boolean  @default(true) @map("require_insurance_valid")
+  requireDriverLicenceValid Boolean  @default(true) @map("require_driver_licence_valid")
+  retentionYears            Int      @default(5) @map("retention_years")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+  site                      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@map("site_configs")
+}
+
+model User {
+  id             String      @id @default(uuid()) @db.Uuid
+  organisationId String?     @db.Uuid @map("organisation_id")
+  email          String      @unique
+  passwordHash   String      @map("password_hash")
+  firstName      String      @map("first_name")
+  lastName       String      @map("last_name")
+  phone          String?
+  role           UserRole
+  status         UserStatus  @default(ACTIVE)
+  lastLoginAt    DateTime?   @map("last_login_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  deletedAt      DateTime?   @map("deleted_at")
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  createdBookings Booking[]  @relation("BookingCreator")
+  approvedBookings Booking[] @relation("BookingApprover")
+  operatedTransactions WeighbridgeTransaction[] @relation("TransactionOperator")
+  resolvedIncidents Incident[] @relation("IncidentResolver")
+  systemLogs      SystemLog[]
+  notifications   Notification[]
+  createdOrders   WeighbridgeOrder[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@index([organisationId, role, status])
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("password_reset_tokens")
+}
+
+model Vehicle {
+  id                String        @id @default(uuid()) @db.Uuid
+  organisationId    String        @db.Uuid @map("organisation_id")
+  plate             String
+  plateNormalized   String        @map("plate_normalized")
+  make              String
+  model             String
+  year              Int?
+  vin               String?       @unique
+  tareWeightKg      Int           @map("tare_weight_kg")
+  legalMaxGvwKg     Int           @map("legal_max_gvw_kg")
+  insuranceExpiry   DateTime      @db.Date @map("insurance_expiry")
+  status            VehicleStatus @default(ACTIVE)
+  anomalyScore      Decimal       @default(0) @db.Decimal(8, 2) @map("anomaly_score")
+  lastTareWeightKg  Int?          @map("last_tare_weight_kg")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  deletedAt         DateTime?     @map("deleted_at")
+  organisation      Organisation  @relation(fields: [organisationId], references: [id])
+  trailers          Trailer[]
+  bookings          Booking[]
+  transactions      WeighbridgeTransaction[]
+  incidents         Incident[]
+  gateEvents        GateEvent[]
+
+  @@unique([organisationId, plateNormalized])
+  @@index([plateNormalized, status])
+  @@index([insuranceExpiry])
+  @@map("vehicles")
+}
+
+model Trailer {
+  id              String   @id @default(uuid()) @db.Uuid
+  vehicleId       String?  @db.Uuid @map("vehicle_id")
+  trailerId       String   @unique @map("trailer_id")
+  registrationNo  String?  @unique @map("registration_no")
+  type            String?
+  tareWeightKg    Int?     @map("tare_weight_kg")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  vehicle         Vehicle? @relation(fields: [vehicleId], references: [id])
+  bookings        Booking[]
+  transactions    WeighbridgeTransaction[]
+  bookingTrailers BookingTrailer[]
+
+  @@index([vehicleId])
+  @@map("trailers")
+}
+
+model BookingTrailer {
+  id        String   @id @default(uuid()) @db.Uuid
+  bookingId String   @db.Uuid @map("booking_id")
+  trailerId String   @db.Uuid @map("trailer_id")
+  position  Int      @default(2)
+  createdAt DateTime @default(now()) @map("created_at")
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  trailer   Trailer  @relation(fields: [trailerId], references: [id])
+
+  @@unique([bookingId, trailerId])
+  @@map("booking_trailers")
+}
+
+model Driver {
+  id                 String   @id @default(uuid()) @db.Uuid
+  organisationId     String   @db.Uuid @map("organisation_id")
+  firstName          String   @map("first_name")
+  lastName           String   @map("last_name")
+  idNumberEncrypted  String   @map("id_number_encrypted")
+  idNumberHash       String   @unique @map("id_number_hash")
+  rfidTag            String   @unique @map("rfid_tag")
+  photoUrl           String?  @map("photo_url")
+  licenceNumber      String   @unique @map("licence_number")
+  licenceExpiry      DateTime @db.Date @map("licence_expiry")
+  blacklistStatus    Boolean  @default(false) @map("blacklist_status")
+  blacklistReason    String?  @map("blacklist_reason")
+  consentCapturedAt  DateTime @map("consent_captured_at")
+  anomalyScore       Decimal  @default(0) @db.Decimal(8, 2) @map("anomaly_score")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
+  organisation       Organisation @relation(fields: [organisationId], references: [id])
+  bookings           Booking[]
+  transactions       WeighbridgeTransaction[]
+  incidents          Incident[]
+
+  @@index([organisationId, blacklistStatus])
+  @@index([licenceExpiry])
+  @@map("drivers")
+}
+
+model Booking {
+  id                        String        @id @default(uuid()) @db.Uuid
+  reference                 String        @unique
+  journeyToken              String        @unique @map("journey_token")
+  transporterOrganisationId String        @db.Uuid @map("transporter_organisation_id")
+  siteId                    String        @db.Uuid @map("site_id")
+  vehicleId                 String        @db.Uuid @map("vehicle_id")
+  trailerId                 String?       @db.Uuid @map("trailer_id")
+  driverId                  String        @db.Uuid @map("driver_id")
+  orderId                   String?       @db.Uuid @map("order_id")
+  commodity                 String
+  commodityDescription      String?       @map("commodity_description")
+  targetTonnageKg           Int           @map("target_tonnage_kg")
+  windowStart               DateTime      @map("window_start")
+  windowEnd                 DateTime      @map("window_end")
+  status                    BookingStatus @default(PENDING)
+  approvalReason            String?       @map("approval_reason")
+  rejectionReason           String?       @map("rejection_reason")
+  createdById               String        @db.Uuid @map("created_by_id")
+  approvedById              String?       @db.Uuid @map("approved_by_id")
+  approvedAt                DateTime?      @map("approved_at")
+  createdAt                 DateTime      @default(now()) @map("created_at")
+  updatedAt                 DateTime      @updatedAt @map("updated_at")
+  transporterOrganisation   Organisation  @relation("TransporterOrganisation", fields: [transporterOrganisationId], references: [id])
+  site                      Site          @relation(fields: [siteId], references: [id])
+  vehicle                   Vehicle       @relation(fields: [vehicleId], references: [id])
+  trailer                   Trailer?      @relation(fields: [trailerId], references: [id])
+  driver                    Driver        @relation(fields: [driverId], references: [id])
+  order                     WeighbridgeOrder? @relation(fields: [orderId], references: [id])
+  createdBy                 User          @relation("BookingCreator", fields: [createdById], references: [id])
+  approvedBy                User?         @relation("BookingApprover", fields: [approvedById], references: [id])
+  transactions              WeighbridgeTransaction[]
+  gateEvents                GateEvent[]
+  incidents                 Incident[]
+  additionalTrailers        BookingTrailer[]
+
+  @@index([siteId, status, windowStart, windowEnd])
+  @@index([vehicleId, status])
+  @@index([driverId, status])
+  @@index([transporterOrganisationId, createdAt])
+  @@map("bookings")
+}
+
+model WeighbridgeOrder {
+  id                       String      @id @default(uuid()) @db.Uuid
+  orderNumber              String      @unique @map("order_number")
+  type                     OrderType
+  siteId                   String      @db.Uuid @map("site_id")
+  originSiteId             String?     @db.Uuid @map("origin_site_id")
+  destinationSiteId        String?     @db.Uuid @map("destination_site_id")
+  customerName             String?     @map("customer_name")
+  supplierName             String?     @map("supplier_name")
+  product                  String
+  estimatedMassKg          Int         @map("estimated_mass_kg")
+  stockpile                String?
+  varianceThresholdPercent Decimal     @default(5) @db.Decimal(5, 2) @map("variance_threshold_percent")
+  varianceThresholdKg      Int?        @map("variance_threshold_kg")
+  ratePerTonZar            Decimal?    @db.Decimal(10, 2) @map("rate_per_ton_zar")
+  notes                    String?
+  status                   OrderStatus @default(ACTIVE)
+  createdById              String      @db.Uuid @map("created_by_id")
+  createdAt                DateTime    @default(now()) @map("created_at")
+  updatedAt                DateTime    @updatedAt @map("updated_at")
+  site                     Site        @relation("OrderWeighbridge", fields: [siteId], references: [id])
+  originSite               Site?       @relation("OrderOrigin", fields: [originSiteId], references: [id])
+  destinationSite          Site?       @relation("OrderDestination", fields: [destinationSiteId], references: [id])
+  createdBy                User        @relation(fields: [createdById], references: [id])
+  bookings                 Booking[]
+
+  @@index([status, type])
+  @@map("weighbridge_orders")
+}
+
+model WeighbridgeTransaction {
+  id                  String            @id @default(uuid()) @db.Uuid
+  edgeTransactionId   String            @unique @map("edge_transaction_id")
+  bookingId           String            @db.Uuid @map("booking_id")
+  vehicleId           String            @db.Uuid @map("vehicle_id")
+  trailerId           String?           @db.Uuid @map("trailer_id")
+  driverId            String            @db.Uuid @map("driver_id")
+  siteId              String            @db.Uuid @map("site_id")
+  operatorId          String?           @db.Uuid @map("operator_id")
+  grossWeightKg       Int               @map("gross_weight_kg")
+  tareWeightKg        Int               @map("tare_weight_kg")
+  netWeightKg         Int               @map("net_weight_kg")
+  commodity           String
+  overload            Boolean           @default(false)
+  overloadVarianceKg  Int               @default(0) @map("overload_variance_kg")
+  underweightEmptyFlag Boolean          @default(false) @map("underweight_empty_flag")
+  overweightLoadedFlag Boolean          @default(false) @map("overweight_loaded_flag")
+  driverDecision      String?           @map("driver_decision")
+  anprConfidence      Decimal?          @db.Decimal(5, 4) @map("anpr_confidence")
+  entryPhotoUrl       String?           @map("entry_photo_url")
+  scalePhotoUrl       String?           @map("scale_photo_url")
+  waybillNumber       String            @unique @map("waybill_number")
+  confirmationHash    String?           @unique @map("confirmation_hash")
+  previousHash        String            @map("previous_hash")
+  integrityHash       String            @unique @map("integrity_hash")
+  syncStatus          SyncStatus        @default(SYNCED) @map("sync_status")
+  status              TransactionStatus @default(COMPLETED)
+  entryAt             DateTime?         @map("entry_at")
+  capturedAt          DateTime           @map("captured_at")
+  exitAt              DateTime?          @map("exit_at")
+  turnaroundSeconds   Int?               @map("turnaround_seconds")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+  booking             Booking            @relation(fields: [bookingId], references: [id])
+  vehicle             Vehicle            @relation(fields: [vehicleId], references: [id])
+  trailer             Trailer?           @relation(fields: [trailerId], references: [id])
+  driver              Driver             @relation(fields: [driverId], references: [id])
+  site                Site               @relation(fields: [siteId], references: [id])
+  operator            User?              @relation("TransactionOperator", fields: [operatorId], references: [id])
+  incidents           Incident[]
+  gateEvents          GateEvent[]
+
+  @@index([siteId, capturedAt])
+  @@index([vehicleId, capturedAt])
+  @@index([bookingId])
+  @@index([syncStatus])
+  @@index([commodity, capturedAt])
+  @@map("weighbridge_transactions")
+}
+
+model GateEvent {
+  id                String        @id @default(uuid()) @db.Uuid
+  siteId            String        @db.Uuid @map("site_id")
+  bookingId         String?       @db.Uuid @map("booking_id")
+  transactionId     String?       @db.Uuid @map("transaction_id")
+  vehicleId         String?       @db.Uuid @map("vehicle_id")
+  direction         GateDirection
+  eventType         GateEventType @map("event_type")
+  plateRead         String?       @map("plate_read")
+  anprConfidence    Decimal?      @db.Decimal(5, 4) @map("anpr_confidence")
+  photoUrl          String?       @map("photo_url")
+  metadata          Json?
+  occurredAt        DateTime      @default(now()) @map("occurred_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  site              Site          @relation(fields: [siteId], references: [id])
+  booking           Booking?      @relation(fields: [bookingId], references: [id])
+  transaction       WeighbridgeTransaction? @relation(fields: [transactionId], references: [id])
+  vehicle           Vehicle?      @relation(fields: [vehicleId], references: [id])
+
+  @@index([siteId, occurredAt])
+  @@index([vehicleId, occurredAt])
+  @@map("gate_events")
+}
+
+model Incident {
+  id              String         @id @default(uuid()) @db.Uuid
+  siteId          String         @db.Uuid @map("site_id")
+  bookingId       String?        @db.Uuid @map("booking_id")
+  transactionId   String?        @db.Uuid @map("transaction_id")
+  vehicleId       String?        @db.Uuid @map("vehicle_id")
+  driverId        String?        @db.Uuid @map("driver_id")
+  type            IncidentType
+  severity        Severity
+  status          IncidentStatus @default(OPEN)
+  title           String
+  description     String
+  evidenceUrls    String[]       @default([]) @map("evidence_urls")
+  anomalyScore    Decimal        @default(0) @db.Decimal(8, 2) @map("anomaly_score")
+  resolvedById    String?        @db.Uuid @map("resolved_by_id")
+  resolutionNotes String?        @map("resolution_notes")
+  resolvedAt      DateTime?      @map("resolved_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  site            Site           @relation(fields: [siteId], references: [id])
+  booking         Booking?       @relation(fields: [bookingId], references: [id])
+  transaction     WeighbridgeTransaction? @relation(fields: [transactionId], references: [id])
+  vehicle         Vehicle?       @relation(fields: [vehicleId], references: [id])
+  driver          Driver?        @relation(fields: [driverId], references: [id])
+  resolvedBy      User?          @relation("IncidentResolver", fields: [resolvedById], references: [id])
+
+  @@index([siteId, status, severity, createdAt])
+  @@index([vehicleId, type, createdAt])
+  @@map("incidents")
+}
+
+model SystemLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  siteId        String?  @db.Uuid @map("site_id")
+  userId        String?  @db.Uuid @map("user_id")
+  action        String
+  entityType    String   @map("entity_type")
+  entityId      String?  @map("entity_id")
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  beforeData    Json?    @map("before_data")
+  afterData     Json?    @map("after_data")
+  occurredAt    DateTime @default(now()) @map("occurred_at")
+  site          Site?    @relation(fields: [siteId], references: [id])
+  user          User?    @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId, occurredAt])
+  @@index([userId, occurredAt])
+  @@index([siteId, occurredAt])
+  @@map("system_logs")
+}
+
+model HardwareDevice {
+  id                     String             @id @default(uuid()) @db.Uuid
+  siteId                 String             @db.Uuid @map("site_id")
+  deviceKey              String             @map("device_key")
+  name                   String
+  type                   HardwareDeviceType
+  serialNumber           String?            @map("serial_number")
+  firmwareVersion        String?            @map("firmware_version")
+  configuration          Json?
+  lastCalibrationDate    DateTime?           @db.Date @map("last_calibration_date")
+  calibrationExpiryDate  DateTime?           @db.Date @map("calibration_expiry_date")
+  isActive               Boolean            @default(true) @map("is_active")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+  site                   Site               @relation(fields: [siteId], references: [id])
+  statuses               HardwareStatus[]
+  calibrationCertificates CalibrationCertificate[]
+
+  @@unique([siteId, deviceKey])
+  @@index([siteId, type, isActive])
+  @@index([calibrationExpiryDate])
+  @@map("hardware_devices")
+}
+
+model HardwareStatus {
+  id              String         @id @default(uuid()) @db.Uuid
+  siteId          String         @db.Uuid @map("site_id")
+  deviceId        String?        @db.Uuid @map("device_id")
+  health          HardwareHealth
+  lastSeen        DateTime       @map("last_seen")
+  sensorReadings  Json?          @map("sensor_readings")
+  connectivity    Json?
+  errorCode       String?        @map("error_code")
+  message         String?
+  createdAt       DateTime       @default(now()) @map("created_at")
+  site            Site           @relation(fields: [siteId], references: [id])
+  device          HardwareDevice? @relation(fields: [deviceId], references: [id])
+
+  @@index([siteId, lastSeen])
+  @@index([deviceId, lastSeen])
+  @@map("hardware_status")
+}
+
+model SyncQueue {
+  id             String         @id @default(uuid()) @db.Uuid
+  siteId         String         @db.Uuid @map("site_id")
+  operation      QueueOperation
+  aggregateId    String         @map("aggregate_id")
+  idempotencyKey String         @unique @map("idempotency_key")
+  payload        Json
+  status         SyncStatus     @default(PENDING)
+  retryCount     Int            @default(0) @map("retry_count")
+  nextRetryAt    DateTime       @default(now()) @map("next_retry_at")
+  lastError      String?        @map("last_error")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  site           Site           @relation(fields: [siteId], references: [id])
+
+  @@index([siteId, status, nextRetryAt])
+  @@map("sync_queue")
+}
+
+model CalibrationCertificate {
+  id                  String   @id @default(uuid()) @db.Uuid
+  siteId              String   @db.Uuid @map("site_id")
+  deviceId            String   @db.Uuid @map("device_id")
+  certificateNumber   String   @unique @map("certificate_number")
+  issuingAuthority    String   @map("issuing_authority")
+  calibratedAt        DateTime @db.Date @map("calibrated_at")
+  expiresAt           DateTime @db.Date @map("expires_at")
+  documentUrl         String   @map("document_url")
+  accuracyClass       String?  @map("accuracy_class")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  site                Site     @relation(fields: [siteId], references: [id])
+  device              HardwareDevice @relation(fields: [deviceId], references: [id])
+
+  @@index([siteId, expiresAt])
+  @@map("calibration_certificates")
+}
+
+model Notification {
+  id          String             @id @default(uuid()) @db.Uuid
+  userId      String             @db.Uuid @map("user_id")
+  channel     NotificationChannel
+  status      NotificationStatus @default(PENDING)
+  severity    Severity
+  subject     String
+  body        String
+  metadata    Json?
+  sentAt      DateTime?          @map("sent_at")
+  error       String?
+  createdAt   DateTime           @default(now()) @map("created_at")
+  user        User               @relation(fields: [userId], references: [id])
+
+  @@index([userId, status, createdAt])
+  @@map("notifications")
+}

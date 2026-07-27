@@ -1,0 +1,15 @@
+node_modules
+apps/*/node_modules
+packages/*/node_modules
+.next
+.git
+.env
+*.db
+*.sqlite
+*.log
+__pycache__
+*.pyc
+.venv
+.pytest_cache
+coverage
+.DS_Store
