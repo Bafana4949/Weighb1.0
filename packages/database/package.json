@@ -5,6 +5,7 @@
   "type": "module",
   "main": "src/client.ts",
   "scripts": {
+    "postinstall": "node prisma-runner.js generate",
     "generate": "node prisma-runner.js generate",
     "migrate:dev": "node prisma-runner.js migrate dev",
     "migrate:deploy": "node prisma-runner.js migrate deploy",
