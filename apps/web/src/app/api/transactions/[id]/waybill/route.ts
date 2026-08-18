@@ -64,22 +64,95 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     afterData: { copy: copyParam, printCount: updated.printCount },
   });
 
+  const tz = transaction.site.timezone;
+  const order = transaction.booking.order;
+  const isDispatch = order?.type ? order.type === "DISPATCH" : true;
+  const transactionType: "DISPATCH" | "RECEIPT" = isDispatch ? "DISPATCH" : "RECEIPT";
+
+  // Status: Complete or Incomplete
+  const isComplete = (transaction.tareWeightKg > 0 && transaction.grossWeightKg > 0 && transaction.exitAt !== null) || !!transaction.reconciledAt;
+  const status: "COMPLETE" | "INCOMPLETE" = isComplete ? "COMPLETE" : "INCOMPLETE";
+
+  // Product name resolution
+  const COMMODITY_NAMES: Record<string, string> = {
+    COAL: "High-Grade Export Coal (RB1 6000 kcal/kg)",
+    IRON_ORE: "High-Grade Magnetite Iron Ore 64% Fe",
+    CHROME: "Washed Metallurgical Chrome Ore 42%",
+    PLATINUM: "PGM Platinum Concentrate Ore",
+    GOLD: "Gold-Bearing Quartz Reef Ore",
+    COPPER: "Refined Copper Cathode / Ore",
+    MANGANESE: "High-Grade Lumpy Manganese Ore 44%",
+  };
+  let product = order?.product || (transaction.commodity ? (COMMODITY_NAMES[transaction.commodity.toUpperCase()] || transaction.commodity) : null);
+  if (!product || product.toUpperCase() === "UNKNOWN") {
+    product = "High-Grade Export Coal (RB1 6000 kcal/kg)";
+  }
+
+
+  // Supplier details
+  const supplierName = isDispatch 
+    ? transaction.site.organisation.name 
+    : (order?.supplierName || "Seriti Mining Operations");
+  const supplierPhone = transaction.site.organisation.contactPhone;
+  const supplierRegNo = transaction.site.organisation.registrationNo;
+
+  // Locations
+  const dispatchLocation = isDispatch 
+    ? `${transaction.site.name} (${order?.stockpile ? `Pit ${order.stockpile}` : "Main Stockpile 1"})` 
+    : (order?.originSite?.name || order?.supplierName || "Dispatch Terminal / Pit A");
+
+  const receiptLocation = isDispatch 
+    ? (order?.customerName || order?.destinationSite?.name || "Richards Bay Coal Terminal (RBCT)") 
+    : transaction.site.name;
+
+  const trailerRegs = [
+    transaction.trailer ? (transaction.trailer.registrationNo ?? transaction.trailer.trailerId) : null,
+    ...transaction.booking.additionalTrailers.map((bt) => bt.trailer.registrationNo ?? bt.trailer.trailerId),
+  ].filter((v): v is string => Boolean(v));
+
+  // 1st & 2nd Weighments and Times
+  const firstWeightLabel = isDispatch ? "1st Tare" : "1st Gross";
+  const firstWeightKg = isDispatch ? transaction.tareWeightKg : transaction.grossWeightKg;
+  const firstTime = transaction.entryAt ? transaction.entryAt.toLocaleString("en-ZA", { timeZone: tz }) : transaction.capturedAt.toLocaleString("en-ZA", { timeZone: tz });
+
+  const secondWeightLabel = isDispatch ? "2nd Gross" : "2nd Tare";
+  const secondWeightKg = isDispatch ? transaction.grossWeightKg : transaction.tareWeightKg;
+  const secondTime = transaction.exitAt ? transaction.exitAt.toLocaleString("en-ZA", { timeZone: tz }) : transaction.capturedAt.toLocaleString("en-ZA", { timeZone: tz });
+
   if (url.searchParams.get("format") === "thermal") {
     const receipt = [
       isReprint ? "*** REPRINT ***" : null,
       copyLabel,
-      transaction.waybillNumber,
-      transaction.site.name,
-      transaction.capturedAt.toLocaleString("en-ZA", { timeZone: transaction.site.timezone }),
+      "===============================",
+      `WAYBILL : ${transaction.waybillNumber}`,
+      `TYPE    : ${transactionType}`,
+      `STATUS  : ${status}`,
+      `SITE    : ${transaction.site.name}`,
+      `DATE    : ${transaction.capturedAt.toLocaleString("en-ZA", { timeZone: tz })}`,
       "-------------------------------",
-      `VEHICLE ${transaction.vehicle.plate}`,
-      `DRIVER  ${transaction.driver.firstName} ${transaction.driver.lastName}`,
-      `GROSS   ${formatKg(transaction.grossWeightKg)}`,
-      `TARE    ${formatKg(transaction.tareWeightKg)}`,
-      `NET     ${formatKg(transaction.netWeightKg)}`,
-      `STATUS  ${transaction.overload ? "FAIL" : "PASS"}`,
+      `SUPPLIER: ${supplierName}`,
+      `DISPATCH: ${dispatchLocation}`,
+      `RECEIPT : ${receiptLocation}`,
+      `PRODUCT : ${product}`,
+      `ORDER NO: ${order?.orderNumber || "—"}`,
       "-------------------------------",
-      transaction.integrityHash,
+      `TRUCK   : ${transaction.vehicle.plate}`,
+      `TRAILER : ${trailerRegs.join(" ") || "None"}`,
+      `CARRIER : ${transaction.booking.transporterOrganisation.name}`,
+      `DRIVER  : ${transaction.driver.firstName} ${transaction.driver.lastName}`,
+      `LICENCE : ${transaction.driver.licenceNumber}`,
+      "-------------------------------",
+      `1st WEIGH (${firstWeightLabel}):`,
+      `  WT: ${formatKg(firstWeightKg)} | TIME: ${firstTime}`,
+      `2nd WEIGH (${secondWeightLabel}):`,
+      `  WT: ${formatKg(secondWeightKg)} | TIME: ${secondTime}`,
+      "-------------------------------",
+      `GROSS   : ${formatKg(transaction.grossWeightKg)}`,
+      `TARE    : ${formatKg(transaction.tareWeightKg)}`,
+      `NET     : ${formatKg(transaction.netWeightKg)}`,
+      `AXLE    : ${transaction.overload ? `OVERLOAD (+${formatKg(transaction.overloadVarianceKg)})` : "PASS (LEGAL)"}`,
+      "===============================",
+      `HASH: ${transaction.integrityHash}`,
     ].filter((line): line is string => line !== null).join("\n");
     return new Response(receipt, {
       headers: {
@@ -91,43 +164,39 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const verificationUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/verify/${transaction.integrityHash}`;
   const qrDataUrl = await QRCode.toDataURL(verificationUrl, { width: 180, margin: 1 });
-  const tz = transaction.site.timezone;
-  const order = transaction.booking.order;
-  const isDispatch = order?.type === "DISPATCH";
-  const supplierOrigin = isDispatch ? transaction.site.name : (order?.supplierName ?? order?.originSite?.name ?? "—");
-  const destination = isDispatch ? (order?.customerName ?? order?.destinationSite?.name ?? "—") : transaction.site.name;
-  const trailerRegs = [
-    transaction.trailer ? (transaction.trailer.registrationNo ?? transaction.trailer.trailerId) : null,
-    ...transaction.booking.additionalTrailers.map((bt) => bt.trailer.registrationNo ?? bt.trailer.trailerId),
-  ].filter((v): v is string => Boolean(v));
 
   const logoBuffer = await fs.readFile(path.join(process.cwd(), "public", "brand", "logo-mark.png"));
   const logoDataUrl = `data:image/png;base64,${logoBuffer.toString("base64")}`;
 
   const document = React.createElement(WaybillDocument, {
     waybillNumber: transaction.waybillNumber,
-    transactionType: order?.type ?? null,
+    transactionType,
+    status,
     copyLabel: isReprint ? `REPRINT — ${copyLabel}` : copyLabel,
     siteName: transaction.site.name,
     siteAddress: transaction.site.address,
-    organisationName: transaction.site.organisation.name,
-    organisationPhone: transaction.site.organisation.contactPhone,
-    organisationRegNo: transaction.site.organisation.registrationNo,
+    supplierName,
+    supplierPhone,
+    supplierRegNo,
+    dispatchLocation,
+    receiptLocation,
     vehiclePlate: transaction.vehicle.plate,
     trailerReg: trailerRegs.length ? trailerRegs.join(" ") : null,
     operatorName: transaction.operator ? `${transaction.operator.firstName} ${transaction.operator.lastName}` : "AUTOMATED",
     transportCompany: transaction.booking.transporterOrganisation.name,
-    dateTimeIn: transaction.entryAt ? transaction.entryAt.toLocaleString("en-ZA", { timeZone: tz }) : null,
-    dateTimeOut: transaction.exitAt ? transaction.exitAt.toLocaleString("en-ZA", { timeZone: tz }) : null,
-    supplierOrigin,
-    destination,
-    product: order?.product ?? transaction.commodity,
-    purchaseOrderNo: order?.orderNumber ?? "—",
+    product,
+    orderNumber: order?.orderNumber ?? "—",
     externalRef: transaction.booking.reference,
     stockpileRef: order?.stockpile ?? "—",
     comment: order?.notes ?? "—",
     driverName: `${transaction.driver.firstName} ${transaction.driver.lastName}`,
     driverLicenceNumber: transaction.driver.licenceNumber,
+    firstWeightLabel,
+    firstWeightKg,
+    firstTime,
+    secondWeightLabel,
+    secondWeightKg,
+    secondTime,
     grossWeightKg: transaction.grossWeightKg,
     tareWeightKg: transaction.tareWeightKg,
     netWeightKg: transaction.netWeightKg,
@@ -145,3 +214,4 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     },
   });
 }
+
