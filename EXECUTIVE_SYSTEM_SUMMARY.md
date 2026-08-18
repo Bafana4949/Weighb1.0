@@ -32,8 +32,9 @@ The platform enforces strict multi-tenant boundary isolation and role-based oper
 
 | Actor / Persona | Primary Scope | Core Responsibilities |
 | :--- | :--- | :--- |
-| **👑 Platform Super Admin** | Platform-Wide | Global system management, onboarding mining companies and haulier tenants, managing global hardware device topologies, reviewing consolidated audit logs, and overseeing fraud analytics across all operations. |
-| **🏢 Mining Company Admin** | Mining House Scope | Manages company mine sites, mineral products (e.g. RB1 Export Coal, Eskom grade), pit sources, dispatch/receipt contract orders, assigns bulk tonnage quotas to contracted hauliers, and defines custom roles. |
+| **👑 Platform Super Admin** | Platform-Wide | Global system management, onboarding mining companies and haulier tenants, provisioning and registering all mine operating sites, managing global hardware device topologies, reviewing consolidated audit logs, and overseeing fraud analytics across all operations. |
+| **🏢 Mining Company Admin** | Mining House Scope | Manages company mine operating configurations, mineral products (e.g. RB1 Export Coal, Eskom grade), pit sources, dispatch/receipt contract orders, assigns bulk tonnage quotas to contracted hauliers, and defines custom roles. |
+
 | **🖥️ Weighbridge Operator** | Site / Scale Deck Scope | Operates live scale consoles, monitors real-time load cell weights and optical positioning beams (P1/P2), performs zero-scale calibration triggers, manages manual vehicle check-ins, and handles reprint requests. |
 | **👮 Security Officer** | Gate Barrier Scope | Controls security boom gates, conducts physical truck/driver safety inspections, validates security copy waybills, and logs vehicle tampering incidents. |
 | **🚛 Transporter / Haulier** | Own Fleet Scope | Contractor self-service: registers fleet vehicles, trailers, and drivers, assigns RFID badges, books arrival delivery slots against allocated orders, views trip histories, prints waybill slips, and pulls automated CSV reports. |
