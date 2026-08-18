@@ -18,24 +18,55 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async authorize(credentials) {
       try {
         const parsed = credentialsSchema.safeParse(credentials);
-        if (!parsed.success) return null;
+        if (!parsed.success) {
+          console.error("AUTH_FAILED: schema parse failed", parsed.error);
+          return null;
+        }
         
-        const email = parsed.data.email.toLowerCase();
+        const email = parsed.data.email.toLowerCase().trim();
         const user = await prisma.user.findUnique({ where: { email } });
         
-        if (!user || user.status !== "ACTIVE" || user.deletedAt) return null;
+        if (!user) {
+          console.error("AUTH_FAILED: user not found for email", email);
+          return null;
+        }
         
-        const match = await bcrypt.compare(parsed.data.password, user.passwordHash);
+        if (user.status !== "ACTIVE" || user.deletedAt) {
+          console.error("AUTH_FAILED: user inactive or deleted", user.status, user.deletedAt);
+          return null;
+        }
+        
+        const match = await bcrypt.compare(parsed.data.password.trim(), user.passwordHash);
         if (!match) {
+          console.error("AUTH_FAILED: bad password for", email);
           logger.warn("auth_login_failed", { email, reason: "bad_password" }); 
           return null; 
         }
         
         logger.info("auth_login_succeeded", { user_id: user.id, email, role: user.role });
-        await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-        const organisation = user.organisationId ? await prisma.organisation.findUnique({ where: { id: user.organisationId } }) : null;
         
-        return { id: user.id, email: user.email, name: `${user.firstName} ${user.lastName}`, role: user.role, organisationId: user.organisationId, organisationName: organisation?.name ?? null, platformRole: user.platformRole };
+        // Non-blocking update so a failure here doesn't abort login
+        prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }).catch((e) => console.warn("Failed to update lastLoginAt", e));
+        
+        let organisationName: string | null = null;
+        if (user.organisationId) {
+          try {
+            const org = await prisma.organisation.findUnique({ where: { id: user.organisationId } });
+            organisationName = org?.name ?? null;
+          } catch (e) {
+            console.warn("Failed to fetch organisation name:", e);
+          }
+        }
+        
+        return {
+          id: user.id,
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role,
+          organisationId: user.organisationId,
+          organisationName,
+          platformRole: user.platformRole,
+        };
       } catch (err: any) {
         console.error("AUTH_AUTHORIZE_EXCEPTION:", err?.message || err);
         return null;
@@ -43,4 +74,3 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   })],
 });
-
