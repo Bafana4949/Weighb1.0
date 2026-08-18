@@ -14,8 +14,9 @@ export default auth((request) => {
     path === "/api/bookings/queue" ||
     path === "/api/transactions/reconcile" ||
     path === "/api/transactions/chain-head" ||
-    path === "/api/debug" ||
+    path.startsWith("/api/debug") ||
     (path === "/api/incidents" && request.method === "POST");
+
 
   const publiclyReachable =
     path.startsWith("/login") ||
