@@ -1,0 +1,5 @@
+import { UserRole } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { fail,ok,requireRole } from "@/lib/api";
+import { safeUserSelect } from "@/lib/utils";
+export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){const a=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const {id}=await params;const transaction=await prisma.weighbridgeTransaction.findUnique({where:{id},include:{booking:true}});if(!transaction||(a.session!.user.role==="TRANSPORTER"&&transaction.booking.transporterOrganisationId!==a.session!.user.organisationId))return fail("Transaction not found",404);const logs=await prisma.systemLog.findMany({where:{entityType:"weighbridge_transaction",entityId:id,action:{in:["TRANSACTION_PRINTED","TRANSACTION_REPRINTED"]}},include:{user:{select:safeUserSelect}},orderBy:{occurredAt:"desc"}});return ok({printedAt:transaction.printedAt,printCount:transaction.printCount,history:logs})}

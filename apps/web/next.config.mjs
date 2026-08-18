@@ -10,5 +10,17 @@ const nextConfig = {
   output: "standalone",
   transpilePackages: ["@weighbridge/database", "@weighbridge/shared-types", "@weighbridge/mqtt-topics"],
   experimental: { serverActions: { bodySizeLimit: "4mb" } },
+  async headers() {
+    return [
+      {
+        source: "/((?!_next/static|_next/image|favicon.ico).*)",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, proxy-revalidate" },
+          { key: "Pragma", value: "no-cache" },
+          { key: "Expires", value: "0" }
+        ],
+      }
+    ];
+  },
 };
 export default nextConfig;

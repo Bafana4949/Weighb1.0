@@ -14,6 +14,13 @@ const routes: Record<string, { roles: UserRole[]; channels: NotificationChannel[
   BOOKING_REJECTED: { roles: [UserRole.TRANSPORTER], channels: [NotificationChannel.EMAIL, NotificationChannel.DASHBOARD] },
   BOOKING_PENDING_REVIEW: { roles: [UserRole.ADMIN, UserRole.OPERATOR], channels: [NotificationChannel.DASHBOARD] },
   TRANSPORTER_APPROVED: { roles: [UserRole.TRANSPORTER], channels: [NotificationChannel.EMAIL, NotificationChannel.DASHBOARD] },
+  COMPANY_ACTIVATED: { roles: [UserRole.ADMIN], channels: [NotificationChannel.EMAIL, NotificationChannel.DASHBOARD] },
+  COMPANY_SUSPENDED: { roles: [UserRole.ADMIN], channels: [NotificationChannel.EMAIL, NotificationChannel.DASHBOARD] },
+  SERVICE_ORDER_CREATED: { roles: [UserRole.ADMIN], channels: [NotificationChannel.DASHBOARD] },
+  SERVICE_ORDER_ASSIGNED: { roles: [UserRole.ADMIN], channels: [NotificationChannel.DASHBOARD, NotificationChannel.EMAIL] },
+  SERVICE_ORDER_COMMENT_ADDED: { roles: [UserRole.ADMIN], channels: [NotificationChannel.DASHBOARD] },
+  SERVICE_ORDER_RESOLVED: { roles: [UserRole.ADMIN], channels: [NotificationChannel.DASHBOARD, NotificationChannel.EMAIL] },
+  VEHICLE_ASSIGNMENT_CREATED: { roles: [UserRole.ADMIN, UserRole.TRANSPORTER], channels: [NotificationChannel.DASHBOARD, NotificationChannel.EMAIL] },
   TRANSACTION_COMPLETE: { roles: [UserRole.TRANSPORTER, UserRole.OPERATOR], channels: [NotificationChannel.DASHBOARD] },
   QUEUE_THRESHOLD: { roles: [UserRole.OPERATOR], channels: [NotificationChannel.DASHBOARD] },
 };

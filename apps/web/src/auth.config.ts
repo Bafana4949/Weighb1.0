@@ -1,5 +1,5 @@
 import type { NextAuthConfig } from "next-auth";
-import type { UserRole } from "@prisma/client";
+import type { PlatformRole,UserRole } from "@prisma/client";
 
 /**
  * Edge-safe NextAuth config: no providers, no Prisma, no bcrypt. Middleware
@@ -21,6 +21,7 @@ export const authConfig = {
         token.role = user.role;
         token.organisationId = user.organisationId;
         token.organisationName = (user as { organisationName?: string | null }).organisationName ?? null;
+        token.platformRole = (user as { platformRole?: PlatformRole | null }).platformRole ?? null;
       }
       return token;
     },
@@ -30,6 +31,7 @@ export const authConfig = {
         session.user.role = token.role as UserRole;
         session.user.organisationId = (token.organisationId as string | null | undefined) ?? null;
         session.user.organisationName = (token.organisationName as string | null | undefined) ?? null;
+        session.user.platformRole = (token.platformRole as PlatformRole | null | undefined) ?? null;
       }
       return session;
     },

@@ -8,8 +8,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-weighbridge}
       POSTGRES_USER: ${POSTGRES_USER:-weighbridge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-weighbridge_dev_change_me}
+    # Host port binding removed — accessible via Docker internal network (postgres:5432).
     ports:
-      - "5432:5432"
+      - "127.0.0.1:15432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -59,11 +60,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-weighbridge}:${POSTGRES_PASSWORD:-weighbridge_dev_change_me}@postgres:5432/${POSTGRES_DB:-weighbridge}?schema=public
       AUTH_SECRET: ${AUTH_SECRET:-development-secret-change-before-production}
       AUTH_TRUST_HOST: "true"
-      NEXT_PUBLIC_APP_URL: http://localhost:3000
-      NEXT_PUBLIC_SOCKET_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3010
+      NEXT_PUBLIC_SOCKET_URL: http://localhost:3010
       SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-dev-site-key-change-me}
       MQTT_URL: mqtt://mosquitto:1883
-      SITE_DAEMON_URL: http://site-daemon:8000
+      SITE_DAEMON_URL: http://site-daemon-dual:8000
       SMTP_HOST: ${SMTP_HOST:-smtp.ethereal.email}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -73,7 +74,7 @@ services:
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
     ports:
-      - "3000:3000"
+      - "3010:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,7 +95,7 @@ services:
       - ./apps/site-daemon/config.docker.yaml:/app/config.docker.yaml:ro
       - ./apps/site-daemon/test_plates:/app/test_plates:ro
     ports:
-      - "8000:8000"
+      - "8010:8000"
     depends_on:
       mosquitto:
         condition: service_started
@@ -108,8 +109,53 @@ services:
       - "7001:7001"
       - "7002:7002"
 
+  # --- DUAL_ENTRY_EXIT demo site (EX-OO1): one site-daemon running two
+  # independent lanes, each with its own hardware-simulator instance, proving
+  # live dual-lane operation without touching the single-lane services above.
+  hardware-simulator-lane-a:
+    build:
+      context: ./apps/hardware-simulator
+    profiles: ["edge-dual"]
+    command: ["python", "simulator.py", "--headless", "--tcp-host", "0.0.0.0", "--tcp-port", "7001", "--control-port", "7002"]
+    ports:
+      - "7011:7001"
+      - "7012:7002"
+
+  hardware-simulator-lane-b:
+    build:
+      context: ./apps/hardware-simulator
+    profiles: ["edge-dual"]
+    command: ["python", "simulator.py", "--headless", "--tcp-host", "0.0.0.0", "--tcp-port", "7001", "--control-port", "7002"]
+    ports:
+      - "7013:7001"
+      - "7014:7002"
+
+  site-daemon-dual:
+    build:
+      context: ./apps/site-daemon
+    restart: unless-stopped
+    profiles: ["edge-dual"]
+    environment:
+      WB_CONFIG_PATH: /app/config.dual.docker.yaml
+      WB_EDGE_DB_PATH: /data/edge.db
+      SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-dev-site-key-change-me}
+    volumes:
+      - edge-data-dual:/data
+      - ./apps/site-daemon/config.dual.docker.yaml:/app/config.dual.docker.yaml:ro
+      - ./apps/site-daemon/test_plates:/app/test_plates:ro
+    ports:
+      - "8020:8000"
+    depends_on:
+      mosquitto:
+        condition: service_started
+      hardware-simulator-lane-a:
+        condition: service_started
+      hardware-simulator-lane-b:
+        condition: service_started
+
 volumes:
   postgres-data:
   pgadmin-data:
   mosquitto-logs:
   edge-data:
+  edge-data-dual:

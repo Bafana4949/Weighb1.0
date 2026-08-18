@@ -1,5 +1,6 @@
-import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/prisma";
-import { fail,ok } from "@/lib/api";
-import { transporterSchema } from "@/lib/validation";
-export async function POST(request:Request){const parsed=transporterSchema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return fail(parsed.error.issues[0]?.message??"Invalid application",422);const email=parsed.data.email.toLowerCase();if(await prisma.user.findUnique({where:{email}}))return fail("Email already registered",409);const {companyName,registrationNo,contactEmail,contactPhone,firstName,lastName,password,phone}=parsed.data;try{const result=await prisma.$transaction(async(tx)=>{const organisation=await tx.organisation.create({data:{name:companyName,type:"HAULIER",isActive:false,registrationNo:registrationNo||null,contactEmail:contactEmail||null,contactPhone:contactPhone||null}});const user=await tx.user.create({data:{organisationId:organisation.id,email,firstName,lastName,phone:phone||null,role:"TRANSPORTER",status:"INVITED",passwordHash:await bcrypt.hash(password,12)}});return {organisation,user}});return ok({message:"Application submitted. An administrator will review it before you can sign in.",companyName:result.organisation.name},201)}catch(error){return fail("Company registration number already in use",409)}}
+export async function POST() {
+  return new Response(
+    JSON.stringify({ error: "Public transporter registration is disabled by business rules." }),
+    { status: 403, headers: { "content-type": "application/json" } }
+  );
+}

@@ -4,9 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { ok,fail } from "@/lib/api";
 import { hashValue } from "@/lib/crypto";
 import { sendDirectEmail } from "@/lib/notifications";
+import { rateLimitOrFail } from "@/lib/rate-limit";
 const schema=z.object({email:z.string().email()});
 const GENERIC_MESSAGE="If that email is registered, a reset link has been sent.";
-export async function POST(request:Request){const parsed=schema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return fail("A valid email is required",422);const email=parsed.data.email.toLowerCase();const user=await prisma.user.findUnique({where:{email}});
+export async function POST(request:Request){const limited=rateLimitOrFail(request,"forgot-password",5,60*60*1000);if(limited)return limited;const parsed=schema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return fail("A valid email is required",422);const email=parsed.data.email.toLowerCase();const user=await prisma.user.findUnique({where:{email}});
   // Always respond identically whether or not the email exists, so this endpoint
   // can't be used to enumerate registered accounts.
   if(!user||user.status!=="ACTIVE"||user.deletedAt)return ok({message:GENERIC_MESSAGE});

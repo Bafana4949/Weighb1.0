@@ -10,13 +10,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/components/providers";
 
+type OrgOption = { id: string; name: string };
 type Role = "TRANSPORTER" | "OPERATOR" | "ADMIN" | "SECURITY";
 type Status = "ACTIVE" | "SUSPENDED" | "INVITED";
-type OrgOption = { id: string; name: string };
+type RoleType = { id: string; name: string; isBuiltIn: boolean };
 type UserRow = {
   id: string; email: string; firstName: string; lastName: string; phone: string | null;
   role: Role; status: Status; organisationId: string | null;
   organisation: OrgOption | null; lastLoginAt: string | Date | null;
+  roleAssignments?: { roleId: string; role: RoleType }[];
 };
 
 const ROLES: Role[] = ["ADMIN", "OPERATOR", "SECURITY", "TRANSPORTER"];
@@ -24,7 +26,7 @@ const STATUSES: Status[] = ["ACTIVE", "SUSPENDED", "INVITED"];
 
 function selectClass() { return "h-9 w-full rounded-sm border border-border bg-surface px-3 text-sm"; }
 
-export function UserManagement({ initialUsers, organisations, currentUserId }: { initialUsers: UserRow[]; organisations: OrgOption[]; currentUserId: string }) {
+export function UserManagement({ initialUsers, organisations, roles, currentUserId }: { initialUsers: UserRow[]; organisations: OrgOption[]; roles: RoleType[]; currentUserId: string }) {
   const [users, setUsers] = useState<UserRow[]>(initialUsers);
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
@@ -39,13 +41,24 @@ export function UserManagement({ initialUsers, organisations, currentUserId }: {
     try {
       const payload = {
         firstName: form.get("firstName"), lastName: form.get("lastName"), email: form.get("email"),
-        phone: form.get("phone") || null, password: form.get("password"), role: form.get("role"),
+        phone: form.get("phone") || null, password: form.get("password"), 
         organisationId: form.get("organisationId") || null,
+        roleIds: form.getAll("roleIds") as string[]
       };
       const response = await fetch("/api/admin/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not create user");
-      setUsers((current) => [{ ...body.data, organisation: organisations.find((o) => o.id === body.data.organisationId) ?? null }, ...current]);
+      
+      const enrichedUser = {
+        ...body.data,
+        organisation: organisations.find((o) => o.id === body.data.organisationId) ?? null,
+        roleAssignments: body.data.roleAssignments?.map((a: any) => ({
+          ...a,
+          role: roles.find(r => r.id === a.roleId) || { id: a.roleId, name: "Unknown", isBuiltIn: false }
+        }))
+      };
+      
+      setUsers((current) => [enrichedUser, ...current]);
       toast({ title: "User created", body: `${body.data.firstName} ${body.data.lastName} · ${body.data.role}` });
       formEl.reset();
       setCreateOpen(false);
@@ -61,12 +74,23 @@ export function UserManagement({ initialUsers, organisations, currentUserId }: {
     try {
       const payload = {
         firstName: form.get("firstName"), lastName: form.get("lastName"), phone: form.get("phone") || null,
-        role: form.get("role"), status: form.get("status"), organisationId: form.get("organisationId") || null,
+        status: form.get("status"), organisationId: form.get("organisationId") || null,
+        roleIds: form.getAll("roleIds") as string[]
       };
       const response = await fetch(`/api/admin/users/${editing.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not update user");
-      setUsers((current) => current.map((u) => u.id === editing.id ? { ...body.data, organisation: organisations.find((o) => o.id === body.data.organisationId) ?? null } : u));
+
+      const enrichedUser = {
+        ...body.data,
+        organisation: organisations.find((o) => o.id === body.data.organisationId) ?? null,
+        roleAssignments: body.data.roleAssignments?.map((a: any) => ({
+          ...a,
+          role: roles.find(r => r.id === a.roleId) || { id: a.roleId, name: "Unknown", isBuiltIn: false }
+        }))
+      };
+
+      setUsers((current) => current.map((u) => u.id === editing.id ? enrichedUser : u));
       toast({ title: "User updated", body: `${body.data.firstName} ${body.data.lastName}` });
       setEditing(null);
     } catch (error) { toast({ title: "Could not update user", body: String(error), severity: "HIGH" }); }
@@ -111,7 +135,14 @@ export function UserManagement({ initialUsers, organisations, currentUserId }: {
         <TableBody>{users.map((u) => <TableRow key={u.id}>
           <TableCell><p>{u.firstName} {u.lastName}{u.id === currentUserId && <span className="ml-1.5 text-2xs text-muted-foreground">(you)</span>}</p><p className="text-xs text-muted-foreground">{u.email}</p></TableCell>
           <TableCell>{u.organisation?.name ?? "Enterprise"}</TableCell>
-          <TableCell><Badge variant="info">{u.role}</Badge></TableCell>
+          <TableCell>
+            <div className="flex flex-wrap gap-1">
+              {u.roleAssignments && u.roleAssignments.length > 0 
+                ? u.roleAssignments.map(a => <Badge key={a.roleId} variant="info">{a.role.name}</Badge>)
+                : <Badge variant="muted">{u.role}</Badge>
+              }
+            </div>
+          </TableCell>
           <TableCell><Badge variant={u.status === "ACTIVE" ? "default" : u.status === "INVITED" ? "warning" : "destructive"}>{u.status}</Badge></TableCell>
           <TableCell className="font-mono text-xs">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString("en-ZA") : "Never"}</TableCell>
           <TableCell><div className="flex gap-1.5">
@@ -132,7 +163,7 @@ export function UserManagement({ initialUsers, organisations, currentUserId }: {
           <div className="space-y-1.5 md:col-span-2"><Label htmlFor="c-email">Email</Label><Input id="c-email" name="email" type="email" required /></div>
           <div className="space-y-1.5 md:col-span-2"><Label htmlFor="c-password">Initial password</Label><Input id="c-password" name="password" type="password" required minLength={12} placeholder="At least 12 characters" /></div>
           <div className="space-y-1.5"><Label htmlFor="c-phone">Phone (optional)</Label><Input id="c-phone" name="phone" /></div>
-          <div className="space-y-1.5"><Label htmlFor="c-role">Role</Label><select id="c-role" name="role" required className={selectClass()} defaultValue="OPERATOR">{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
+          <div className="space-y-1.5 md:col-span-2"><Label htmlFor="c-roleIds">Roles</Label><select id="c-roleIds" name="roleIds" multiple size={4} className={selectClass() + " h-auto py-2"}>{roles.map((r) => <option key={r.id} value={r.id}>{r.name} {r.isBuiltIn ? "(Built-in)" : "(Custom)"}</option>)}</select><p className="text-xs text-muted-foreground">Hold Ctrl/Cmd to select multiple.</p></div>
           <div className="space-y-1.5 md:col-span-2"><Label htmlFor="c-org">Organisation (optional)</Label><select id="c-org" name="organisationId" className={selectClass()} defaultValue=""><option value="">— None —</option>{organisations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
           <div className="md:col-span-2"><Button type="submit" disabled={busy} className="w-full">{busy ? "Creating…" : "Create user"}</Button></div>
         </form>
@@ -147,7 +178,7 @@ export function UserManagement({ initialUsers, organisations, currentUserId }: {
           <div className="space-y-1.5"><Label htmlFor="e-lastName">Last name</Label><Input id="e-lastName" name="lastName" required minLength={2} defaultValue={editing.lastName} /></div>
           <div className="space-y-1.5 md:col-span-2"><Label>Email</Label><p className="flex h-9 items-center rounded-sm border border-border bg-muted px-3 text-sm text-muted-foreground">{editing.email}</p></div>
           <div className="space-y-1.5"><Label htmlFor="e-phone">Phone</Label><Input id="e-phone" name="phone" defaultValue={editing.phone ?? ""} /></div>
-          <div className="space-y-1.5"><Label htmlFor="e-role">Role</Label><select id="e-role" name="role" required className={selectClass()} defaultValue={editing.role}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
+          <div className="space-y-1.5 md:col-span-2"><Label htmlFor="e-roleIds">Roles</Label><select id="e-roleIds" name="roleIds" multiple size={4} className={selectClass() + " h-auto py-2"} defaultValue={editing.roleAssignments?.map(a => a.roleId) || []}>{roles.map((r) => <option key={r.id} value={r.id}>{r.name} {r.isBuiltIn ? "(Built-in)" : "(Custom)"}</option>)}</select><p className="text-xs text-muted-foreground">Hold Ctrl/Cmd to select multiple.</p></div>
           <div className="space-y-1.5"><Label htmlFor="e-status">Status</Label><select id="e-status" name="status" required className={selectClass()} defaultValue={editing.status}>{STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
           <div className="space-y-1.5"><Label htmlFor="e-org">Organisation</Label><select id="e-org" name="organisationId" className={selectClass()} defaultValue={editing.organisationId ?? ""}><option value="">— None —</option>{organisations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
           <div className="md:col-span-2"><Button type="submit" disabled={busy} className="w-full">{busy ? "Saving…" : "Save changes"}</Button></div>

@@ -8,8 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-import cv2
-import numpy as np
+try:
+    import cv2
+    import numpy as np
+    ANPR_AVAILABLE = True
+except ImportError:
+    cv2 = None
+    np = None
+    ANPR_AVAILABLE = False
 
 from config import AnprConfig
 from models import AnprResult
@@ -31,6 +37,8 @@ class AnprEngine:
     def __init__(self, config: AnprConfig) -> None:
         self.config = config
         self._reader = None
+        if not ANPR_AVAILABLE:
+            LOGGER.warning("ANPR components (cv2/numpy/easyocr) are not installed. ANPR will be disabled.")
 
     @property
     def reader(self):
@@ -113,6 +121,9 @@ class AnprEngine:
         return frames, None
 
     def recognise(self, source: str | int | None = None) -> AnprResult:
+        if not ANPR_AVAILABLE:
+            return AnprResult(plate_text=None, confidence=0, timestamp=datetime.now(timezone.utc), image_path=None, bbox_coordinates=None, attempts=0)
+            
         camera_source = self.config.camera_source if source is None else source
         all_reads: list[tuple[str, float, tuple[int, int, int, int] | None]] = []
         image_path: str | None = None

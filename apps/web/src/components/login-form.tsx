@@ -18,5 +18,5 @@ export function LoginForm() {
     if (result?.error) { setError("Invalid email or password"); return; }
     router.push("/"); router.refresh();
   }
-  return <form onSubmit={submit} className="space-y-4"><div className="space-y-1.5"><Label htmlFor="email">Email address</Label><Input id="email" name="email" type="email" defaultValue="operator@weighbridge.local" required /></div><div className="space-y-1.5"><Label htmlFor="password">Password</Label><Input id="password" name="password" type="password" defaultValue="Password123!" required /></div>{error && <p className="rounded-sm border border-danger/30 bg-danger/10 p-2 text-xs text-danger">{error}</p>}<Button type="submit" className="w-full" disabled={loading}>{loading ? "Signing in…" : "Sign in"}</Button></form>;
+  return <form onSubmit={submit} className="space-y-4"><div className="space-y-1.5"><Label htmlFor="email">Email address</Label><Input id="email" name="email" type="email" required /></div><div className="space-y-1.5"><Label htmlFor="password">Password</Label><Input id="password" name="password" type="password" required /></div>{error && <p className="rounded-sm border border-danger/30 bg-danger/10 p-2 text-xs text-danger">{error}</p>}<Button type="submit" className="w-full" disabled={loading}>{loading ? "Signing in…" : "Sign in"}</Button></form>;
 }

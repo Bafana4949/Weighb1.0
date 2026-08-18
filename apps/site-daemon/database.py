@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     entry_photo_url TEXT,
     scale_photo_url TEXT,
     driver_decision TEXT,
+    lane_number INTEGER,
     sync_status TEXT NOT NULL DEFAULT 'pending',
     cloud_confirmation_hash TEXT,
     created_at TEXT NOT NULL,
@@ -180,6 +181,8 @@ class EdgeDatabase:
             connection.execute("ALTER TABLE transactions ADD COLUMN overweight_loaded_flag INTEGER NOT NULL DEFAULT 0")
         if "driver_decision" not in columns:
             connection.execute("ALTER TABLE transactions ADD COLUMN driver_decision TEXT")
+        if "lane_number" not in columns:
+            connection.execute("ALTER TABLE transactions ADD COLUMN lane_number INTEGER")
 
     def bootstrap_chain_head(self, chain_hash: str) -> bool:
         if len(chain_hash) != 64 or any(char not in "0123456789abcdef" for char in chain_hash.lower()):
@@ -249,6 +252,7 @@ class EdgeDatabase:
         underweight_empty: bool = False,
         overweight_loaded: bool = False,
         driver_decision: str | None = None,
+        lane_number: int | None = None,
     ) -> EdgeTransaction:
         with self._write_lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -290,6 +294,7 @@ class EdgeDatabase:
                 entry_photo_url=entry_photo_url,
                 scale_photo_url=scale_photo_url,
                 driver_decision=driver_decision,
+                lane_number=lane_number,
             )
             payload_json = canonical_json(transaction.model_dump(mode="json"))
             now = iso()
@@ -299,8 +304,8 @@ class EdgeDatabase:
                     gross_weight_kg, tare_weight_kg, net_weight_kg, commodity, captured_at, entry_at,
                     exit_at, turnaround_seconds, waybill_number, previous_hash, integrity_hash, overload, overload_variance_kg,
                     underweight_empty_flag, overweight_loaded_flag,
-                    anpr_confidence, entry_photo_url, scale_photo_url, driver_decision, sync_status, created_at, updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    anpr_confidence, entry_photo_url, scale_photo_url, driver_decision, lane_number, sync_status, created_at, updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     transaction.edge_transaction_id, transaction.booking_id, transaction.vehicle_id,
                     transaction.trailer_id, transaction.driver_id, transaction.site_id,
@@ -312,7 +317,7 @@ class EdgeDatabase:
                     int(transaction.overload), transaction.overload_variance_kg,
                     int(transaction.underweight_empty), int(transaction.overweight_loaded),
                     transaction.anpr_confidence, transaction.entry_photo_url, transaction.scale_photo_url,
-                    transaction.driver_decision, "pending", now, now,
+                    transaction.driver_decision, transaction.lane_number, "pending", now, now,
                 ),
             )
             connection.execute(

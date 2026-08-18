@@ -11,6 +11,7 @@ const updateSchema=z.object({
   role:z.nativeEnum(UserRole).optional(),
   status:z.nativeEnum(UserStatus).optional(),
   organisationId:z.string().uuid().optional().nullable(),
+  roleIds:z.array(z.string().uuid()).optional(),
 });
 
 export async function PUT(request:Request,{params}:{params:Promise<{id:string}>}){
@@ -32,14 +33,24 @@ export async function PUT(request:Request,{params}:{params:Promise<{id:string}>}
     const org=await prisma.organisation.findUnique({where:{id:parsed.data.organisationId}});
     if(!org||org.deletedAt)return fail("Organisation not found",422);
   }
-  const {status,...rest}=parsed.data;
+  const {status,roleIds,...rest}=parsed.data;
   const user=await prisma.user.update({where:{id},data:{
     ...rest,
     ...(status?{status,...(status===UserStatus.ACTIVE?{deletedAt:null}:{})}:{}),
   }});
-  await audit({userId:access.session!.user.id,action:"USER_UPDATED",entityType:"user",entityId:id,beforeData:{role:before.role,status:before.status,organisationId:before.organisationId},afterData:{role:user.role,status:user.status,organisationId:user.organisationId}});
+  
+  if (roleIds) {
+    await prisma.userRoleAssignment.deleteMany({ where: { userId: id } });
+    if (roleIds.length > 0) {
+      await prisma.userRoleAssignment.createMany({
+        data: roleIds.map(roleId => ({ userId: id, roleId }))
+      });
+    }
+  }
+  
+  await audit({userId:access.session!.user.id,action:"USER_UPDATED",entityType:"user",entityId:id,beforeData:{role:before.role,status:before.status,organisationId:before.organisationId},afterData:{role:user.role,status:user.status,organisationId:user.organisationId,roleIds}});
   const {passwordHash,...safe}=user;
-  return ok(safe);
+  return ok({ ...safe, roleAssignments: roleIds?.map(roleId => ({ roleId })) || [] });
 }
 
 export async function DELETE(_:Request,{params}:{params:Promise<{id:string}>}){

@@ -13,7 +13,9 @@
     "build": "npm --workspace @weighbridge/database run generate && npm --workspace @weighbridge/web run build",
     "db:generate": "npm --workspace @weighbridge/database run generate",
     "db:migrate": "npm --workspace @weighbridge/database run migrate:dev",
+    "db:push": "npm --workspace @weighbridge/database run push",
     "db:seed": "npm --workspace @weighbridge/database run seed",
+    "demo:auto": "bash scripts/run-auto-weighment.sh",
     "test": "npm --workspace @weighbridge/web run test",
     "preflight": "node preflight.mjs"
   },

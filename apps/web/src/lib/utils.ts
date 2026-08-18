@@ -31,3 +31,6 @@ export function parsePagination(url: URL): { page: number; limit: number; skip: 
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
   return { page, limit, skip: (page - 1) * limit };
 }
+
+/** Use as `select: safeUserSelect` on any User relation include — never spread a full User row (passwordHash) into a client-facing response. */
+export const safeUserSelect = { id: true, firstName: true, lastName: true, email: true } as const;

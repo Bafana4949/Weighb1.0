@@ -30,6 +30,7 @@ class WeighingStateMachine:
         send_command: SendCommand,
         capture_snapshot: SnapshotCallback,
         raise_alert: AlertCallback,
+        lane_number: int | None = None,
     ) -> None:
         self.config = config
         self.database = database
@@ -37,6 +38,11 @@ class WeighingStateMachine:
         self.send_command = send_command
         self.capture_snapshot = capture_snapshot
         self.raise_alert = raise_alert
+        # None for BIDIRECTIONAL_SINGLE sites (one implicit lane); 1/2/... for
+        # each independent deck on a DUAL_ENTRY_EXIT site. Tags every MQTT
+        # message and transaction this instance produces so lane-scoped
+        # consumers (dashboard panels, reports) can tell them apart.
+        self.lane_number = lane_number
         self.state = WeighingState.IDLE
         self.session_id = str(uuid4())
         self.booking: ActiveBooking | None = None
@@ -58,7 +64,7 @@ class WeighingStateMachine:
         previous = self.state
         self.state = new_state
         LOGGER.info("State %s -> %s (%s)", previous, new_state, reason)
-        self.mqtt.publish("state", {"state": new_state, "previous_state": previous, "reason": reason}, qos=0, retain=True)
+        self.mqtt.publish("state", {"state": new_state, "previous_state": previous, "reason": reason}, qos=0, retain=True, lane_number=self.lane_number)
         if new_state == WeighingState.IDLE:
             await asyncio.to_thread(self.database.clear_session, self.session_id)
         else:
@@ -87,6 +93,7 @@ class WeighingStateMachine:
         await self.send_command(build_command("LIGHT", "ENTRY", "RED"))
         await self.send_command(build_command("GATE_CLOSE", "ENTRY"))
         await self.raise_alert(Alert(
+            lane_number=self.lane_number,
             type="UNAUTHORISED_ACCESS",
             severity="HIGH",
             title="Unauthorised vehicle attempt",
@@ -225,14 +232,16 @@ class WeighingStateMachine:
                 anpr_confidence=self.anpr_result.confidence if self.anpr_result else None,
                 entry_photo_url=self.anpr_result.image_path if self.anpr_result else None,
                 scale_photo_url=snapshot,
+                lane_number=self.lane_number,
             )
             self.last_transaction = transaction
-            self.mqtt.publish("transaction", transaction.model_dump(mode="json"), qos=1)
+            self.mqtt.publish("transaction", transaction.model_dump(mode="json"), qos=1, lane_number=self.lane_number)
             await self.send_command(build_command("LIGHT", "EXIT", "RED"))
             await self.send_command(build_command("GATE_CLOSE", "EXIT"))
             await self.send_command(build_command("BUZZER", value="ON"))
             if underweight_empty:
                 await self.raise_alert(Alert(
+                    lane_number=self.lane_number,
                     type="UNDERWEIGHT_EMPTY",
                     severity="HIGH",
                     title="Underweight empty vehicle detected",
@@ -245,6 +254,7 @@ class WeighingStateMachine:
                 ))
             if overweight_loaded:
                 await self.raise_alert(Alert(
+                    lane_number=self.lane_number,
                     type="OVERLOAD",
                     severity="HIGH",
                     title="Loaded vehicle weight limit exceeded",
@@ -257,6 +267,7 @@ class WeighingStateMachine:
                 ))
             if overload:
                 await self.raise_alert(Alert(
+                    lane_number=self.lane_number,
                     type="OVERLOAD",
                     severity="HIGH",
                     title="Overload detected",
@@ -301,6 +312,7 @@ class WeighingStateMachine:
             entry_photo_url=self.anpr_result.image_path if self.anpr_result else None,
             scale_photo_url=snapshot,
             driver_decision="ACCEPTED",
+            lane_number=self.lane_number,
         )
         self.last_transaction = transaction
         self.mqtt.publish("transaction", transaction.model_dump(mode="json"), qos=1)
@@ -332,6 +344,7 @@ class WeighingStateMachine:
         self.driver_mismatch_alerted = True
         assert self.booking is not None
         await self.raise_alert(Alert(
+            lane_number=self.lane_number,
             type="DRIVER_MISMATCH",
             severity="CRITICAL",
             title="Driver and plate mismatch",
@@ -350,7 +363,7 @@ class WeighingStateMachine:
         await self.transition(WeighingState.FAULT, description)
         if not self.scale_fault_alerted:
             self.scale_fault_alerted = True
-            await self.raise_alert(Alert(type="SCALE_FAULT", severity="HIGH", title="Scale fault", description=description))
+            await self.raise_alert(Alert(lane_number=self.lane_number, type="SCALE_FAULT", severity="HIGH", title="Scale fault", description=description))
 
     async def reset(self) -> None:
         await asyncio.to_thread(self.database.clear_session, self.session_id)

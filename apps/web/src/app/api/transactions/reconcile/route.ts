@@ -4,8 +4,16 @@ import { fail, ok, requireSiteOrRole } from "@/lib/api";
 import { reconcileSchema } from "@/lib/validation";
 import { reconcileTransaction } from "@/lib/reconciliation";
 import { routeNotification } from "@/lib/notifications";
+import { rateLimitOrFail } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
+  // Generous relative to the other creation routes: a legitimate site daemon
+  // catching up on a connectivity outage retries its whole backlog quickly,
+  // and a DUAL_ENTRY_EXIT site's two lanes reconcile concurrently from the
+  // same IP. This exists to blunt a leaked/guessed site-api-key, not to
+  // throttle normal edge sync.
+  const limited = rateLimitOrFail(request, "transactions-reconcile", 240, 60 * 1000);
+  if (limited) return limited;
   const access = await requireSiteOrRole(request, [UserRole.ADMIN]);
   if (access.error) return access.error;
   const parsed = reconcileSchema.safeParse(await request.json().catch(() => null));

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Building2, CheckCircle2, KeyRound, Plus, Power, XCircle } from "lucide-react";
+import { Building2, CheckCircle2, KeyRound, Plus, Power, XCircle, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -104,32 +104,33 @@ export function TransporterManagement({ initialTransporters }: { initialTranspor
     finally { setBusy(null); }
   }
 
-  const applications = transporters.filter(isPendingApplication);
-  const others = transporters.filter((t) => !isPendingApplication(t));
+  async function activate(transporter: TransporterRow) {
+    setBusy(transporter.id);
+    try {
+      const response = await fetch(`/api/admin/transporters/${transporter.id}/activate`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not activate transporter");
+      setTransporters((current) => current.map((t) => t.id === transporter.id ? { ...t, isActive: true, users: t.users.map((u) => ({ ...u, status: "ACTIVE" })) } : t));
+      toast({ title: "Transporter activated", body: transporter.name });
+    } catch (error) { toast({ title: "Could not activate transporter", body: String(error), severity: "HIGH" }); }
+    finally { setBusy(null); }
+  }
+  async function deleteTransporter(transporter: TransporterRow) {
+    if (!window.confirm(`Delete ${transporter.name}? This will suspend all users and hide the transporter.`)) return;
+    setBusy(transporter.id);
+    try {
+      const response = await fetch(`/api/admin/transporters/${transporter.id}`, { method: "DELETE" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not delete transporter");
+      setTransporters((current) => current.filter((t) => t.id !== transporter.id));
+      toast({ title: "Transporter deleted", body: transporter.name });
+    } catch (error) { toast({ title: "Could not delete transporter", body: String(error), severity: "HIGH" }); }
+    finally { setBusy(null); }
+  }
+
+
 
   return <div className="space-y-4">
-    <Card>
-      <CardHeader className="flex-row items-center justify-between">
-        <CardTitle>Applications awaiting approval</CardTitle>
-        <Badge variant={applications.length ? "warning" : "default"}>{applications.length} pending</Badge>
-      </CardHeader>
-      <CardContent className="p-0">
-        <Table>
-          <TableHeader><TableRow><TableHead>Company</TableHead><TableHead>Registration</TableHead><TableHead>Contact</TableHead><TableHead>Applicant login</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
-          <TableBody>{applications.length ? applications.map((t) => <TableRow key={t.id}>
-            <TableCell><p className="flex items-center gap-1.5 font-medium"><Building2 size={13} className="text-muted-foreground" />{t.name}</p></TableCell>
-            <TableCell className="font-mono text-xs">{t.registrationNo ?? "—"}</TableCell>
-            <TableCell className="text-xs">{t.contactEmail ?? "—"}<p className="text-2xs text-muted-foreground">{t.contactPhone ?? ""}</p></TableCell>
-            <TableCell className="text-xs">{t.users.map((u) => <p key={u.id}>{u.firstName} {u.lastName} · <span className="text-muted-foreground">{u.email}</span></p>)}</TableCell>
-            <TableCell><div className="flex gap-1.5">
-              <Button size="sm" disabled={busy === t.id} onClick={() => approve(t)}><CheckCircle2 size={13} className="mr-1" />Approve</Button>
-              <Button size="sm" variant="destructive" disabled={busy === t.id} onClick={() => reject(t)}><XCircle size={13} className="mr-1" />Reject</Button>
-            </div></TableCell>
-          </TableRow>) : <TableRow><TableCell colSpan={5} className="p-8 text-center text-sm text-muted-foreground">No applications waiting on review</TableCell></TableRow>}</TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle>Transporters</CardTitle>
@@ -138,14 +139,21 @@ export function TransporterManagement({ initialTransporters }: { initialTranspor
       <CardContent className="p-0">
         <Table>
           <TableHeader><TableRow><TableHead>Company</TableHead><TableHead>Registration</TableHead><TableHead>Contact</TableHead><TableHead>Logins</TableHead><TableHead>Fleet</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
-          <TableBody>{others.length ? others.map((t) => <TableRow key={t.id}>
+          <TableBody>{transporters.length ? transporters.map((t) => <TableRow key={t.id}>
             <TableCell><p className="flex items-center gap-1.5 font-medium"><Building2 size={13} className="text-muted-foreground" />{t.name}</p></TableCell>
             <TableCell className="font-mono text-xs">{t.registrationNo ?? "—"}</TableCell>
             <TableCell className="text-xs">{t.contactEmail ?? "—"}<p className="text-2xs text-muted-foreground">{t.contactPhone ?? ""}</p></TableCell>
             <TableCell className="text-xs">{t.users.map((u) => <p key={u.id} className="flex items-center gap-1.5">{u.firstName} {u.lastName} · <span className="text-muted-foreground">{u.email}</span> {u.status !== "ACTIVE" && <Badge variant="destructive">{u.status}</Badge>}<button type="button" onClick={() => resetPassword(u)} disabled={busy === u.id} className="text-muted-foreground hover:text-foreground" title="Reset password"><KeyRound size={12} /></button></p>)}</TableCell>
             <TableCell className="text-xs">{t._count.vehicles} vehicles · {t._count.drivers} drivers</TableCell>
             <TableCell><Badge variant={t.isActive ? "default" : "destructive"}>{t.isActive ? "ACTIVE" : "INACTIVE"}</Badge></TableCell>
-            <TableCell><Button variant="ghost" size="sm" onClick={() => deactivate(t)} disabled={busy === t.id || !t.isActive}><Power size={13} className="mr-1" />Deactivate</Button></TableCell>
+            <TableCell className="space-x-1">
+              {t.isActive ? (
+                <Button variant="ghost" size="sm" onClick={() => deactivate(t)} disabled={busy === t.id}><Power size={13} className="mr-1" />Deactivate</Button>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => activate(t)} disabled={busy === t.id}><CheckCircle2 size={13} className="mr-1" />Activate</Button>
+              )}
+              <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => deleteTransporter(t)} disabled={busy === t.id}><Trash2 size={13} className="mr-1" />Delete</Button>
+            </TableCell>
           </TableRow>) : <TableRow><TableCell colSpan={7} className="p-8 text-center text-sm text-muted-foreground">No transporters registered yet</TableCell></TableRow>}</TableBody>
         </Table>
       </CardContent>

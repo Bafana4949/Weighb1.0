@@ -54,11 +54,13 @@ If you encounter Docker connection errors, ensure Docker Desktop is correctly co
 3. Use Linux containers.
 4. Enable the WSL 2 backend if required in settings.
 5. Verify the Docker daemon is accessible by running:
+
    ```powershell
    docker version
    docker info
    docker context ls
    ```
+
 6. Ensure the active Docker context is appropriate for Docker Desktop.
 7. Retry starting containers: `docker compose up -d postgres mosquitto`
 
@@ -77,6 +79,7 @@ Copy-Item .env.example .env
 ```
 
 Open the `.env` file and generate secure random values for:
+
 - `AUTH_SECRET`
 - `SITE_DAEMON_API_KEY`
 - `PASSWORD_PEPPER`
@@ -99,15 +102,18 @@ docker compose ps
 ```
 
 To verify the database started successfully:
+
 ```powershell
 docker compose logs postgres --tail 100
 ```
 
 > **Note on database resets:** If PostgreSQL was previously initialized with a different password and there is no important data, the development volume can be reset with:
+>
 > ```powershell
 > docker compose down -v
 > docker compose up -d postgres mosquitto
 > ```
+>
 > ⚠️ **WARNING:** `docker compose down -v` permanently deletes the local development database and all contained data.
 
 Optional pgAdmin:
@@ -131,7 +137,7 @@ npm run db:seed
 Demo accounts all use `Password123!`:
 
 | Role | Email |
-|---|---|
+| --- | --- |
 | Administrator | `admin@weighbridge.local` |
 | Operator | `operator@weighbridge.local` |
 | Security | `security@weighbridge.local` |
@@ -177,7 +183,7 @@ docker compose up -d postgres mosquitto
 npm run dev:web
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3010`.
 
 ### Terminal 3 — virtual hardware
 
@@ -249,9 +255,9 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8000/edge/check-in `
   -Body '{"manual_plate":"AB 123 CD GP","image_path":"test_plates/sample_01.png"}'
 ```
 
-4. In the simulator GUI, set RFID to `DRV00421`, block both beams, and move weight to approximately `52 000 kg`.
-5. Keep the reading within 20 kg for three seconds.
-6. The daemon captures the transaction, stores it in SQLite, publishes MQTT, reconciles it to PostgreSQL, generates a waybill, and commands the exit gate.
+1. In the simulator GUI, set RFID to `DRV00421`, block both beams, and move weight to approximately `52 000 kg`.
+2. Keep the reading within 20 kg for three seconds.
+3. The daemon captures the transaction, stores it in SQLite, publishes MQTT, reconciles it to PostgreSQL, generates a waybill, and commands the exit gate.
 
 Automated scenario:
 
@@ -259,6 +265,28 @@ Automated scenario:
 cd apps/hardware-simulator
 python scenarios.py normal
 ```
+
+This is fully hands-off: it auto-detects the site, auto-picks a truck from
+the live booking queue, captures its registration by rendering (or reusing) a
+plate photo and letting the daemon's real ANPR (OpenCV + EasyOCR) pipeline
+read it — no `manual_plate` shortcut — ramps the weight up and down
+automatically, and confirms the driver load-check decision itself.
+
+### One command, zero manual steps
+
+To also bring up every required container (postgres, MQTT, the cloud web app,
+the edge daemon and the headless hardware simulator) and then run the
+scenario above, with no other terminals or curl commands needed:
+
+```bash
+npm run demo:auto
+```
+
+This assumes the database has already been migrated and seeded once (see
+"Apply the database migration and seed demo records" above). Run
+`npm run demo:auto -- overload` (or `unauthorised` / `unstable` /
+`driver-mismatch` / `offline-sync`) to run a different scenario against the
+same running containers.
 
 Other scenarios:
 
@@ -297,7 +325,7 @@ Safety rules:
 Every payload is JSON with `message_id`, `site_id`, `timestamp_utc`, and `payload`.
 
 | Topic | QoS |
-|---|---:|
+| --- | ---: |
 | `weighbridge/{site_id}/telemetry` | 0 |
 | `weighbridge/{site_id}/state` | 0 |
 | `weighbridge/{site_id}/transaction` | 1 |

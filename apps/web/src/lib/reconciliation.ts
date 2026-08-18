@@ -5,6 +5,7 @@ import { stableStringify } from "@/lib/crypto";
 import type { z } from "zod";
 import { reconcileSchema } from "@/lib/validation";
 import { runFraudChecks } from "@/lib/fraud";
+import { logger } from "@/lib/logger";
 
 export type ReconcileInput = z.infer<typeof reconcileSchema>;
 
@@ -49,7 +50,10 @@ export async function reconcileTransaction(input: ReconcileInput) {
   const duplicate = await prisma.weighbridgeTransaction.findFirst({
     where: { OR: [{ edgeTransactionId: input.edge_transaction_id }, { integrityHash: input.integrity_hash }] },
   });
-  if (duplicate) return { duplicate: true as const, transaction: duplicate };
+  if (duplicate) {
+    logger.info("transaction_reconcile_duplicate", { edge_transaction_id: input.edge_transaction_id, site_id: input.site_id, waybill_number: input.waybill_number });
+    return { duplicate: true as const, transaction: duplicate };
+  }
 
   const booking = await prisma.booking.findUnique({
     where: { id: input.booking_id },
@@ -61,6 +65,14 @@ export async function reconcileTransaction(input: ReconcileInput) {
   if (input.gross_weight_kg - input.tare_weight_kg !== input.net_weight_kg) throw new Error("NET_WEIGHT_MISMATCH");
   if (input.tare_weight_kg !== booking.vehicle.tareWeightKg) throw new Error("TARE_WEIGHT_MISMATCH");
   if (computeEdgeIntegrityHash(input) !== input.integrity_hash) throw new Error("INTEGRITY_HASH_MISMATCH");
+
+  // Not part of computeEdgeIntegrityHash's payload — the daemon's hash chain is
+  // lane-independent by design, so a booking's lane attribution can't fail
+  // reconciliation just because it's missing or wrong. Best-effort attribution
+  // only; an unmatched lane_number quietly leaves laneId null.
+  const lane = input.lane_number
+    ? await prisma.lane.findUnique({ where: { siteId_laneNumber: { siteId: booking.siteId, laneNumber: input.lane_number } } })
+    : null;
 
   const config = await prisma.siteConfig.findUnique({ where: { siteId: booking.siteId } });
   const tolerance = Number(config?.overloadTolerancePercent ?? 5) / 100;
@@ -82,7 +94,10 @@ export async function reconcileTransaction(input: ReconcileInput) {
       where: { siteId: booking.siteId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
-    if ((prior?.integrityHash ?? "0".repeat(64)) !== input.previous_hash) throw new Error("HASH_CHAIN_MISMATCH");
+    if ((prior?.integrityHash ?? "0".repeat(64)) !== input.previous_hash) {
+      logger.error("transaction_hash_chain_mismatch", { site_id: booking.siteId, edge_transaction_id: input.edge_transaction_id, expected_previous_hash: prior?.integrityHash ?? "genesis" });
+      throw new Error("HASH_CHAIN_MISMATCH");
+    }
 
     const transaction = await tx.weighbridgeTransaction.create({ data: {
       edgeTransactionId: input.edge_transaction_id,
@@ -91,6 +106,7 @@ export async function reconcileTransaction(input: ReconcileInput) {
       trailerId: input.trailer_id ?? booking.trailerId,
       driverId: booking.driverId,
       siteId: booking.siteId,
+      laneId: lane?.id ?? null,
       grossWeightKg: input.gross_weight_kg,
       tareWeightKg: input.tare_weight_kg,
       netWeightKg: input.net_weight_kg,
@@ -155,6 +171,9 @@ export async function reconcileTransaction(input: ReconcileInput) {
     return { duplicate: false as const, transaction };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
 
-  if (!result.duplicate) await runFraudChecks(result.transaction.id);
+  if (!result.duplicate) {
+    logger.info("transaction_reconciled", { transaction_id: result.transaction.id, site_id: result.transaction.siteId, waybill_number: result.transaction.waybillNumber, overload: result.transaction.overload, held: result.transaction.status === "HELD" });
+    await runFraudChecks(result.transaction.id);
+  }
   return result;
 }

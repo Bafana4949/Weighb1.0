@@ -12,6 +12,7 @@ type BookingRow = {
   windowStart: string | Date; windowEnd: string | Date;
   vehicle: { plate: string }; driver: { firstName: string; lastName: string; licenceNumber: string };
   site: { name: string; code: string }; transporterOrganisation: { name: string };
+  order?: { orderNumber: string } | null;
 };
 
 export function BookingApprovals({ initialBookings }: { initialBookings: BookingRow[] }) {
@@ -26,8 +27,8 @@ export function BookingApprovals({ initialBookings }: { initialBookings: Booking
       const body = await response.json();
       if (!response.ok) {
         if (!reason && /override reason is required/i.test(body.error ?? "")) {
-          const override = window.prompt(`${body.error}\n\nEnter an override reason to approve anyway:`);
-          if (override && override.trim()) return approve(booking, override.trim());
+          const override = window.confirm(`${body.error}\n\nDo you want to override the policy and approve anyway?`);
+          if (override) return approve(booking, "Admin override");
           return;
         }
         throw new Error(body.error ?? "Could not approve booking");
@@ -39,14 +40,13 @@ export function BookingApprovals({ initialBookings }: { initialBookings: Booking
   }
 
   async function reject(booking: BookingRow) {
-    const reason = window.prompt(`Reason for rejecting ${booking.reference} (at least 10 characters):`);
-    if (!reason || reason.trim().length < 10) { toast({ title: "Rejection cancelled", body: "A reason of at least 10 characters is required", severity: "MEDIUM" }); return; }
+    if (!window.confirm(`Are you sure you want to reject booking ${booking.reference}?`)) return;
     setBusy(booking.id);
     try {
-      const response = await fetch(`/api/bookings/${booking.id}/reject`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason: reason.trim() }) });
+      const response = await fetch(`/api/bookings/${booking.id}/reject`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason: "Rejected by admin" }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not reject booking");
-      setBookings((current) => current.map((b) => b.id === booking.id ? { ...b, status: body.data.status } : b));
+      setBookings((current) => current.filter((b) => b.id !== booking.id));
       toast({ title: "Booking rejected", body: `${booking.reference} · ${booking.vehicle.plate}` });
     } catch (error) { toast({ title: "Could not reject booking", body: String(error), severity: "HIGH" }); }
     finally { setBusy(null); }
@@ -63,9 +63,9 @@ export function BookingApprovals({ initialBookings }: { initialBookings: Booking
       </CardHeader>
       <CardContent className="p-0">
         <Table>
-          <TableHeader><TableRow><TableHead>Order reference</TableHead><TableHead>Transporter</TableHead><TableHead>Vehicle</TableHead><TableHead>Driver</TableHead><TableHead>Weighbridge</TableHead><TableHead>Product / load</TableHead><TableHead>Arrival window</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Reference / Order</TableHead><TableHead>Transporter</TableHead><TableHead>Vehicle</TableHead><TableHead>Driver</TableHead><TableHead>Weighbridge</TableHead><TableHead>Product / load</TableHead><TableHead>Arrival window</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
           <TableBody>{pending.length ? pending.map((b) => <TableRow key={b.id}>
-            <TableCell className="font-mono text-xs">{b.reference}</TableCell>
+            <TableCell><div className="font-mono text-xs">{b.reference}</div>{b.order && <div className="text-2xs text-muted-foreground mt-1">Order: {b.order.orderNumber}</div>}</TableCell>
             <TableCell className="text-xs">{b.transporterOrganisation.name}</TableCell>
             <TableCell className="font-mono">{b.vehicle.plate}</TableCell>
             <TableCell className="text-xs">{b.driver.firstName} {b.driver.lastName}<p className="text-2xs text-muted-foreground">{b.driver.licenceNumber}</p></TableCell>
@@ -85,9 +85,9 @@ export function BookingApprovals({ initialBookings }: { initialBookings: Booking
       <CardHeader><CardTitle>Recent decisions</CardTitle></CardHeader>
       <CardContent className="p-0">
         <Table>
-          <TableHeader><TableRow><TableHead>Order reference</TableHead><TableHead>Vehicle</TableHead><TableHead>Driver</TableHead><TableHead>Weighbridge</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Reference / Order</TableHead><TableHead>Vehicle</TableHead><TableHead>Driver</TableHead><TableHead>Weighbridge</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
           <TableBody>{others.length ? others.map((b) => <TableRow key={b.id}>
-            <TableCell className="font-mono text-xs">{b.reference}</TableCell>
+            <TableCell><div className="font-mono text-xs">{b.reference}</div>{b.order && <div className="text-2xs text-muted-foreground mt-1">Order: {b.order.orderNumber}</div>}</TableCell>
             <TableCell className="font-mono">{b.vehicle.plate}</TableCell>
             <TableCell className="text-xs">{b.driver.firstName} {b.driver.lastName}</TableCell>
             <TableCell className="text-xs">{b.site.name}</TableCell>

@@ -64,17 +64,21 @@ class MqttService:
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
             LOGGER.error("Invalid MQTT command: %s", error)
 
-    def envelope(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def envelope(self, payload: dict[str, Any], lane_number: int | None = None) -> dict[str, Any]:
         return {
             "message_id": str(uuid4()),
             "site_id": self.config.site.id,
+            "lane_number": lane_number,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "payload": payload,
         }
 
-    def publish(self, suffix: str, payload: dict[str, Any], qos: int = 0, retain: bool = False) -> None:
+    def publish(self, suffix: str, payload: dict[str, Any], qos: int = 0, retain: bool = False, lane_number: int | None = None) -> None:
+        # lane_number rides inside the envelope only — the topic shape stays
+        # identical to single-lane sites so the web app's existing MQTT
+        # topic-parsing (server.ts) needs no changes for dual-lane sites.
         topic = suffix if suffix.startswith("dashboard/") or suffix.startswith("sync/") else f"weighbridge/{self.config.site.id}/{suffix}"
-        encoded = json.dumps(self.envelope(payload), separators=(",", ":"), default=str)
+        encoded = json.dumps(self.envelope(payload, lane_number), separators=(",", ":"), default=str)
         if not self.connected:
             self.buffer.append((topic, encoded, qos, retain))
             return

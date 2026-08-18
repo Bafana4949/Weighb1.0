@@ -44,7 +44,7 @@ mqtt:
   memory_buffer_limit: 1000
 
 cloud:
-  api_url: "http://localhost:3000/api"
+  api_url: "http://localhost:3010/api"
   site_api_key: "dev-site-key-change-me"
   sync_interval_seconds: 30
   max_offline_hours: 72

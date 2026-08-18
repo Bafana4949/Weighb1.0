@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserRole } from "@prisma/client";
 import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
 import { roleAllowed } from "@/lib/access";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 
 export function ok<T>(data: T, status = 200, meta?: { page: number; total: number; limit: number }) {
   return NextResponse.json({ success: true, data, ...(meta ? { meta } : {}) }, { status });
@@ -17,6 +19,40 @@ export async function requireRole(roles: UserRole[]) {
   const session = await auth();
   if (!session?.user?.id || !session.user.role) return { error: fail("Authentication required", 401), session: null };
   if (!roleAllowed(session.user.role, roles)) return { error: fail("Insufficient permissions", 403), session: null };
+  return { error: null, session };
+}
+
+export async function requirePlatformSuperAdmin() {
+  const result = await requireRole(["ADMIN"] as UserRole[]);
+  if (result.error) return result;
+  if (!isPlatformSuperAdmin(result.session!.user)) {
+    return { error: fail("Only the platform administrator can perform this action", 403), session: null };
+  }
+  return result;
+}
+
+/**
+ * Additive, finer-grained check layered alongside (not replacing) requireRole.
+ * Resolves via UserRoleAssignment -> Role -> RolePermission -> Permission.
+ * A platform super-admin is never restricted by client-level role permissions.
+ *
+ * Users who have never been assigned a custom/built-in role (the common case
+ * immediately after this feature ships — assignment is opt-in) fall back to
+ * whatever their coarse UserRole already granted via requireRole, so adding
+ * a permission check to an existing route never regresses access for the
+ * whole existing user base on day one. Once a user has at least one role
+ * assignment, that becomes the authoritative, granular answer.
+ */
+export async function requirePermission(permissionKey: string) {
+  const session = await auth();
+  if (!session?.user?.id) return { error: fail("Authentication required", 401), session: null };
+  if (isPlatformSuperAdmin(session.user)) return { error: null, session };
+  const assignmentCount = await prisma.userRoleAssignment.count({ where: { userId: session.user.id } });
+  if (assignmentCount === 0) return { error: null, session };
+  const grantedCount = await prisma.userRoleAssignment.count({
+    where: { userId: session.user.id, role: { permissions: { some: { permission: { key: permissionKey } } } } },
+  });
+  if (grantedCount === 0) return { error: fail("Insufficient permissions", 403), session: null };
   return { error: null, session };
 }
 

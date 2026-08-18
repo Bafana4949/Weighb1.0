@@ -88,6 +88,7 @@ class EdgeTransaction(BaseModel):
     scale_photo_url: str | None = None
     driver_decision: str | None = None
     sync_status: str = "pending"
+    lane_number: int | None = None
 
 
 class Alert(BaseModel):
@@ -101,3 +102,4 @@ class Alert(BaseModel):
     evidence_urls: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    lane_number: int | None = None

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Building2, Plus, Power } from "lucide-react";
+import { Building2, CheckCircle2, PauseCircle, Plus, Power, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,10 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useToast } from "@/components/providers";
 
 type LoginUser = { id: string; firstName: string; lastName: string; email: string; status: string };
+type CompanyStatus = "PENDING_SETUP" | "ACTIVE" | "SUSPENDED" | "ARCHIVED";
 type CompanyRow = {
   id: string; name: string; registrationNo: string | null; contactEmail: string | null; contactPhone: string | null;
-  isActive: boolean; users: LoginUser[]; _count: { sites: number };
+  isActive: boolean; status: CompanyStatus; users: LoginUser[]; _count: { sites: number };
 };
+const STATUS_BADGE: Record<CompanyStatus, "default" | "warning" | "destructive" | "muted"> = { ACTIVE: "default", PENDING_SETUP: "warning", SUSPENDED: "destructive", ARCHIVED: "muted" };
 
 export function CompanyManagement({ initialCompanies }: { initialCompanies: CompanyRow[] }) {
   const [companies, setCompanies] = useState<CompanyRow[]>(initialCompanies);
@@ -38,23 +40,62 @@ export function CompanyManagement({ initialCompanies }: { initialCompanies: Comp
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not register company");
       setCompanies((current) => [{ ...body.data, _count: { sites: 0 } }, ...current]);
-      toast({ title: "Mining company registered", body: `${body.data.name} · admin login ${body.data.users[0]?.email}` });
+      toast({ title: "Mining company registered", body: `${body.data.name} · admin login ${body.data.users[0]?.email} · pending setup — add a site, then activate` });
       formEl.reset();
       setCreateOpen(false);
     } catch (error) { toast({ title: "Could not register company", body: String(error), severity: "HIGH" }); }
     finally { setBusy(false); }
   }
 
-  async function deactivate(company: CompanyRow) {
-    if (!window.confirm(`Deactivate ${company.name}? All of their admin logins will be suspended immediately.`)) return;
+  async function activate(company: CompanyRow) {
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/admin/companies/${company.id}/activate`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not activate company");
+      setCompanies((current) => current.map((c) => c.id === company.id ? { ...c, status: "ACTIVE" } : c));
+      toast({ title: "Company activated", body: company.name });
+    } catch (error) { toast({ title: "Could not activate company", body: String(error), severity: "HIGH" }); }
+    finally { setBusy(false); }
+  }
+
+  async function suspend(company: CompanyRow) {
+    const reason = window.prompt(`Reason for suspending ${company.name}? (visible to their admins)`);
+    if (!reason) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/admin/companies/${company.id}/suspend`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not suspend company");
+      setCompanies((current) => current.map((c) => c.id === company.id ? { ...c, status: "SUSPENDED" } : c));
+      toast({ title: "Company suspended", body: company.name });
+    } catch (error) { toast({ title: "Could not suspend company", body: String(error), severity: "HIGH" }); }
+    finally { setBusy(false); }
+  }
+
+  async function archive(company: CompanyRow) {
+    if (!window.confirm(`Archive ${company.name}? This cannot be undone from this screen.`)) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/admin/companies/${company.id}/archive`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not archive company");
+      setCompanies((current) => current.map((c) => c.id === company.id ? { ...c, status: "ARCHIVED" } : c));
+      toast({ title: "Company archived", body: company.name });
+    } catch (error) { toast({ title: "Could not archive company", body: String(error), severity: "HIGH" }); }
+    finally { setBusy(false); }
+  }
+
+  async function deleteCompany(company: CompanyRow) {
+    if (!window.confirm(`Delete ${company.name}? This will suspend all users and hide the company.`)) return;
     setBusy(true);
     try {
       const response = await fetch(`/api/admin/companies/${company.id}`, { method: "DELETE" });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not deactivate company");
-      setCompanies((current) => current.map((c) => c.id === company.id ? { ...c, isActive: false, users: c.users.map((u) => ({ ...u, status: "SUSPENDED" })) } : c));
-      toast({ title: "Company deactivated", body: company.name });
-    } catch (error) { toast({ title: "Could not deactivate company", body: String(error), severity: "HIGH" }); }
+      if (!response.ok) throw new Error(body.error ?? "Could not delete company");
+      setCompanies((current) => current.filter((c) => c.id !== company.id));
+      toast({ title: "Company deleted", body: company.name });
+    } catch (error) { toast({ title: "Could not delete company", body: String(error), severity: "HIGH" }); }
     finally { setBusy(false); }
   }
 
@@ -72,8 +113,13 @@ export function CompanyManagement({ initialCompanies }: { initialCompanies: Comp
           <TableCell className="text-xs">{c.contactEmail ?? "—"}<p className="text-2xs text-muted-foreground">{c.contactPhone ?? ""}</p></TableCell>
           <TableCell className="text-xs">{c.users.map((u) => <p key={u.id}>{u.firstName} {u.lastName} · <span className="text-muted-foreground">{u.email}</span> {u.status !== "ACTIVE" && <Badge variant="destructive">{u.status}</Badge>}</p>)}</TableCell>
           <TableCell className="text-xs">{c._count.sites}</TableCell>
-          <TableCell><Badge variant={c.isActive ? "default" : "destructive"}>{c.isActive ? "ACTIVE" : "INACTIVE"}</Badge></TableCell>
-          <TableCell><Button variant="ghost" size="sm" onClick={() => deactivate(c)} disabled={busy || !c.isActive}><Power size={13} className="mr-1" />Deactivate</Button></TableCell>
+          <TableCell><Badge variant={STATUS_BADGE[c.status]}>{c.status.replace("_", " ")}</Badge></TableCell>
+          <TableCell className="space-x-1">
+            {(c.status === "PENDING_SETUP" || c.status === "SUSPENDED") && <Button variant="ghost" size="sm" onClick={() => activate(c)} disabled={busy}><CheckCircle2 size={13} className="mr-1" />Activate</Button>}
+            {c.status === "ACTIVE" && <Button variant="ghost" size="sm" onClick={() => suspend(c)} disabled={busy}><PauseCircle size={13} className="mr-1" />Suspend</Button>}
+            {c.status !== "ARCHIVED" && <Button variant="ghost" size="sm" onClick={() => archive(c)} disabled={busy}><Power size={13} className="mr-1" />Archive</Button>}
+            <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => deleteCompany(c)} disabled={busy}><Trash2 size={13} className="mr-1" />Delete</Button>
+          </TableCell>
         </TableRow>) : <TableRow><TableCell colSpan={7} className="p-8 text-center text-sm text-muted-foreground">No mining companies registered yet</TableCell></TableRow>}</TableBody>
       </Table>
     </CardContent>

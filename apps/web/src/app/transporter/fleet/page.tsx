@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/app-shell";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { FleetManagement } from "@/components/fleet-management";
 const LIMIT = 50;
 export default async function TransporterFleet({ searchParams }: { searchParams: Promise<{ vpage?: string; dpage?: string }> }) {
@@ -17,5 +18,5 @@ export default async function TransporterFleet({ searchParams }: { searchParams:
     prisma.driver.count({ where: { organisationId: org??undefined, deletedAt: null } }),
     prisma.trailer.findMany({ where: { vehicle: { organisationId: org??undefined } }, include: { vehicle: true }, orderBy: { trailerId: "asc" }, take: 200 }),
   ]);
-  return <AppShell role={s.user.role} userName={s.user.name??"Transporter"} orgName={s.user.organisationName}><div className="space-y-4"><div><h1 className="text-2xl font-semibold text-foreground">Fleet</h1><p className="text-xs text-muted-foreground">Vehicles and drivers registered to your organisation.</p></div><FleetManagement initialVehicles={vehicles.map(v=>({...v,organisation:null}))} initialDrivers={drivers.map(({idNumberEncrypted,idNumberHash,...d})=>({...d,organisation:null}))} initialTrailers={trailers} organisations={[]} isAdmin={false} vehiclePagination={{ page: vpage, limit: LIMIT, total: vehicleTotal }} driverPagination={{ page: dpage, limit: LIMIT, total: driverTotal }}/></div></AppShell>;
+  return <AppShell role={s.user.role} userName={s.user.name??"Transporter"} orgName={s.user.organisationName} isSuperAdmin={isPlatformSuperAdmin(s.user)}><div className="space-y-4"><div><h1 className="text-2xl font-semibold text-foreground">Fleet</h1><p className="text-xs text-muted-foreground">Vehicles and drivers registered to your organisation.</p></div><FleetManagement initialVehicles={JSON.parse(JSON.stringify(vehicles.map(v=>({...v,organisation:null}))))} initialDrivers={JSON.parse(JSON.stringify(drivers.map(({idNumberEncrypted,idNumberHash,...d})=>({...d,organisation:null}))))} initialTrailers={JSON.parse(JSON.stringify(trailers))} organisations={[]} isAdmin={false} vehiclePagination={{ page: vpage, limit: LIMIT, total: vehicleTotal }} driverPagination={{ page: dpage, limit: LIMIT, total: driverTotal }}/></div></AppShell>;
 }

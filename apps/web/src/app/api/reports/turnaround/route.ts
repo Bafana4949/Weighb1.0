@@ -1,5 +1,5 @@
 import { UserRole } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import { ok,requireRole } from "@/lib/api";
-import { dateRange } from "@/lib/reports";
-export async function GET(request:Request){const a=await requireRole([UserRole.OPERATOR,UserRole.ADMIN]);if(a.error)return a.error;const url=new URL(request.url);const rows=await prisma.weighbridgeTransaction.findMany({where:{capturedAt:dateRange(url.searchParams),turnaroundSeconds:{not:null}},include:{site:true},orderBy:{turnaroundSeconds:"desc"}});const bySite=new Map<string,number[]>();for(const row of rows){const values=bySite.get(row.site.code)??[];values.push(row.turnaroundSeconds!);bySite.set(row.site.code,values)}return ok({sites:[...bySite].map(([site,values])=>({site,average_seconds:Math.round(values.reduce((a,b)=>a+b,0)/values.length),maximum_seconds:Math.max(...values),transactions:values.length})),bottlenecks:rows.slice(0,20).map(row=>({transaction_id:row.id,waybill_number:row.waybillNumber,site:row.site.code,turnaround_seconds:row.turnaroundSeconds}))})}
+import { mineScope } from "@/lib/access";
+import { dateRange,turnaroundBySite } from "@/lib/reports";
+export async function GET(request:Request){const a=await requireRole([UserRole.OPERATOR,UserRole.ADMIN]);if(a.error)return a.error;const url=new URL(request.url);const report=await turnaroundBySite(dateRange(url.searchParams),mineScope(a.session!.user.organisationId));return ok(report)}

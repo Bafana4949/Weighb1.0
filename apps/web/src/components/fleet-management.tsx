@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
-import { Ban, Pencil, Plus, ShieldCheck, Truck as TruckX, Upload, Users } from "lucide-react";
+import { read, utils } from "xlsx";
+import { Ban, Handshake, Pencil, Plus, ShieldCheck, Truck as TruckX, Upload, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,19 @@ function parseCsv(text: string): Record<string, string>[] {
   return lines.slice(1).map((line) => Object.fromEntries(splitLine(line).map((value, i) => [headers[i], value])));
 }
 
+async function parseFile(file: File): Promise<Record<string, any>[]> {
+  if (file.name.toLowerCase().endsWith(".xlsx")) {
+    const buffer = await file.arrayBuffer();
+    const workbook = read(buffer);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+    if (!sheet) return [];
+    return utils.sheet_to_json(sheet, { defval: "" });
+  } else {
+    return parseCsv(await file.text());
+  }
+}
+
 function downloadTemplate(filename: string, headers: string[]) {
   const blob = new Blob([headers.join(",") + "\n"], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -65,15 +79,18 @@ function downloadTemplate(filename: string, headers: string[]) {
 export function FleetManagement({ initialVehicles, initialDrivers, initialTrailers, organisations, isAdmin, vehiclePagination, driverPagination }: { initialVehicles: VehicleRow[]; initialDrivers: DriverRow[]; initialTrailers?: TrailerRow[]; organisations: OrgOption[]; isAdmin: boolean; vehiclePagination?: Pagination; driverPagination?: Pagination }) {
   return <div className="space-y-4">
     <VehicleSection initialVehicles={initialVehicles} organisations={organisations} isAdmin={isAdmin} pagination={vehiclePagination} />
-    <TrailerSection initialTrailers={initialTrailers ?? []} vehicles={initialVehicles} />
+    <TrailerSection initialTrailers={initialTrailers ?? []} vehicles={initialVehicles} isAdmin={isAdmin} />
     <DriverSection initialDrivers={initialDrivers} organisations={organisations} isAdmin={isAdmin} pagination={driverPagination} />
   </div>;
 }
 
-function TrailerSection({ initialTrailers, vehicles }: { initialTrailers: TrailerRow[]; vehicles: VehicleRow[] }) {
+function TrailerSection({ initialTrailers, vehicles, isAdmin }: { initialTrailers: TrailerRow[]; vehicles: VehicleRow[]; isAdmin: boolean }) {
   const [trailers, setTrailers] = useState<TrailerRow[]>(initialTrailers);
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importResult, setImportResult] = useState<{ created: number; errors: { row: number; message: string }[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
   async function createTrailer(event: React.FormEvent<HTMLFormElement>) {
@@ -97,10 +114,34 @@ function TrailerSection({ initialTrailers, vehicles }: { initialTrailers: Traile
     finally { setBusy(false); }
   }
 
+  async function importCsv(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const file = fileRef.current?.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    setImportResult(null);
+    try {
+      const parsedRows = await parseFile(file);
+      const rows = parsedRows.map((row) => ({
+        vehiclePlate: row.vehiclePlate ? String(row.vehiclePlate) : undefined, trailerId: row.trailerId ? String(row.trailerId) : undefined, registrationNo: row.registrationNo ? String(row.registrationNo) : undefined,
+        type: row.type ? String(row.type) : undefined, tareWeightKg: row.tareWeightKg ? Number(row.tareWeightKg) : undefined,
+      }));
+      const response = await fetch("/api/trailers/bulk", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rows }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not import trailers");
+      setImportResult(body.data);
+      if (body.data.created > 0) window.location.reload();
+    } catch (error) { toast({ title: "Could not import trailers", body: String(error), severity: "HIGH" }); }
+    finally { setBusy(false); }
+  }
+
   return <Card>
     <CardHeader className="flex-row items-center justify-between">
       <CardTitle>Trailers</CardTitle>
-      <Button size="sm" onClick={() => setCreateOpen(true)} disabled={vehicles.length === 0}><Plus size={14} className="mr-1.5" />New trailer</Button>
+      {isAdmin && <div className="flex gap-1.5">
+        <Button size="sm" variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}><Upload size={14} className="mr-1.5" />Import CSV</Button>
+        <Button size="sm" onClick={() => setCreateOpen(true)} disabled={vehicles.length === 0}><Plus size={14} className="mr-1.5" />New trailer</Button>
+      </div>}
     </CardHeader>
     <CardContent className="p-0">
       <Table>
@@ -128,6 +169,22 @@ function TrailerSection({ initialTrailers, vehicles }: { initialTrailers: Traile
         </form>
       </DialogContent>
     </Dialog>
+
+    <Dialog open={importOpen} onOpenChange={setImportOpen}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Import trailers from CSV</DialogTitle></DialogHeader>
+        <form onSubmit={importCsv} className="space-y-3">
+          <p className="text-xs text-muted-foreground">Columns: vehiclePlate, trailerId, registrationNo, type, tareWeightKg.</p>
+          <Button type="button" variant="ghost" size="sm" onClick={() => downloadTemplate("trailers-template.csv", ["vehiclePlate", "trailerId", "registrationNo", "type", "tareWeightKg"])}>Download CSV template</Button>
+          <Input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+          {importResult && <div className="rounded-sm border border-border p-3 text-xs">
+            <p className="font-medium text-foreground">{importResult.created} trailer{importResult.created === 1 ? "" : "s"} imported</p>
+            {importResult.errors.length > 0 && <ul className="mt-2 space-y-1 text-danger">{importResult.errors.map((e, i) => <li key={i}>Row {e.row}: {e.message}</li>)}</ul>}
+          </div>}
+          <Button type="submit" disabled={busy} className="w-full">{busy ? "Importing…" : "Import"}</Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   </Card>;
 }
 
@@ -137,9 +194,47 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
   const [importOpen, setImportOpen] = useState(false);
   const [importResult, setImportResult] = useState<{ created: number; errors: { row: number; message: string }[] } | null>(null);
   const [editing, setEditing] = useState<VehicleRow | null>(null);
+  const [managingAssignments, setManagingAssignments] = useState<VehicleRow | null>(null);
+  const [assignments, setAssignments] = useState<{ id: string; relationshipType: string; contractReference: string | null; status: string; transporterOrganisation: { name: string } }[]>([]);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
+
+  async function openAssignments(vehicle: VehicleRow) {
+    setManagingAssignments(vehicle);
+    const response = await fetch(`/api/vehicles/${vehicle.id}/assignments`);
+    const body = await response.json();
+    if (response.ok) setAssignments(body.data);
+  }
+
+  async function addAssignment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!managingAssignments) return;
+    const formEl = event.currentTarget;
+    const form = new FormData(formEl);
+    setBusy(true);
+    try {
+      const payload = { transporterOrganisationId: form.get("transporterOrganisationId"), relationshipType: form.get("relationshipType"), contractReference: form.get("contractReference") || null };
+      const response = await fetch(`/api/vehicles/${managingAssignments.id}/assignments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not create assignment");
+      setAssignments((current) => [body.data, ...current]);
+      toast({ title: "Subcontractor assignment created", body: body.data.transporterOrganisation.name });
+      formEl.reset();
+    } catch (error) { toast({ title: "Could not create assignment", body: String(error), severity: "HIGH" }); }
+    finally { setBusy(false); }
+  }
+
+  async function endAssignment(assignmentId: string) {
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/vehicle-transporter-assignments/${assignmentId}`, { method: "DELETE" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not end assignment");
+      setAssignments((current) => current.map((a) => a.id === assignmentId ? { ...a, status: "ENDED" } : a));
+    } catch (error) { toast({ title: "Could not end assignment", body: String(error), severity: "HIGH" }); }
+    finally { setBusy(false); }
+  }
 
   async function createVehicle(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -167,13 +262,18 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
     event.preventDefault();
     const file = fileRef.current?.files?.[0];
     if (!file) return;
+    const formEl = event.currentTarget;
+    const form = new FormData(formEl);
+    const orgId = form.get("organisationId")?.toString();
+
     setBusy(true);
     setImportResult(null);
     try {
-      const rows = parseCsv(await file.text()).map((row) => ({
-        organisationId: row.organisationId || undefined, plate: row.plate, make: row.make, model: row.model,
-        year: row.year ? Number(row.year) : undefined, vin: row.vin || undefined,
-        tareWeightKg: Number(row.tareWeightKg), legalMaxGvwKg: Number(row.legalMaxGvwKg), insuranceExpiry: row.insuranceExpiry,
+      const parsedRows = await parseFile(file);
+      const rows = parsedRows.map((row) => ({
+        organisationId: orgId || (row.organisationId ? String(row.organisationId) : undefined), plate: row.plate ? String(row.plate) : undefined, make: row.make ? String(row.make) : undefined, model: row.model ? String(row.model) : undefined,
+        year: row.year ? Number(row.year) : undefined, vin: row.vin ? String(row.vin) : undefined,
+        tareWeightKg: Number(row.tareWeightKg), legalMaxGvwKg: Number(row.legalMaxGvwKg), insuranceExpiry: row.insuranceExpiry ? String(row.insuranceExpiry) : undefined,
       }));
       const response = await fetch("/api/vehicles/bulk", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rows }) });
       const body = await response.json();
@@ -221,10 +321,10 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
   return <Card>
     <CardHeader className="flex-row items-center justify-between">
       <CardTitle>Vehicles</CardTitle>
-      <div className="flex gap-1.5">
+      {isAdmin && <div className="flex gap-1.5">
         <Button size="sm" variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}><Upload size={14} className="mr-1.5" />Import CSV</Button>
         <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={14} className="mr-1.5" />New vehicle</Button>
-      </div>
+      </div>}
     </CardHeader>
     <CardContent className="p-0">
       <Table>
@@ -237,8 +337,9 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
           <TableCell className="text-xs">{new Date(v.insuranceExpiry).toLocaleDateString("en-ZA")}</TableCell>
           <TableCell><Badge variant={v.status === "ACTIVE" ? "default" : v.status === "MAINTENANCE" ? "warning" : "destructive"}>{v.status}</Badge></TableCell>
           <TableCell><div className="flex gap-1.5">
-            <Button variant="ghost" size="sm" onClick={() => setEditing(v)} disabled={busy}><Pencil size={13} className="mr-1" />Edit</Button>
-            <Button variant="ghost" size="sm" onClick={() => deactivate(v)} disabled={busy || v.status === "SUSPENDED"}><TruckX size={13} className="mr-1" />Deactivate</Button>
+            {isAdmin && <Button variant="ghost" size="sm" onClick={() => setEditing(v)} disabled={busy}><Pencil size={13} className="mr-1" />Edit</Button>}
+            {isAdmin && <Button variant="ghost" size="sm" onClick={() => openAssignments(v)} disabled={busy}><Handshake size={13} className="mr-1" />Assignments</Button>}
+            {isAdmin && <Button variant="ghost" size="sm" onClick={() => deactivate(v)} disabled={busy || v.status === "SUSPENDED"}><TruckX size={13} className="mr-1" />Deactivate</Button>}
           </div></TableCell>
         </TableRow>) : <TableRow><TableCell colSpan={isAdmin ? 7 : 6} className="p-8 text-center text-sm text-muted-foreground">No vehicles registered yet</TableCell></TableRow>}</TableBody>
       </Table>
@@ -267,9 +368,10 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
       <DialogContent>
         <DialogHeader><DialogTitle>Import vehicles from CSV</DialogTitle></DialogHeader>
         <form onSubmit={importCsv} className="space-y-3">
-          <p className="text-xs text-muted-foreground">Columns: {isAdmin ? "organisationId, " : ""}plate, make, model, year, vin, tareWeightKg, legalMaxGvwKg, insuranceExpiry (YYYY-MM-DD).</p>
-          <Button type="button" variant="ghost" size="sm" onClick={() => downloadTemplate("vehicles-template.csv", [...(isAdmin ? ["organisationId"] : []), "plate", "make", "model", "year", "vin", "tareWeightKg", "legalMaxGvwKg", "insuranceExpiry"])}>Download CSV template</Button>
-          <Input ref={fileRef} type="file" accept=".csv,text/csv" required />
+          {isAdmin && <div className="space-y-1.5"><Label htmlFor="vi-org">Target Transporter</Label><select id="vi-org" name="organisationId" required className={selectClass()} defaultValue=""><option value="" disabled>Select transporter...</option>{organisations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>}
+          <p className="text-xs text-muted-foreground">Columns: plate, make, model, year, vin, tareWeightKg, legalMaxGvwKg, insuranceExpiry (YYYY-MM-DD).</p>
+          <Button type="button" variant="ghost" size="sm" onClick={() => downloadTemplate("vehicles-template.csv", ["plate", "make", "model", "year", "vin", "tareWeightKg", "legalMaxGvwKg", "insuranceExpiry"])}>Download CSV template</Button>
+          <Input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
           {importResult && <div className="rounded-sm border border-border p-3 text-xs">
             <p className="font-medium text-foreground">{importResult.created} vehicle{importResult.created === 1 ? "" : "s"} imported</p>
             {importResult.errors.length > 0 && <ul className="mt-2 space-y-1 text-danger">{importResult.errors.map((e, i) => <li key={i}>Row {e.row}: {e.message}</li>)}</ul>}
@@ -293,6 +395,31 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
           <div className="space-y-1.5"><Label htmlFor="ev-status">Status</Label><select id="ev-status" name="status" required className={selectClass()} defaultValue={editing.status}><option value="ACTIVE">ACTIVE</option><option value="SUSPENDED">SUSPENDED</option><option value="MAINTENANCE">MAINTENANCE</option><option value="EXPIRED_DOCUMENTS">EXPIRED_DOCUMENTS</option></select></div>
           <div className="md:col-span-2"><Button type="submit" disabled={busy} className="w-full">{busy ? "Saving…" : "Save changes"}</Button></div>
         </form>}
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={managingAssignments !== null} onOpenChange={(open) => { if (!open) setManagingAssignments(null); }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Subcontractor assignments — {managingAssignments?.plate}</DialogTitle></DialogHeader>
+        {managingAssignments && <div className="space-y-3">
+          <p className="text-2xs text-muted-foreground">Authorise another transporter to book this vehicle without transferring ownership. The same plate can legitimately have multiple active transporter relationships.</p>
+          <Table>
+            <TableHeader><TableRow><TableHead>Transporter</TableHead><TableHead>Relationship</TableHead><TableHead>Contract ref</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow></TableHeader>
+            <TableBody>{assignments.length ? assignments.map((a) => <TableRow key={a.id}>
+              <TableCell className="text-xs">{a.transporterOrganisation.name}</TableCell>
+              <TableCell className="text-xs">{a.relationshipType.replace(/_/g, " ")}</TableCell>
+              <TableCell className="text-xs">{a.contractReference ?? "—"}</TableCell>
+              <TableCell><Badge variant={a.status === "ACTIVE" ? "default" : "muted"}>{a.status}</Badge></TableCell>
+              <TableCell>{a.status === "ACTIVE" && <Button variant="ghost" size="sm" onClick={() => endAssignment(a.id)} disabled={busy}>End</Button>}</TableCell>
+            </TableRow>) : <TableRow><TableCell colSpan={5} className="p-4 text-center text-xs text-muted-foreground">No subcontractor assignments yet — this vehicle can only be booked by its owning organisation.</TableCell></TableRow>}</TableBody>
+          </Table>
+          <form onSubmit={addAssignment} className="grid grid-cols-3 gap-2 items-end border-t border-border pt-3">
+            <div className="space-y-1.5"><Label htmlFor="va-org">Transporter</Label><select id="va-org" name="transporterOrganisationId" required className={selectClass()} defaultValue="">{organisations.filter((o) => o.id !== managingAssignments.organisationId).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
+            <div className="space-y-1.5"><Label htmlFor="va-rel">Relationship</Label><select id="va-rel" name="relationshipType" className={selectClass()} defaultValue="SUBCONTRACTOR"><option value="SUBCONTRACTOR">Subcontractor</option><option value="PRIMARY_CONTRACTOR">Primary contractor</option><option value="TEMPORARY_ASSIGNMENT">Temporary assignment</option><option value="THIRD_PARTY_HAULIER">Third-party haulier</option></select></div>
+            <div className="space-y-1.5"><Label htmlFor="va-ref">Contract ref (optional)</Label><Input id="va-ref" name="contractReference" /></div>
+            <div className="col-span-3"><Button type="submit" disabled={busy} className="w-full">{busy ? "Saving…" : "Add assignment"}</Button></div>
+          </form>
+        </div>}
       </DialogContent>
     </Dialog>
   </Card>;
@@ -334,12 +461,17 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
     event.preventDefault();
     const file = fileRef.current?.files?.[0];
     if (!file) return;
+    const formEl = event.currentTarget;
+    const form = new FormData(formEl);
+    const orgId = form.get("organisationId")?.toString();
+
     setBusy(true);
     setImportResult(null);
     try {
-      const rows = parseCsv(await file.text()).map((row) => ({
-        organisationId: row.organisationId || undefined, firstName: row.firstName, lastName: row.lastName,
-        idNumber: row.idNumber, rfidTag: row.rfidTag, licenceNumber: row.licenceNumber, licenceExpiry: row.licenceExpiry, consent: true,
+      const parsedRows = await parseFile(file);
+      const rows = parsedRows.map((row) => ({
+        organisationId: orgId || (row.organisationId ? String(row.organisationId) : undefined), firstName: row.firstName ? String(row.firstName) : undefined, lastName: row.lastName ? String(row.lastName) : undefined,
+        idNumber: row.idNumber ? String(row.idNumber) : undefined, rfidTag: row.rfidTag ? String(row.rfidTag) : undefined, licenceNumber: row.licenceNumber ? String(row.licenceNumber) : undefined, licenceExpiry: row.licenceExpiry ? String(row.licenceExpiry) : undefined, consent: true,
       }));
       const response = await fetch("/api/drivers/bulk", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rows }) });
       const body = await response.json();
@@ -401,10 +533,10 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
   return <Card>
     <CardHeader className="flex-row items-center justify-between">
       <CardTitle>Drivers</CardTitle>
-      <div className="flex gap-1.5">
+      {isAdmin && <div className="flex gap-1.5">
         <Button size="sm" variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}><Upload size={14} className="mr-1.5" />Import CSV</Button>
         <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={14} className="mr-1.5" />New driver</Button>
-      </div>
+      </div>}
     </CardHeader>
     <CardContent className="p-0">
       <Table>
@@ -416,9 +548,9 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
           <TableCell><p className="font-mono text-xs">{d.licenceNumber}</p><p className="text-2xs text-muted-foreground">Expires {new Date(d.licenceExpiry).toLocaleDateString("en-ZA")}</p></TableCell>
           <TableCell>{d.blacklistStatus ? <Badge variant="destructive" title={d.blacklistReason ?? undefined}>BLACKLISTED</Badge> : new Date(d.licenceExpiry) < new Date() ? <Badge variant="destructive" title="This driver cannot be booked until their licence is renewed">LICENCE EXPIRED</Badge> : <Badge variant="default">ACTIVE</Badge>}</TableCell>
           <TableCell><div className="flex gap-1.5">
-            <Button variant="ghost" size="sm" onClick={() => setEditing(d)} disabled={busy}><Pencil size={13} className="mr-1" />Edit</Button>
+            {isAdmin && <Button variant="ghost" size="sm" onClick={() => setEditing(d)} disabled={busy}><Pencil size={13} className="mr-1" />Edit</Button>}
             {isAdmin && <Button variant="ghost" size="sm" onClick={() => toggleBlacklist(d)} disabled={busy}>{d.blacklistStatus ? <ShieldCheck size={13} className="mr-1" /> : <Ban size={13} className="mr-1" />}{d.blacklistStatus ? "Clear" : "Blacklist"}</Button>}
-            {!isAdmin && <Button variant="ghost" size="sm" onClick={() => deactivate(d)} disabled={busy}><Users size={13} className="mr-1" />Remove</Button>}
+            {isAdmin && <Button variant="ghost" size="sm" onClick={() => deactivate(d)} disabled={busy}><Users size={13} className="mr-1" />Remove</Button>}
           </div></TableCell>
         </TableRow>) : <TableRow><TableCell colSpan={isAdmin ? 6 : 5} className="p-8 text-center text-sm text-muted-foreground">No drivers registered yet</TableCell></TableRow>}</TableBody>
       </Table>
@@ -446,10 +578,11 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
       <DialogContent>
         <DialogHeader><DialogTitle>Import drivers from CSV</DialogTitle></DialogHeader>
         <form onSubmit={importCsv} className="space-y-3">
-          <p className="text-xs text-muted-foreground">Columns: {isAdmin ? "organisationId, " : ""}firstName, lastName, idNumber, rfidTag, licenceNumber, licenceExpiry (YYYY-MM-DD).</p>
+          {isAdmin && <div className="space-y-1.5"><Label htmlFor="di-org">Target Transporter</Label><select id="di-org" name="organisationId" required className={selectClass()} defaultValue=""><option value="" disabled>Select transporter...</option>{organisations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>}
+          <p className="text-xs text-muted-foreground">Columns: firstName, lastName, idNumber, rfidTag, licenceNumber, licenceExpiry (YYYY-MM-DD).</p>
           <p className="text-2xs text-muted-foreground">By importing you confirm each driver has consented to their ID and licence details being stored, per POPIA.</p>
-          <Button type="button" variant="ghost" size="sm" onClick={() => downloadTemplate("drivers-template.csv", [...(isAdmin ? ["organisationId"] : []), "firstName", "lastName", "idNumber", "rfidTag", "licenceNumber", "licenceExpiry"])}>Download CSV template</Button>
-          <Input ref={fileRef} type="file" accept=".csv,text/csv" required />
+          <Button type="button" variant="ghost" size="sm" onClick={() => downloadTemplate("drivers-template.csv", ["firstName", "lastName", "idNumber", "rfidTag", "licenceNumber", "licenceExpiry"])}>Download CSV template</Button>
+          <Input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
           {importResult && <div className="rounded-sm border border-border p-3 text-xs">
             <p className="font-medium text-foreground">{importResult.created} driver{importResult.created === 1 ? "" : "s"} imported</p>
             {importResult.errors.length > 0 && <ul className="mt-2 space-y-1 text-danger">{importResult.errors.map((e, i) => <li key={i}>Row {e.row}: {e.message}</li>)}</ul>}

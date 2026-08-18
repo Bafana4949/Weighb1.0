@@ -382,6 +382,19 @@ class SimulatorGui:
 
     def _poll_outputs(self) -> None:
         current = snapshot(self.state)
+        # Sync remote control changes back to the Tkinter UI variables
+        if self.weight_var.get() != current["weight_kg"]:
+            self.weight_var.set(current["weight_kg"])
+            self.weight_label.configure(text=f"{current['weight_kg']:,} kg")
+        if self.p1_var.get() != current["p1"]:
+            self.p1_var.set(current["p1"])
+        if self.p2_var.get() != current["p2"]:
+            self.p2_var.set(current["p2"])
+        if self.rfid_var.get() != current["rfid"]:
+            self.rfid_var.set(current["rfid"])
+        if self.status_var.get() != current["scale_status"]:
+            self.status_var.set(current["scale_status"])
+            
         outputs = current["outputs"]
         self.output_text.set(
             f"ENTRY GATE : {outputs['entry_gate']}\n"

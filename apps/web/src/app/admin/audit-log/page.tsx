@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/app-shell";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ export default async function AuditLog({ searchParams }: { searchParams: Promise
     prisma.systemLog.count({ where }),
   ]);
 
-  return <AppShell role={s.user.role} userName={s.user.name ?? "Admin"} orgName={s.user.organisationName}>
+  return <AppShell role={s.user.role} userName={s.user.name ?? "Admin"} orgName={s.user.organisationName} isSuperAdmin={isPlatformSuperAdmin(s.user)}>
     <div className="space-y-4">
       <div><h1 className="text-2xl font-semibold text-foreground">Audit log</h1><p className="text-xs text-muted-foreground">Every create, update, approve and reject action across the whole platform.</p></div>
       <form className="flex flex-wrap items-end gap-2" method="get">

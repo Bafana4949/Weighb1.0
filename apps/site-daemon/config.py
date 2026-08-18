@@ -13,6 +13,30 @@ class SiteConfig(BaseModel):
     name: str
     timezone: str = "Africa/Johannesburg"
     operating_hours: dict[str, str]
+    # Mirrors the web app's Site.topology (BIDIRECTIONAL_SINGLE | DUAL_ENTRY_EXIT).
+    # Not live-synced from the cloud — like the rest of this file, kept in step
+    # with the web-side Site record by whoever edits the YAML. When this is
+    # DUAL_ENTRY_EXIT, `lanes` below must list two LaneConfig entries; the
+    # daemon then runs one independent WeighingStateMachine per lane, each
+    # with its own hardware transport connection.
+    topology: str = "BIDIRECTIONAL_SINGLE"
+
+
+class LaneConfig(BaseModel):
+    # Stable string used in HTTP query params / MQTT payloads to address this
+    # lane (e.g. "north", "south"). Independent of the cloud database.
+    id: str
+    # Matches the web app's Lane.laneNumber for the same physical deck, so
+    # cloud-side reconciliation can attribute a transaction to the right Lane
+    # row. Not a foreign key here — the daemon never talks to Postgres directly.
+    lane_number: int
+    mode: str = "tcp"
+    tcp_host: str = "127.0.0.1"
+    tcp_port: int = 7001
+    serial_port: str | None = None
+    serial_baud_rate: int = 115200
+    # Optional per-lane camera override; falls back to anpr.camera_source when unset.
+    camera_source: str | int | None = None
 
 
 class WeighbridgeConfig(BaseModel):
@@ -91,6 +115,10 @@ class AppConfig(BaseModel):
     cloud: CloudConfig
     storage: StorageConfig
     notifications: NotificationConfig
+    # Only populated for topology: DUAL_ENTRY_EXIT. Empty (the default) means
+    # the daemon runs a single lane built from `transport` above, exactly as
+    # it always has for BIDIRECTIONAL_SINGLE sites.
+    lanes: list[LaneConfig] = Field(default_factory=list)
 
 
 def load_config(path: str | None = None) -> AppConfig:

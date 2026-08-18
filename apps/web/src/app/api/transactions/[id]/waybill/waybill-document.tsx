@@ -3,7 +3,9 @@ import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/render
 import { formatKg } from "@/lib/utils";
 
 const styles = StyleSheet.create({
-  page: { padding: 28, fontSize: 9, fontFamily: "Helvetica", color: "#111" },
+  page: { padding: 28, fontSize: 9, fontFamily: "Helvetica", color: "#111", position: "relative" },
+  watermarkContainer: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "center", alignItems: "center", zIndex: -1 },
+  watermarkImage: { width: 350, opacity: 0.06 },
   header: { flexDirection: "row", justifyContent: "space-between", borderBottomWidth: 2, borderBottomColor: "#111", paddingBottom: 10 },
   siteName: { fontSize: 15, fontFamily: "Helvetica-Bold" },
   orgLine: { fontSize: 8, color: "#333", marginTop: 1 },
@@ -24,6 +26,7 @@ const styles = StyleSheet.create({
   signatureLabel: { fontSize: 8, color: "#555" },
   signatureName: { fontSize: 10, fontFamily: "Helvetica-Bold", marginTop: 2 },
   signatureLine: { borderTopWidth: 1, borderTopColor: "#111", marginTop: 22, paddingTop: 3, fontSize: 8, color: "#555" },
+  copyLabel: { fontSize: 9, fontFamily: "Helvetica-Bold", letterSpacing: 1, textAlign: "center", backgroundColor: "#111", color: "#fff", paddingVertical: 4, marginBottom: 8 },
   footer: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginTop: 20, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#ccc" },
   footerText: { fontSize: 7, color: "#666" },
   hash: { fontSize: 6, fontFamily: "Courier", color: "#888", marginTop: 2 },
@@ -32,6 +35,7 @@ const styles = StyleSheet.create({
 export interface WaybillDocumentProps {
   waybillNumber: string;
   transactionType: "DISPATCH" | "RECEIPT" | null;
+  copyLabel: string;
   siteName: string;
   siteAddress: string;
   organisationName: string;
@@ -59,6 +63,7 @@ export interface WaybillDocumentProps {
   overloadVarianceKg: number;
   integrityHash: string;
   qrDataUrl: string;
+  logoDataUrl?: string;
 }
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -73,6 +78,12 @@ export function WaybillDocument(props: WaybillDocumentProps) {
   return (
     <Document>
       <Page size="A4" style={styles.page}>
+        {props.logoDataUrl && (
+          <View style={styles.watermarkContainer} fixed>
+            <Image src={props.logoDataUrl} style={styles.watermarkImage} />
+          </View>
+        )}
+        <Text style={styles.copyLabel}>{props.copyLabel}</Text>
         <View style={styles.header}>
           <View>
             <Text style={styles.siteName}>{props.siteName}</Text>

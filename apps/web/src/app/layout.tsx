@@ -10,7 +10,7 @@ const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], 
 // never flashes the light theme on load.
 const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("theme");var d=t?t==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d);}catch(e){}})();`;
 
-export const metadata: Metadata = { title: "Weighbridge Control", description: "Mining weighbridge and site access automation" };
+export const metadata: Metadata = { title: "Weighbridge Control (v1)", description: "Mining weighbridge and site access automation" };
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return <html lang="en" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} /></head><body className={`${sans.variable} ${mono.variable} font-sans`} suppressHydrationWarning><Providers>{children}</Providers></body></html>;
 }

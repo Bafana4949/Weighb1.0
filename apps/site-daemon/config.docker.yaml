@@ -22,7 +22,7 @@ anpr:
   rapid_capture_count: 5
 transport:
   mode: "tcp"
-  tcp_host: "hardware-simulator"
+  tcp_host: "host.docker.internal"
   tcp_port: 7001
 serial:
   port: "/dev/ttyUSB0"
@@ -38,8 +38,8 @@ mqtt:
   password: null
   memory_buffer_limit: 1000
 cloud:
-  api_url: "http://web:3000/api"
-  site_api_key: "dev-site-key-change-me"
+  api_url: "http://host.docker.internal:3010/api"
+  site_api_key: "3f1fddae9eaa2ce74b118a22b041a70732f1700c6c86430126e380e6189db50d"
   sync_interval_seconds: 30
   max_offline_hours: 72
   request_timeout_seconds: 8

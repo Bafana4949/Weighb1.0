@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { mineScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -36,7 +37,7 @@ export default async function Billing({ searchParams }: { searchParams: Promise<
 
   const exportQuery = `from=${from.toISOString()}&to=${to.toISOString()}`;
 
-  return <AppShell role={s.user.role} userName={s.user.name ?? "Admin"}>
+  return <AppShell role={s.user.role} userName={s.user.name ?? "Admin"} isSuperAdmin={isPlatformSuperAdmin(s.user)}>
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>

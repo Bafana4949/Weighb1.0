@@ -7,6 +7,11 @@ COPY apps/web/package.json apps/web/package.json
 COPY packages/database/package.json packages/database/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/mqtt-topics/package.json packages/mqtt-topics/package.json
+# @weighbridge/database's postinstall hook runs `node prisma-runner.js generate`
+# during `npm ci` below — it needs the runner script and the schema it points
+# at present before that happens, not just the package.json files.
+COPY packages/database/prisma-runner.js packages/database/prisma-runner.js
+COPY packages/database/schema.prisma packages/database/schema.prisma
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --fund=false --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 

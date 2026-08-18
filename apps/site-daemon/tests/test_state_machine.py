@@ -12,8 +12,8 @@ class FakeMqtt:
     def __init__(self) -> None:
         self.messages = []
 
-    def publish(self, suffix, payload, qos=0, retain=False) -> None:
-        self.messages.append((suffix, payload, qos, retain))
+    def publish(self, suffix, payload, qos=0, retain=False, lane_number=None) -> None:
+        self.messages.append((suffix, payload, qos, retain, lane_number))
 
 
 def make_config(tmp_path) -> AppConfig:
@@ -70,8 +70,14 @@ async def test_happy_path_state_transitions(tmp_path) -> None:
     assert machine.state == WeighingState.STABILISING
     for index in range(5):
         await machine.process(frame(now + timedelta(seconds=0.4 + index * 0.1), weight=52000 + (index % 2) * 10, p1=True, p2=True))
+    # A weight within every configured limit stops at AWAITING_DRIVER_DECISION
+    # (the driver load-check kiosk step) rather than completing automatically —
+    # the daemon holds the exit gate closed until the driver accepts the load.
+    assert machine.state == WeighingState.AWAITING_DRIVER_DECISION
+    assert machine.pending_gross_weight_kg == 52000
+    transaction = await machine.accept_load()
     assert machine.state == WeighingState.COMPLETE
-    assert machine.last_transaction is not None
+    assert machine.last_transaction is transaction
     assert machine.last_transaction.net_weight_kg == 34000
     assert not alerts
     assert any(b"GATE_OPEN;TGT:EXIT" in command for command in commands)

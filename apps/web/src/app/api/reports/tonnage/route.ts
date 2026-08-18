@@ -1,5 +1,5 @@
 import { UserRole } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import { ok,requireRole } from "@/lib/api";
-import { dateRange } from "@/lib/reports";
-export async function GET(request:Request){const a=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN]);if(a.error)return a.error;const url=new URL(request.url);const range=dateRange(url.searchParams);const group=url.searchParams.get("group")??"commodity";const rows=await prisma.weighbridgeTransaction.findMany({where:{capturedAt:range,...(a.session!.user.role==="TRANSPORTER"?{booking:{transporterOrganisationId:a.session!.user.organisationId!}}:{})},include:{vehicle:true,site:true}});const totals=new Map<string,{group:string,net_weight_kg:number,transactions:number}>();for(const row of rows){const key=group==="vehicle"?row.vehicle.plate:group==="site"?row.site.code:row.commodity;const current=totals.get(key)??{group:key,net_weight_kg:0,transactions:0};current.net_weight_kg+=row.netWeightKg;current.transactions++;totals.set(key,current)}return ok([...totals.values()].sort((a,b)=>b.net_weight_kg-a.net_weight_kg))}
+import { mineScope } from "@/lib/access";
+import { dateRange,tonnageByGroup } from "@/lib/reports";
+export async function GET(request:Request){const a=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN]);if(a.error)return a.error;const url=new URL(request.url);const range=dateRange(url.searchParams);const group=url.searchParams.get("group")??"commodity";const isTransporter=a.session!.user.role==="TRANSPORTER";const {rows}=await tonnageByGroup(range,group,isTransporter?{}:mineScope(a.session!.user.organisationId),isTransporter?{booking:{transporterOrganisationId:a.session!.user.organisationId!}}:{});return ok(rows)}

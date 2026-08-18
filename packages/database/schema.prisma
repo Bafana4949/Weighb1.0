@@ -7,10 +7,196 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Permission {
+  id              String   @id @default(uuid()) @db.Uuid
+  key             String   @unique
+  description     String
+  category        String
+  createdAt       DateTime @default(now()) @map("created_at")
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model Role {
+  id             String   @id @default(uuid()) @db.Uuid
+  organisationId String?  @db.Uuid @map("organisation_id")
+  name           String
+  isBuiltIn      Boolean  @default(false) @map("is_built_in")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  organisation   Organisation? @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  permissions    RolePermission[]
+  assignments    UserRoleAssignment[]
+
+  @@unique([organisationId, name])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       String     @db.Uuid @map("role_id")
+  permissionId String     @db.Uuid @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRoleAssignment {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid @map("user_id")
+  roleId    String   @db.Uuid @map("role_id")
+  siteId    String?  @db.Uuid @map("site_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  site      Site?    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, siteId])
+  @@map("user_role_assignments")
+}
+
+model UserSiteAccess {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid @map("user_id")
+  siteId    String   @db.Uuid @map("site_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, siteId])
+  @@map("user_site_access")
+}
+
 enum OrganisationType {
   MINING_COMPANY
   HAULIER
   SERVICE_PROVIDER
+}
+
+enum ClientOrganisationStatus {
+  PENDING_SETUP
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum PlatformRole {
+  PLATFORM_SUPER_ADMIN
+  PLATFORM_SUPPORT
+}
+
+enum WeighbridgeTopology {
+  BIDIRECTIONAL_SINGLE
+  DUAL_ENTRY_EXIT
+}
+
+enum ServiceOrderCategory {
+  HARDWARE
+  SOFTWARE
+  NETWORK
+  ANPR
+  SCALE
+  GATE
+  PRINTER
+  REPORTING
+  USER_ACCESS
+  CALIBRATION
+  TRAINING
+  OTHER
+}
+
+enum ServiceOrderPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ServiceOrderStatus {
+  OPEN
+  ACKNOWLEDGED
+  IN_PROGRESS
+  WAITING_FOR_CLIENT
+  RESOLVED
+  CLOSED
+  CANCELLED
+}
+
+enum ServiceOrderSource {
+  PLATFORM_ADMIN
+  CLIENT_USER
+  AUTOMATED_ALERT
+}
+
+model ServiceOrder {
+  id              String               @id @default(uuid()) @db.Uuid
+  orderNumber     String               @unique @map("order_number")
+  organisationId  String               @db.Uuid @map("organisation_id")
+  siteId          String?              @db.Uuid @map("site_id")
+  title           String
+  description     String
+  category        ServiceOrderCategory
+  priority        ServiceOrderPriority @default(MEDIUM)
+  status          ServiceOrderStatus   @default(OPEN)
+  source          ServiceOrderSource
+  createdById     String               @db.Uuid @map("created_by_id")
+  assignedToId    String?              @db.Uuid @map("assigned_to_id")
+  contactName     String?              @map("contact_name")
+  contactPhone    String?              @map("contact_phone")
+  contactEmail    String?              @map("contact_email")
+  deviceId        String?              @db.Uuid @map("device_id")
+  transactionId   String?              @db.Uuid @map("transaction_id")
+  incidentId      String?              @db.Uuid @map("incident_id")
+  dueAt           DateTime?            @map("due_at")
+  acknowledgedAt  DateTime?            @map("acknowledged_at")
+  startedAt       DateTime?            @map("started_at")
+  resolvedAt      DateTime?            @map("resolved_at")
+  closedAt        DateTime?            @map("closed_at")
+  resolutionNotes String?              @map("resolution_notes")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  organisation    Organisation         @relation(fields: [organisationId], references: [id])
+  site            Site?                @relation(fields: [siteId], references: [id])
+  createdBy       User                 @relation("ServiceOrderCreator", fields: [createdById], references: [id])
+  assignedTo      User?                @relation("ServiceOrderAssignee", fields: [assignedToId], references: [id])
+  comments        ServiceOrderComment[]
+  attachments     ServiceOrderAttachment[]
+
+  @@index([organisationId, status, createdAt])
+  @@index([assignedToId, status])
+  @@map("service_orders")
+}
+
+model ServiceOrderComment {
+  id             String       @id @default(uuid()) @db.Uuid
+  serviceOrderId String       @db.Uuid @map("service_order_id")
+  authorId       String       @db.Uuid @map("author_id")
+  body           String
+  isInternal     Boolean      @default(false) @map("is_internal")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  author         User         @relation(fields: [authorId], references: [id])
+
+  @@index([serviceOrderId, createdAt])
+  @@map("service_order_comments")
+}
+
+model ServiceOrderAttachment {
+  id             String       @id @default(uuid()) @db.Uuid
+  serviceOrderId String       @db.Uuid @map("service_order_id")
+  uploadedById   String       @db.Uuid @map("uploaded_by_id")
+  fileName       String       @map("file_name")
+  contentType    String       @map("content_type")
+  sizeBytes      Int          @map("size_bytes")
+  storageKey     String       @map("storage_key")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  uploadedBy     User         @relation(fields: [uploadedById], references: [id])
+
+  @@index([serviceOrderId, createdAt])
+  @@map("service_order_attachments")
 }
 
 enum SiteType {
@@ -68,6 +254,18 @@ enum TransactionStatus {
   HELD
   VOIDED
   MANUAL_REVIEW
+}
+
+enum TransactionType {
+  INBOUND
+  OUTBOUND
+  DELIVERY
+  COLLECTION
+  FIRST_WEIGH
+  SECOND_WEIGH
+  GROSS_ONLY
+  TARE_ONLY
+  INTERNAL_TRANSFER
 }
 
 enum SyncStatus {
@@ -134,6 +332,7 @@ enum HardwareDeviceType {
   TRAFFIC_LIGHT
   BUZZER
   EDGE_DAEMON
+  PRINTER
 }
 
 enum HardwareHealth {
@@ -166,22 +365,63 @@ enum NotificationStatus {
 model Organisation {
   id              String             @id @default(uuid()) @db.Uuid
   name            String
+  code            String?            @unique
   registrationNo  String?            @unique @map("registration_no")
   type            OrganisationType
   contactEmail    String?            @map("contact_email")
   contactPhone    String?            @map("contact_phone")
   isActive        Boolean            @default(true) @map("is_active")
+  status          ClientOrganisationStatus @default(ACTIVE) @map("status")
+  suspendedAt     DateTime?          @map("suspended_at")
+  suspensionReason String?           @map("suspension_reason")
+  legalName       String?            @map("legal_name")
+  tradingName     String?            @map("trading_name")
+  taxNumber       String?            @unique @map("tax_number")
+  physicalAddress String?            @map("physical_address")
+  postalAddress   String?            @map("postal_address")
+  logoUrl         String?            @map("logo_url")
+  timezone        String?            @default("Africa/Johannesburg")
+  defaultCurrency String?            @default("ZAR") @map("default_currency")
+  onboardedAt     DateTime?          @map("onboarded_at")
+  onboardedById   String?            @db.Uuid @map("onboarded_by_id")
   createdAt       DateTime           @default(now()) @map("created_at")
   updatedAt       DateTime           @updatedAt @map("updated_at")
   deletedAt       DateTime?          @map("deleted_at")
-  users           User[]
+  users           User[]             @relation("OrganisationUsers")
+  onboardedBy     User?              @relation("OrganisationOnboardedBy", fields: [onboardedById], references: [id])
   vehicles        Vehicle[]
   drivers         Driver[]
   sites           Site[]             @relation("SiteOwner")
   transporterBookings Booking[]      @relation("TransporterOrganisation")
+  serviceOrders   ServiceOrder[]
+  vehicleAssignments VehicleTransporterAssignment[]
+  roles           Role[]
+  sources         Source[]
+  destinations    Destination[]
+  products        Product[]
+  rfidCredentials RfidCredential[]
+  weighbridgeInstallations WeighbridgeInstallation[]
+  fleetRosters    FleetRoster[]
+
+  miningCompanyTransporters   MiningCompanyTransporter[] @relation("MiningCompanyPartners")
+  clientMiningCompanies       MiningCompanyTransporter[] @relation("TransporterClients")
 
   @@index([type, isActive])
   @@map("organisations")
+}
+
+model MiningCompanyTransporter {
+  id              String       @id @default(uuid()) @db.Uuid
+  miningCompanyId String       @db.Uuid @map("mining_company_id")
+  transporterId   String       @db.Uuid @map("transporter_id")
+  status          String       @default("ACTIVE")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  miningCompany   Organisation @relation("MiningCompanyPartners", fields: [miningCompanyId], references: [id], onDelete: Cascade)
+  transporter     Organisation @relation("TransporterClients", fields: [transporterId], references: [id], onDelete: Cascade)
+
+  @@unique([miningCompanyId, transporterId])
+  @@map("mining_company_transporters")
 }
 
 model Site {
@@ -195,6 +435,7 @@ model Site {
   longitude             Decimal              @db.Decimal(10, 7)
   timezone              String               @default("Africa/Johannesburg")
   geofenceRadiusM       Int                  @default(500) @map("geofence_radius_m")
+  topology              WeighbridgeTopology  @default(BIDIRECTIONAL_SINGLE)
   isActive              Boolean              @default(true) @map("is_active")
   createdAt             DateTime             @default(now()) @map("created_at")
   updatedAt             DateTime             @updatedAt @map("updated_at")
@@ -212,9 +453,32 @@ model Site {
   weighbridgeOrders     WeighbridgeOrder[]   @relation("OrderWeighbridge")
   originOrders          WeighbridgeOrder[]   @relation("OrderOrigin")
   destinationOrders     WeighbridgeOrder[]   @relation("OrderDestination")
+  lanes                 Lane[]
+  serviceOrders         ServiceOrder[]
+  userRoleAssignments   UserRoleAssignment[]
+  userSiteAccess        UserSiteAccess[]
+  weighbridgeInstallation WeighbridgeInstallation?
+  rfidCredentials       RfidCredential[]
 
   @@index([organisationId, isActive])
   @@map("sites")
+}
+
+model Lane {
+  id         String         @id @default(uuid()) @db.Uuid
+  siteId     String         @db.Uuid @map("site_id")
+  laneNumber Int            @map("lane_number")
+  name       String
+  direction  GateDirection?
+  isActive   Boolean        @default(true) @map("is_active")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+  site       Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  hardwareDevices HardwareDevice[]
+  transactions WeighbridgeTransaction[]
+
+  @@unique([siteId, laneNumber])
+  @@map("lanes")
 }
 
 model SiteConfig {
@@ -251,12 +515,14 @@ model User {
   lastName       String      @map("last_name")
   phone          String?
   role           UserRole
+  platformRole   PlatformRole? @map("platform_role")
   status         UserStatus  @default(ACTIVE)
   lastLoginAt    DateTime?   @map("last_login_at")
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
   deletedAt      DateTime?   @map("deleted_at")
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  organisation   Organisation? @relation("OrganisationUsers", fields: [organisationId], references: [id])
+  onboardedOrganisations Organisation[] @relation("OrganisationOnboardedBy")
   createdBookings Booking[]  @relation("BookingCreator")
   approvedBookings Booking[] @relation("BookingApprover")
   operatedTransactions WeighbridgeTransaction[] @relation("TransactionOperator")
@@ -265,8 +531,20 @@ model User {
   notifications   Notification[]
   createdOrders   WeighbridgeOrder[]
   passwordResetTokens PasswordResetToken[]
+  createdServiceOrders ServiceOrder[] @relation("ServiceOrderCreator")
+  assignedServiceOrders ServiceOrder[] @relation("ServiceOrderAssignee")
+  serviceOrderComments ServiceOrderComment[]
+  serviceOrderAttachments ServiceOrderAttachment[]
+  createdVehicleAssignments VehicleTransporterAssignment[]
+  roleAssignments UserRoleAssignment[]
+  siteAccess      UserSiteAccess[]
+  createdSources  Source[]             @relation("SourceCreator")
+  createdDestinations Destination[]    @relation("DestinationCreator")
+  createdProducts Product[]            @relation("ProductCreator")
+  createdRfids    RfidCredential[]     @relation("RfidCreator")
 
   @@index([organisationId, role, status])
+  @@index([platformRole])
   @@map("users")
 }
 
@@ -307,11 +585,49 @@ model Vehicle {
   transactions      WeighbridgeTransaction[]
   incidents         Incident[]
   gateEvents        GateEvent[]
+  transporterAssignments VehicleTransporterAssignment[]
+  rfidCredentials   RfidCredential[]
+  fleetRosters      FleetRoster[]
 
   @@unique([organisationId, plateNormalized])
   @@index([plateNormalized, status])
   @@index([insuranceExpiry])
   @@map("vehicles")
+}
+
+enum VehicleAssignmentRelationship {
+  OWNER
+  PRIMARY_CONTRACTOR
+  SUBCONTRACTOR
+  TEMPORARY_ASSIGNMENT
+  THIRD_PARTY_HAULIER
+}
+
+enum VehicleAssignmentStatus {
+  ACTIVE
+  ENDED
+}
+
+model VehicleTransporterAssignment {
+  id                        String                        @id @default(uuid()) @db.Uuid
+  vehicleId                 String                        @db.Uuid @map("vehicle_id")
+  transporterOrganisationId String                        @db.Uuid @map("transporter_organisation_id")
+  relationshipType           VehicleAssignmentRelationship @default(SUBCONTRACTOR) @map("relationship_type")
+  contractReference          String?                       @map("contract_reference")
+  notes                      String?
+  status                     VehicleAssignmentStatus       @default(ACTIVE)
+  validFrom                  DateTime                      @default(now()) @map("valid_from") @db.Date
+  validTo                    DateTime?                     @map("valid_to") @db.Date
+  createdById                String                        @db.Uuid @map("created_by_id")
+  createdAt                  DateTime                      @default(now()) @map("created_at")
+  updatedAt                  DateTime                      @updatedAt @map("updated_at")
+  vehicle                    Vehicle                       @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  transporterOrganisation    Organisation                  @relation(fields: [transporterOrganisationId], references: [id])
+  createdBy                  User                          @relation(fields: [createdById], references: [id])
+
+  @@index([vehicleId, status])
+  @@index([transporterOrganisationId, status])
+  @@map("vehicle_transporter_assignments")
 }
 
 model Trailer {
@@ -327,6 +643,8 @@ model Trailer {
   bookings        Booking[]
   transactions    WeighbridgeTransaction[]
   bookingTrailers BookingTrailer[]
+  rostersAsTrailer1 FleetRoster[] @relation("Trailer1Roster")
+  rostersAsTrailer2 FleetRoster[] @relation("Trailer2Roster")
 
   @@index([vehicleId])
   @@map("trailers")
@@ -367,6 +685,8 @@ model Driver {
   bookings           Booking[]
   transactions       WeighbridgeTransaction[]
   incidents          Incident[]
+  rfidCredentials    RfidCredential[]
+  fleetRosters       FleetRoster[]
 
   @@index([organisationId, blacklistStatus])
   @@index([licenceExpiry])
@@ -439,6 +759,12 @@ model WeighbridgeOrder {
   site                     Site        @relation("OrderWeighbridge", fields: [siteId], references: [id])
   originSite               Site?       @relation("OrderOrigin", fields: [originSiteId], references: [id])
   destinationSite          Site?       @relation("OrderDestination", fields: [destinationSiteId], references: [id])
+  sourceId                 String?     @db.Uuid @map("source_id")
+  destinationId            String?     @db.Uuid @map("destination_id")
+  productId                String?     @db.Uuid @map("product_id")
+  source                   Source?     @relation("OrderSource", fields: [sourceId], references: [id])
+  destination              Destination? @relation("OrderDestination2", fields: [destinationId], references: [id])
+  productRef               Product?    @relation("OrderProduct", fields: [productId], references: [id])
   createdBy                User        @relation(fields: [createdById], references: [id])
   bookings                 Booking[]
 
@@ -454,6 +780,7 @@ model WeighbridgeTransaction {
   trailerId           String?           @db.Uuid @map("trailer_id")
   driverId            String            @db.Uuid @map("driver_id")
   siteId              String            @db.Uuid @map("site_id")
+  laneId              String?           @db.Uuid @map("lane_id")
   operatorId          String?           @db.Uuid @map("operator_id")
   grossWeightKg       Int               @map("gross_weight_kg")
   tareWeightKg        Int               @map("tare_weight_kg")
@@ -471,12 +798,20 @@ model WeighbridgeTransaction {
   confirmationHash    String?           @unique @map("confirmation_hash")
   previousHash        String            @map("previous_hash")
   integrityHash       String            @unique @map("integrity_hash")
+  transactionType     TransactionType?  @map("transaction_type")
   syncStatus          SyncStatus        @default(SYNCED) @map("sync_status")
   status              TransactionStatus @default(COMPLETED)
   entryAt             DateTime?         @map("entry_at")
+  grossCapturedAt     DateTime?         @map("gross_captured_at")
+  tareCapturedAt      DateTime?         @map("tare_captured_at")
+  mineTicketNumber    String?           @map("mine_ticket_number")
+  mineTicketMass      Int?              @map("mine_ticket_mass")
   capturedAt          DateTime           @map("captured_at")
   exitAt              DateTime?          @map("exit_at")
   turnaroundSeconds   Int?               @map("turnaround_seconds")
+  printedAt           DateTime?          @map("printed_at")
+  printCount          Int                @default(0) @map("print_count")
+  lastPrintedById     String?            @db.Uuid @map("last_printed_by_id")
   createdAt           DateTime           @default(now()) @map("created_at")
   updatedAt           DateTime           @updatedAt @map("updated_at")
   booking             Booking            @relation(fields: [bookingId], references: [id])
@@ -484,6 +819,7 @@ model WeighbridgeTransaction {
   trailer             Trailer?           @relation(fields: [trailerId], references: [id])
   driver              Driver             @relation(fields: [driverId], references: [id])
   site                Site               @relation(fields: [siteId], references: [id])
+  lane                Lane?              @relation(fields: [laneId], references: [id])
   operator            User?              @relation("TransactionOperator", fields: [operatorId], references: [id])
   incidents           Incident[]
   gateEvents          GateEvent[]
@@ -575,6 +911,7 @@ model SystemLog {
 model HardwareDevice {
   id                     String             @id @default(uuid()) @db.Uuid
   siteId                 String             @db.Uuid @map("site_id")
+  laneId                 String?            @db.Uuid @map("lane_id")
   deviceKey              String             @map("device_key")
   name                   String
   type                   HardwareDeviceType
@@ -587,6 +924,7 @@ model HardwareDevice {
   createdAt              DateTime           @default(now()) @map("created_at")
   updatedAt              DateTime           @updatedAt @map("updated_at")
   site                   Site               @relation(fields: [siteId], references: [id])
+  lane                   Lane?              @relation(fields: [laneId], references: [id])
   statuses               HardwareStatus[]
   calibrationCertificates CalibrationCertificate[]
 
@@ -669,4 +1007,172 @@ model Notification {
 
   @@index([userId, status, createdAt])
   @@map("notifications")
+}
+
+model Source {
+  id              String       @id @default(uuid()) @db.Uuid
+  organisationId  String       @db.Uuid @map("organisation_id")
+  name            String
+  code            String?
+  description     String?
+  address         String?
+  contactPerson   String?      @map("contact_person")
+  contactPhone    String?      @map("contact_phone")
+  latitude        Decimal?     @db.Decimal(10, 7)
+  longitude       Decimal?     @db.Decimal(10, 7)
+  isActive        Boolean      @default(true) @map("is_active")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  createdByUserId String       @db.Uuid @map("created_by_user_id")
+
+  organisation    Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  createdBy       User         @relation("SourceCreator", fields: [createdByUserId], references: [id])
+  orders          WeighbridgeOrder[] @relation("OrderSource")
+
+  @@unique([organisationId, code])
+  @@map("sources")
+}
+
+model Destination {
+  id              String       @id @default(uuid()) @db.Uuid
+  organisationId  String       @db.Uuid @map("organisation_id")
+  name            String
+  code            String?
+  description     String?
+  address         String?
+  contactPerson   String?      @map("contact_person")
+  contactPhone    String?      @map("contact_phone")
+  latitude        Decimal?     @db.Decimal(10, 7)
+  longitude       Decimal?     @db.Decimal(10, 7)
+  isActive        Boolean      @default(true) @map("is_active")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  createdByUserId String       @db.Uuid @map("created_by_user_id")
+
+  organisation    Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  createdBy       User         @relation("DestinationCreator", fields: [createdByUserId], references: [id])
+  orders          WeighbridgeOrder[] @relation("OrderDestination2")
+
+  @@unique([organisationId, code])
+  @@map("destinations")
+}
+
+model Product {
+  id                  String       @id @default(uuid()) @db.Uuid
+  organisationId      String       @db.Uuid @map("organisation_id")
+  name                String
+  code                String?
+  description         String?
+  category            String?
+  unitOfMeasure       String?      @default("TONNE") @map("unit_of_measure")
+  minimumAllowedWeight Int?        @map("minimum_allowed_weight")
+  maximumAllowedWeight Int?        @map("maximum_allowed_weight")
+  isActive            Boolean      @default(true) @map("is_active")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  createdByUserId     String       @db.Uuid @map("created_by_user_id")
+
+  organisation        Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  createdBy           User         @relation("ProductCreator", fields: [createdByUserId], references: [id])
+  orders              WeighbridgeOrder[] @relation("OrderProduct")
+
+  @@unique([organisationId, code])
+  @@map("products")
+}
+
+enum RfidCredentialType {
+  DRIVER
+  TRUCK
+}
+
+enum RfidCredentialStatus {
+  ACTIVE
+  INACTIVE
+  LOST
+  STOLEN
+  EXPIRED
+  REPLACED
+  BLOCKED
+}
+
+model RfidCredential {
+  id                String               @id @default(uuid()) @db.Uuid
+  uid               String               @unique
+  displayCode       String?              @map("display_code")
+  credentialType    RfidCredentialType   @map("credential_type")
+  organisationId    String               @db.Uuid @map("organisation_id")
+  siteId            String?              @db.Uuid @map("site_id")
+  driverId          String?              @db.Uuid @map("driver_id")
+  vehicleId         String?              @db.Uuid @map("vehicle_id")
+  status            RfidCredentialStatus @default(ACTIVE)
+  issuedAt          DateTime             @default(now()) @map("issued_at")
+  expiresAt         DateTime?            @map("expires_at")
+  activatedAt       DateTime?            @map("activated_at")
+  deactivatedAt     DateTime?            @map("deactivated_at")
+  replacedById      String?              @db.Uuid @map("replaced_by_id")
+  replacementReason String?              @map("replacement_reason")
+  notes             String?
+  createdById       String               @db.Uuid @map("created_by_id")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  organisation      Organisation         @relation(fields: [organisationId], references: [id])
+  site              Site?                @relation(fields: [siteId], references: [id])
+  driver            Driver?              @relation(fields: [driverId], references: [id])
+  vehicle           Vehicle?             @relation(fields: [vehicleId], references: [id])
+  createdBy         User                 @relation("RfidCreator", fields: [createdById], references: [id])
+  replacedBy        RfidCredential?      @relation("RfidReplacement", fields: [replacedById], references: [id])
+  replacements      RfidCredential[]     @relation("RfidReplacement")
+
+  @@index([uid, status])
+  @@index([organisationId, credentialType])
+  @@map("rfid_credentials")
+}
+
+model WeighbridgeInstallation {
+  id                String               @id @default(uuid()) @db.Uuid
+  siteId            String               @unique @db.Uuid @map("site_id")
+  organisationId    String               @db.Uuid @map("organisation_id")
+  name              String
+  code              String?              @unique
+  status            String               @default("ACTIVE")
+  topology          WeighbridgeTopology  @default(BIDIRECTIONAL_SINGLE)
+  maxCapacityKg     Int                  @map("max_capacity_kg")
+  weightUnit        String               @default("kg") @map("weight_unit")
+  laneCount         Int                  @default(1) @map("lane_count")
+  entryExitConfig   String?              @map("entry_exit_config")
+  installationDate  DateTime?            @db.Date @map("installation_date")
+  manufacturer      String?
+  model             String?
+  serialNumber      String?              @map("serial_number")
+  notes             String?
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  site              Site                 @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  organisation      Organisation         @relation(fields: [organisationId], references: [id])
+
+  @@index([organisationId])
+  @@map("weighbridge_installations")
+}
+
+model FleetRoster {
+  id              String   @id @default(uuid()) @db.Uuid
+  organisationId  String   @db.Uuid @map("organisation_id")
+  vehicleId       String   @db.Uuid @map("vehicle_id")
+  trailer1Id      String?  @db.Uuid @map("trailer1_id")
+  trailer2Id      String?  @db.Uuid @map("trailer2_id")
+  driverId        String   @db.Uuid @map("driver_id")
+  rosterDate      DateTime @db.Date @map("roster_date")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  organisation    Organisation @relation(fields: [organisationId], references: [id])
+  vehicle         Vehicle      @relation(fields: [vehicleId], references: [id])
+  trailer1        Trailer?     @relation("Trailer1Roster", fields: [trailer1Id], references: [id])
+  trailer2        Trailer?     @relation("Trailer2Roster", fields: [trailer2Id], references: [id])
+  driver          Driver       @relation(fields: [driverId], references: [id])
+
+  @@unique([vehicleId, rosterDate])
+  @@index([organisationId, rosterDate])
+  @@map("fleet_rosters")
 }
