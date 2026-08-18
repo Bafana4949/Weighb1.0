@@ -561,7 +561,10 @@ async function main(): Promise<void> {
   await prisma.incident.create({ data: { siteId: site.id, vehicleId: vehicles[4]!.id, type: IncidentType.ROUTE_DEVIATION, severity: Severity.MEDIUM, title: "Travel time anomaly", description: "Travel time exceeded the configured corridor baseline by 84 minutes.", anomalyScore: 18 } });
 
   // --- RBAC: permission catalogue + built-in roles (see packages/database/src/rbac-catalogue.ts) ---
-  const permissionRows = await Promise.all(PERMISSION_CATALOGUE.map((p) => prisma.permission.create({ data: p })));
+  const permissionRows = [];
+  for (const p of PERMISSION_CATALOGUE) {
+    permissionRows.push(await prisma.permission.create({ data: p }));
+  }
   const permissionByKey = new Map(permissionRows.map((p) => [p.key, p]));
   const builtInRoles = new Map<string, Awaited<ReturnType<typeof prisma.role.create>>>();
   for (const [roleName, keys] of Object.entries(BUILT_IN_ROLE_PERMISSIONS)) {
