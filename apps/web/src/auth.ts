@@ -37,8 +37,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         
         return { id: user.id, email: user.email, name: `${user.firstName} ${user.lastName}`, role: user.role, organisationId: user.organisationId, organisationName: organisation?.name ?? null, platformRole: user.platformRole };
       } catch (err: any) {
+        console.error("AUTH_AUTHORIZE_EXCEPTION:", err?.message || err);
         return null;
       }
     },
   })],
 });
+
