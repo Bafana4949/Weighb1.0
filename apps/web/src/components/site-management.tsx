@@ -34,8 +34,9 @@ const TOPOLOGIES = [
   { value: "DUAL_ENTRY_EXIT", label: "Dual — separate entry and exit weighbridges" },
 ];
 
-export function SiteManagement({ initialSites, organisations }: { initialSites: SiteRow[]; organisations: OrgOption[] }) {
+export function SiteManagement({ initialSites, organisations, isSuperAdmin = false }: { initialSites: SiteRow[]; organisations: OrgOption[]; isSuperAdmin?: boolean }) {
   const [sites, setSites] = useState<SiteRow[]>(initialSites);
+
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<SiteRow | null>(null);
   const [configuring, setConfiguring] = useState<SiteRow | null>(null);
@@ -163,8 +164,13 @@ export function SiteManagement({ initialSites, organisations }: { initialSites: 
   return <Card>
     <CardHeader className="flex-row items-center justify-between">
       <CardTitle>Sites</CardTitle>
-      <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={14} className="mr-1.5" />New site</Button>
+      {isSuperAdmin && (
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Plus size={14} className="mr-1.5" />New site
+        </Button>
+      )}
     </CardHeader>
+
     <CardContent className="p-0">
       <Table>
         <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Name</TableHead><TableHead>Type</TableHead><TableHead>Location</TableHead><TableHead>Operating hours</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
