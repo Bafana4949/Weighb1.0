@@ -11,9 +11,11 @@ import type { PlatformRole,UserRole } from "@prisma/client";
  */
 export const authConfig = {
   trustHost: true,
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? "389a5165ecc5ef7bc47ebe02e382bdfe34e0d1ecd096f22626156282ad3ca136741ae1b2bdbb352efd0b00131cb2c8a0",
   session: { strategy: "jwt", maxAge: 8 * 60 * 60 },
-  pages: { signIn: "/login" },
+  pages: { signIn: "/login", error: "/login" },
   providers: [],
+
   callbacks: {
     async jwt({ token, user }) {
       if (user) {

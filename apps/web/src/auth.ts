@@ -10,7 +10,10 @@ const credentialsSchema = z.object({ email: z.string().email(), password: z.stri
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
+  trustHost: true,
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? "389a5165ecc5ef7bc47ebe02e382bdfe34e0d1ecd096f22626156282ad3ca136741ae1b2bdbb352efd0b00131cb2c8a0",
   providers: [Credentials({
+
     credentials: { email: {}, password: {} },
     async authorize(credentials) {
       try {
