@@ -64,6 +64,7 @@ export const laneSchema = z.object({
 export const laneUpdateSchema = laneSchema.partial();
 
 export const orderBaseSchema = z.object({
+  orderNumber: z.string().min(2).max(60).optional().nullable(),
   type: z.enum(["DISPATCH", "RECEIPT"]),
   siteId: z.string().uuid(),
   originSiteId: z.string().uuid().optional().nullable(),
@@ -92,7 +93,7 @@ export const vehicleSchema = z.object({
   model: z.string().min(1).max(60),
   year: z.number().int().min(1980).max(2100).optional(),
   vin: z.string().max(40).optional().nullable(),
-  tareWeightKg: z.number().int().min(1_000).max(50_000),
+  tareWeightKg: z.number().int().min(0).max(50_000).default(0).optional(),
   legalMaxGvwKg: z.number().int().min(5_000).max(100_000),
   insuranceExpiry: z.coerce.date(),
 });
@@ -110,7 +111,7 @@ export const driverSchema = z.object({
   firstName: z.string().min(2).max(80),
   lastName: z.string().min(2).max(80),
   idNumber: z.string().min(8).max(30),
-  rfidTag: z.string().min(4).max(24),
+  rfidTag: z.string().min(2).max(30).optional().nullable(),
   photoUrl: z.string().optional().nullable(),
   licenceNumber: z.string().min(4).max(50),
   licenceExpiry: z.coerce.date(),

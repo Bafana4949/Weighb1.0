@@ -141,7 +141,9 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
     try {
       const productId = (form.get("productId") as string) || undefined;
       const selectedProduct = products.find((p) => p.id === productId);
+      const orderNumberRaw = (form.get("orderNumber") as string)?.trim();
       const payload = {
+        orderNumber: orderNumberRaw || undefined,
         type: form.get("type"), siteId: form.get("siteId"),
         sourceId: form.get("sourceId") || undefined, destinationId: form.get("destinationId") || undefined,
         productId,
@@ -172,7 +174,9 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
     try {
       const productId = (form.get("productId") as string) || undefined;
       const selectedProduct = products.find((p) => p.id === productId);
+      const orderNumberRaw = (form.get("orderNumber") as string)?.trim();
       const payload = {
+        orderNumber: orderNumberRaw || undefined,
         sourceId: form.get("sourceId") || undefined, destinationId: form.get("destinationId") || undefined,
         productId,
         product: selectedProduct?.name || undefined,
@@ -285,6 +289,10 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
       <DialogContent>
         <DialogHeader><DialogTitle>Create Weighbridge Order</DialogTitle></DialogHeader>
         <form onSubmit={createOrder} className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-1.5 md:col-span-2">
+            <Label htmlFor="o-number">Order Number / PO Number (Optional)</Label>
+            <Input id="o-number" name="orderNumber" placeholder="Leave blank to auto-generate (e.g. ORD-000042)" />
+          </div>
           <div className="space-y-1.5"><Label htmlFor="o-type">Transaction Type</Label><select id="o-type" name="type" required className={selectClass()} value={createType} onChange={(e) => setCreateType(e.target.value as "DISPATCH" | "RECEIPT")}><option value="DISPATCH">Dispatch</option><option value="RECEIPT">Receipt</option></select></div>
           <div className="space-y-1.5"><Label htmlFor="o-site">Weighbridge</Label><select id="o-site" name="siteId" required className={selectClass()} defaultValue="">{sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           {createType === "DISPATCH" ? <div className="space-y-1.5"><Label htmlFor="o-customer">Customer</Label><Input id="o-customer" name="customerName" required minLength={2} /></div>
@@ -306,6 +314,10 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
       <DialogContent>
         <DialogHeader><DialogTitle>Edit {editing?.orderNumber}</DialogTitle></DialogHeader>
         {editing && <form onSubmit={saveEdit} className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-1.5 md:col-span-2">
+            <Label htmlFor="eo-number">Order Number / PO Number</Label>
+            <Input id="eo-number" name="orderNumber" defaultValue={editing.orderNumber} required minLength={2} />
+          </div>
           <div className="space-y-1.5"><Label htmlFor="eo-product">Product</Label><select id="eo-product" name="productId" required className={selectClass()} defaultValue={editing.productId || ""}><option value="" disabled>Select product</option>{products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
           <div className="space-y-1.5"><Label htmlFor="eo-source">From (Source)</Label><select id="eo-source" name="sourceId" className={selectClass()} defaultValue={editing.sourceId || ""}><option value="">— None —</option>{sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           <div className="space-y-1.5"><Label htmlFor="eo-destination">To (Destination)</Label><select id="eo-destination" name="destinationId" className={selectClass()} defaultValue={editing.destinationId || ""}><option value="">— None —</option>{destinations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>

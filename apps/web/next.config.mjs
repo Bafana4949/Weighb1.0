@@ -3,7 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-config({ path: path.resolve(__dirname, '../../.env') });
+config({ path: path.resolve(__dirname, '../../.env'), override: true });
+config({ path: path.resolve(__dirname, '.env'), override: true });
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -23,4 +24,5 @@ const nextConfig = {
     ];
   },
 };
+
 export default nextConfig;

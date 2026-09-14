@@ -12,7 +12,7 @@ if (fs.existsSync(configPath)) {
   try { fs.unlinkSync(configPath); } catch (e) {}
 }
 
-config({ path: path.resolve(__dirname, '../../.env') });
+config({ path: path.resolve(__dirname, '../../.env'), override: true });
 
 const [, , ...args] = process.argv;
 const schemaPath = path.resolve(__dirname, 'schema.prisma');

@@ -20,6 +20,162 @@ async function generateNextWaybillNumber(siteCode: string, siteId: string): Prom
   return `${prefix}${seq}`;
 }
 
+async function resolveOrCreateWalkInBooking({
+  siteId,
+  siteOrganisationId,
+  plate,
+  driverName,
+  transporterName,
+  trailer,
+  commodity,
+  orderId,
+  operatorId,
+}: {
+  siteId: string;
+  siteOrganisationId: string;
+  plate: string;
+  driverName?: string;
+  transporterName?: string;
+  trailer?: string;
+  commodity?: string;
+  orderId?: string;
+  operatorId?: string | null;
+}) {
+  const plateClean = plate.trim().toUpperCase();
+  const plateNorm = plateClean.replace(/[^A-Z0-9]/g, "");
+
+  // 1. Resolve or Create Transporter Organisation
+  let transporterOrg = null;
+  if (transporterName && transporterName.trim()) {
+    const tName = transporterName.trim();
+    transporterOrg = await prisma.organisation.findFirst({
+      where: { name: { equals: tName, mode: "insensitive" }, type: "HAULIER" },
+    });
+    if (!transporterOrg) {
+      transporterOrg = await prisma.organisation.create({
+        data: {
+          name: tName,
+          type: "HAULIER",
+          status: "ACTIVE",
+          isActive: true,
+          contactEmail: `dispatch@${tName.toLowerCase().replace(/[^a-z0-9]/g, "")}.co.za`,
+        },
+      });
+    }
+  } else {
+    transporterOrg = await prisma.organisation.findFirst({
+      where: { type: "HAULIER", isActive: true },
+    });
+    if (!transporterOrg) {
+      transporterOrg = await prisma.organisation.findUnique({
+        where: { id: siteOrganisationId },
+      });
+    }
+  }
+
+  if (!transporterOrg) {
+    throw new Error("Unable to resolve an organisation for this weighment");
+  }
+
+  // 2. Resolve or Create Vehicle
+  let vehicle = await prisma.vehicle.findFirst({
+    where: { plateNormalized: plateNorm, deletedAt: null },
+  });
+  if (!vehicle) {
+    vehicle = await prisma.vehicle.create({
+      data: {
+        organisationId: transporterOrg.id,
+        plate: plateClean,
+        plateNormalized: plateNorm,
+        make: "Standard",
+        model: "Commercial Haulier",
+        tareWeightKg: 14500,
+        legalMaxGvwKg: 56000,
+        insuranceExpiry: new Date(Date.now() + 365 * 24 * 3600 * 1000),
+        status: "ACTIVE",
+      },
+    });
+  }
+
+  // 3. Resolve or Create Driver
+  let driver = null;
+  const dParts = (driverName || "Driver Unknown").trim().split(" ");
+  const firstName = dParts[0] || "Driver";
+  const lastName = dParts.slice(1).join(" ") || "Haulier";
+
+  driver = await prisma.driver.findFirst({
+    where: {
+      organisationId: transporterOrg.id,
+      firstName: { equals: firstName, mode: "insensitive" },
+      lastName: { equals: lastName, mode: "insensitive" },
+      deletedAt: null,
+    },
+  });
+
+  if (!driver) {
+    const rand = Math.random().toString(36).substring(2, 8);
+    driver = await prisma.driver.create({
+      data: {
+        organisationId: transporterOrg.id,
+        firstName,
+        lastName,
+        idNumberEncrypted: "N/A",
+        idNumberHash: `id_${Date.now()}_${rand}`,
+        rfidTag: `rfid_${Date.now()}_${rand}`,
+        licenceNumber: `LIC-${rand.toUpperCase()}`,
+        licenceExpiry: new Date(Date.now() + 365 * 24 * 3600 * 1000),
+        consentCapturedAt: new Date(),
+      },
+    });
+  }
+
+  // 4. Resolve or Create Trailer
+  let trailerRecord = null;
+  if (trailer && trailer.trim()) {
+    const tClean = trailer.trim().toUpperCase();
+    trailerRecord = await prisma.trailer.findFirst({
+      where: { trailerId: tClean },
+    });
+    if (!trailerRecord) {
+      trailerRecord = await prisma.trailer.create({
+        data: {
+          trailerId: tClean,
+          registrationNo: tClean,
+          tareWeightKg: 4200,
+          vehicleId: vehicle.id,
+        },
+      });
+    }
+  }
+
+  // 5. Create Instant Booking
+  const ref = `WALK-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+  const token = `JT-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+  const fallbackUser = operatorId || (await prisma.user.findFirst())?.id || vehicle.organisationId;
+
+  return await prisma.booking.create({
+    data: {
+      reference: ref,
+      journeyToken: token,
+      transporterOrganisationId: transporterOrg.id,
+      siteId,
+      vehicleId: vehicle.id,
+      driverId: driver.id,
+      trailerId: trailerRecord?.id ?? null,
+      orderId: orderId ?? null,
+      commodity: commodity?.trim() || "Coal (ROM)",
+      targetTonnageKg: 34000,
+      windowStart: new Date(),
+      windowEnd: new Date(Date.now() + 24 * 3600 * 1000),
+      status: "APPROVED",
+      approvedAt: new Date(),
+      approvalReason: "Manual walk-in weighment authorized by operator",
+      createdById: fallbackUser,
+    },
+    include: { vehicle: true, driver: true, trailer: true, order: true },
+  });
+}
+
 export async function GET(request: NextRequest) {
   const authCheck = await requireSiteOrRole(request, [UserRole.OPERATOR, UserRole.ADMIN, UserRole.SECURITY]);
   if (authCheck.error) return authCheck.error;
@@ -110,17 +266,33 @@ export async function POST(request: NextRequest) {
   // ACTION: FIRST_WEIGH (Weigh-In / 1st Weight)
   // --------------------------------------------------------------------------
   if (action === "FIRST_WEIGH") {
-    const { bookingId, weightKg, weighType, notes } = body;
+    const { bookingId, weightKg, weighType, notes, plate, driverName, transporterName, trailer, commodity, orderId } = body;
     const parsedWeight = Math.round(Number(weightKg));
 
-    if (!bookingId) return fail("bookingId is required for 1st weighment", 422);
     if (!parsedWeight || parsedWeight <= 0) return fail("Valid scale weight (kg) is required", 422);
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: { vehicle: true, driver: true, trailer: true, order: true },
-    });
-    if (!booking) return fail("Booking not found", 404);
+    let booking;
+    if (bookingId) {
+      booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: { vehicle: true, driver: true, trailer: true, order: true },
+      });
+      if (!booking) return fail("Booking not found", 404);
+    } else if (plate && plate.trim()) {
+      booking = await resolveOrCreateWalkInBooking({
+        siteId: resolvedSite.id,
+        siteOrganisationId: resolvedSite.organisationId,
+        plate,
+        driverName,
+        transporterName,
+        trailer,
+        commodity,
+        orderId,
+        operatorId,
+      });
+    } else {
+      return fail("Either bookingId or vehicle registration plate is required for 1st weighment", 422);
+    }
 
     // Check if an in-progress transaction already exists for this booking
     const existingActive = await prisma.weighbridgeTransaction.findFirst({
@@ -279,9 +451,10 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const hasActiveOrder = Boolean(transaction.booking.orderId);
     await prisma.booking.update({
       where: { id: transaction.bookingId },
-      data: { status: "COMPLETED" },
+      data: { status: hasActiveOrder ? "APPROVED" : "COMPLETED" },
     });
 
     await prisma.vehicle.update({
@@ -320,18 +493,34 @@ export async function POST(request: NextRequest) {
   // ACTION: DIRECT_WEIGH (Enter both 1st & 2nd weights simultaneously)
   // --------------------------------------------------------------------------
   if (action === "DIRECT_WEIGH") {
-    const { bookingId, weight1Kg, weight2Kg, notes, mineTicketNumber } = body;
+    const { bookingId, weight1Kg, weight2Kg, notes, mineTicketNumber, plate, driverName, transporterName, trailer, commodity, orderId } = body;
     const w1 = Math.round(Number(weight1Kg));
     const w2 = Math.round(Number(weight2Kg));
 
-    if (!bookingId) return fail("bookingId is required", 422);
     if (!w1 || w1 <= 0 || !w2 || w2 <= 0) return fail("Both 1st and 2nd weights (kg) must be greater than 0", 422);
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: { vehicle: true, driver: true, trailer: true, order: true },
-    });
-    if (!booking) return fail("Booking not found", 404);
+    let booking;
+    if (bookingId) {
+      booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: { vehicle: true, driver: true, trailer: true, order: true },
+      });
+      if (!booking) return fail("Booking not found", 404);
+    } else if (plate && plate.trim()) {
+      booking = await resolveOrCreateWalkInBooking({
+        siteId: resolvedSite.id,
+        siteOrganisationId: resolvedSite.organisationId,
+        plate,
+        driverName,
+        transporterName,
+        trailer,
+        commodity,
+        orderId,
+        operatorId,
+      });
+    } else {
+      return fail("Either bookingId or vehicle registration plate is required", 422);
+    }
 
     const actualGross = Math.max(w1, w2);
     const actualTare = Math.min(w1, w2);
@@ -397,9 +586,10 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const hasActiveOrder = Boolean(booking.orderId);
     await prisma.booking.update({
       where: { id: booking.id },
-      data: { status: "COMPLETED" },
+      data: { status: hasActiveOrder ? "APPROVED" : "COMPLETED" },
     });
 
     await prisma.vehicle.update({

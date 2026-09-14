@@ -253,7 +253,7 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
       const payload = {
         organisationId: form.get("organisationId") || undefined, plate: form.get("plate"), make: form.get("make"), model: form.get("model"),
         year: form.get("year") ? Number(form.get("year")) : undefined, vin: form.get("vin") || null,
-        tareWeightKg: Number(form.get("tareWeightKg")), legalMaxGvwKg: Number(form.get("legalMaxGvwKg")), insuranceExpiry: form.get("insuranceExpiry"),
+        tareWeightKg: form.get("tareWeightKg") ? Number(form.get("tareWeightKg")) : 0, legalMaxGvwKg: Number(form.get("legalMaxGvwKg")), insuranceExpiry: form.get("insuranceExpiry"),
       };
       const response = await fetch("/api/vehicles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json();
@@ -372,7 +372,7 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
           <div className="space-y-1.5"><Label htmlFor="v-make">Make</Label><Input id="v-make" name="make" required minLength={2} /></div>
           <div className="space-y-1.5"><Label htmlFor="v-model">Model</Label><Input id="v-model" name="model" required minLength={1} /></div>
           <div className="space-y-1.5 md:col-span-2"><Label htmlFor="v-vin">VIN (optional)</Label><Input id="v-vin" name="vin" /></div>
-          <div className="space-y-1.5"><Label htmlFor="v-tare">Tare weight (kg)</Label><Input id="v-tare" name="tareWeightKg" type="number" required min={1000} max={50000} /></div>
+          <div className="space-y-1.5"><Label htmlFor="v-tare">Tare weight (kg) <span className="text-2xs text-muted-foreground font-normal">(Optional)</span></Label><Input id="v-tare" name="tareWeightKg" type="number" min={0} max={50000} placeholder="0 (Live scale tare)" /></div>
           <div className="space-y-1.5"><Label htmlFor="v-gvw">Legal max GVW (kg)</Label><Input id="v-gvw" name="legalMaxGvwKg" type="number" required min={5000} max={100000} /></div>
           <div className="space-y-1.5 md:col-span-2"><Label htmlFor="v-insurance">Insurance expiry</Label><Input id="v-insurance" name="insuranceExpiry" type="date" required /></div>
           <div className="md:col-span-2"><Button type="submit" disabled={busy} className="w-full">{busy ? "Adding…" : "Add vehicle"}</Button></div>
@@ -459,7 +459,7 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
     try {
       const payload = {
         organisationId: form.get("organisationId") || undefined, firstName: form.get("firstName"), lastName: form.get("lastName"),
-        idNumber: form.get("idNumber"), rfidTag: form.get("rfidTag"), licenceNumber: form.get("licenceNumber"),
+        idNumber: form.get("idNumber"), rfidTag: form.get("rfidTag") ? String(form.get("rfidTag")).trim() : undefined, licenceNumber: form.get("licenceNumber"),
         licenceExpiry: form.get("licenceExpiry"), consent: true,
       };
       const response = await fetch("/api/drivers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
@@ -589,7 +589,7 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
           <div className="space-y-1.5"><Label htmlFor="d-firstName">First name</Label><Input id="d-firstName" name="firstName" required minLength={2} /></div>
           <div className="space-y-1.5"><Label htmlFor="d-lastName">Last name</Label><Input id="d-lastName" name="lastName" required minLength={2} /></div>
           <div className="space-y-1.5"><Label htmlFor="d-idNumber">ID number</Label><Input id="d-idNumber" name="idNumber" required minLength={8} /></div>
-          <div className="space-y-1.5"><Label htmlFor="d-rfid">RFID tag</Label><Input id="d-rfid" name="rfidTag" required minLength={4} /></div>
+          <div className="space-y-1.5"><Label htmlFor="d-rfid">RFID tag <span className="text-2xs text-muted-foreground font-normal">(Optional)</span></Label><Input id="d-rfid" name="rfidTag" placeholder="Optional" /></div>
           <div className="space-y-1.5"><Label htmlFor="d-licence">Licence number</Label><Input id="d-licence" name="licenceNumber" required minLength={4} /></div>
           <div className="space-y-1.5"><Label htmlFor="d-licenceExpiry">Licence expiry</Label><Input id="d-licenceExpiry" name="licenceExpiry" type="date" required /></div>
           <p className="text-2xs text-muted-foreground md:col-span-2">By adding this driver you confirm they have consented to their ID and licence details being stored, per POPIA.</p>
@@ -622,7 +622,7 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
         {editing && <form onSubmit={saveEdit} className="grid gap-3 md:grid-cols-2">
           <div className="space-y-1.5"><Label htmlFor="ed-firstName">First name</Label><Input id="ed-firstName" name="firstName" required minLength={2} defaultValue={editing.firstName} /></div>
           <div className="space-y-1.5"><Label htmlFor="ed-lastName">Last name</Label><Input id="ed-lastName" name="lastName" required minLength={2} defaultValue={editing.lastName} /></div>
-          <div className="space-y-1.5"><Label htmlFor="ed-rfid">RFID tag</Label><Input id="ed-rfid" name="rfidTag" required minLength={4} defaultValue={editing.rfidTag} /></div>
+          <div className="space-y-1.5"><Label htmlFor="ed-rfid">RFID tag <span className="text-2xs text-muted-foreground font-normal">(Optional)</span></Label><Input id="ed-rfid" name="rfidTag" placeholder="Optional" defaultValue={editing.rfidTag ?? ""} /></div>
           <div className="space-y-1.5"><Label htmlFor="ed-licence">Licence number</Label><Input id="ed-licence" name="licenceNumber" required minLength={4} defaultValue={editing.licenceNumber} /></div>
           <div className="space-y-1.5 md:col-span-2"><Label htmlFor="ed-licenceExpiry">Licence expiry</Label><Input id="ed-licenceExpiry" name="licenceExpiry" type="date" required defaultValue={dateInput(editing.licenceExpiry)} /></div>
           <div className="md:col-span-2"><Button type="submit" disabled={busy} className="w-full">{busy ? "Saving…" : "Save changes"}</Button></div>

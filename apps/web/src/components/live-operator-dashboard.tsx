@@ -93,6 +93,14 @@ export function LiveOperatorDashboard({
   const [submitting, setSubmitting] = useState(false);
   const [completedResult, setCompletedResult] = useState<any>(null);
 
+  // Walk-In / Unscheduled Truck Input States
+  const [isWalkIn, setIsWalkIn] = useState(false);
+  const [walkInPlate, setWalkInPlate] = useState("");
+  const [walkInDriver, setWalkInDriver] = useState("");
+  const [walkInTransporter, setWalkInTransporter] = useState("");
+  const [walkInTrailer, setWalkInTrailer] = useState("");
+  const [walkInCommodity, setWalkInCommodity] = useState("Coal (ROM)");
+
   const toast = useToast();
   const router = useRouter();
 
@@ -119,7 +127,7 @@ export function LiveOperatorDashboard({
         setActiveWeighments(data.data.activeWeighments);
       }
     } catch {
-      /* Ignore transient error */
+      /* Keep showing last known active weighments */
     } finally {
       setLoadingManual(false);
     }
@@ -136,13 +144,18 @@ export function LiveOperatorDashboard({
   }, [siteCode]);
 
   // Open modal prefilled for 1st weighment
-  function handleOpenFirstWeigh(booking?: QueueItem) {
+  function handleOpenFirstWeigh(booking?: QueueItem, forceWalkIn = false) {
     setCompletedResult(null);
     setModalMode("FIRST");
     if (booking) {
       setSelectedBookingId(booking.id);
+      setIsWalkIn(false);
+    } else if (forceWalkIn || queue.length === 0) {
+      setSelectedBookingId("");
+      setIsWalkIn(true);
     } else if (queue.length > 0 && queue[0]) {
       setSelectedBookingId(queue[0].id);
+      setIsWalkIn(false);
     }
     setFirstWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "");
     setSecondWeightInput("");
@@ -170,13 +183,18 @@ export function LiveOperatorDashboard({
   }
 
   // Open modal for direct entry (both weights at once)
-  function handleOpenDirectWeigh(booking?: QueueItem) {
+  function handleOpenDirectWeigh(booking?: QueueItem, forceWalkIn = false) {
     setCompletedResult(null);
     setModalMode("DIRECT");
     if (booking) {
       setSelectedBookingId(booking.id);
+      setIsWalkIn(false);
+    } else if (forceWalkIn || queue.length === 0) {
+      setSelectedBookingId("");
+      setIsWalkIn(true);
     } else if (queue.length > 0 && queue[0]) {
       setSelectedBookingId(queue[0].id);
+      setIsWalkIn(false);
     }
     setFirstWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "14500");
     setSecondWeightInput("48500");
@@ -189,7 +207,12 @@ export function LiveOperatorDashboard({
     try {
       if (modalMode === "FIRST") {
         const weightKg = Number(firstWeightInput);
-        if (!selectedBookingId) throw new Error("Please select an approved booking/truck");
+        if (isWalkIn) {
+          if (!walkInPlate.trim()) throw new Error("Please enter truck registration plate");
+          if (!walkInDriver.trim()) throw new Error("Please enter driver name");
+        } else {
+          if (!selectedBookingId) throw new Error("Please select an approved booking/truck");
+        }
         if (!weightKg || weightKg <= 0) throw new Error("Please enter a valid 1st scale reading (kg)");
 
         const res = await fetch("/api/transactions/manual", {
@@ -198,7 +221,12 @@ export function LiveOperatorDashboard({
           body: JSON.stringify({
             action: "FIRST_WEIGH",
             siteCode,
-            bookingId: selectedBookingId,
+            bookingId: isWalkIn ? undefined : selectedBookingId,
+            plate: isWalkIn ? walkInPlate.trim().toUpperCase() : undefined,
+            driverName: isWalkIn ? walkInDriver.trim() : undefined,
+            transporterName: isWalkIn ? walkInTransporter.trim() : undefined,
+            trailer: isWalkIn ? walkInTrailer.trim().toUpperCase() : undefined,
+            commodity: isWalkIn ? walkInCommodity : undefined,
             weightKg,
             weighType,
             notes: notesInput || undefined,
@@ -241,7 +269,12 @@ export function LiveOperatorDashboard({
       } else if (modalMode === "DIRECT") {
         const weight1Kg = Number(firstWeightInput);
         const weight2Kg = Number(secondWeightInput);
-        if (!selectedBookingId) throw new Error("Please select an approved booking/truck");
+        if (isWalkIn) {
+          if (!walkInPlate.trim()) throw new Error("Please enter truck registration plate");
+          if (!walkInDriver.trim()) throw new Error("Please enter driver name");
+        } else {
+          if (!selectedBookingId) throw new Error("Please select an approved booking/truck");
+        }
         if (!weight1Kg || weight1Kg <= 0 || !weight2Kg || weight2Kg <= 0) {
           throw new Error("Both 1st and 2nd weights must be greater than 0 kg");
         }
@@ -252,7 +285,12 @@ export function LiveOperatorDashboard({
           body: JSON.stringify({
             action: "DIRECT_WEIGH",
             siteCode,
-            bookingId: selectedBookingId,
+            bookingId: isWalkIn ? undefined : selectedBookingId,
+            plate: isWalkIn ? walkInPlate.trim().toUpperCase() : undefined,
+            driverName: isWalkIn ? walkInDriver.trim() : undefined,
+            transporterName: isWalkIn ? walkInTransporter.trim() : undefined,
+            trailer: isWalkIn ? walkInTrailer.trim().toUpperCase() : undefined,
+            commodity: isWalkIn ? walkInCommodity : undefined,
             weight1Kg,
             weight2Kg,
             mineTicketNumber: mineTicketInput || undefined,
@@ -425,20 +463,28 @@ export function LiveOperatorDashboard({
             </div>
 
             {/* Primary Action Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-border">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-border">
               <Button
                 onClick={() => handleOpenFirstWeigh()}
-                className="w-full text-sm font-medium h-11 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer gap-2"
+                className="w-full text-xs sm:text-sm font-medium h-11 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer gap-2"
               >
                 <ArrowDownCircle size={16} />
-                Record 1st Weight (Weigh-In / Empty)
+                Record 1st Weight
               </Button>
               <Button
                 onClick={() => handleOpenSecondWeigh()}
-                className="w-full text-sm font-medium h-11 bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer gap-2"
+                className="w-full text-xs sm:text-sm font-medium h-11 bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer gap-2"
               >
                 <ArrowUpCircle size={16} />
-                Record 2nd Weight (Weigh-Out / Loaded)
+                Record 2nd Weight
+              </Button>
+              <Button
+                onClick={() => handleOpenFirstWeigh(undefined, true)}
+                variant="outline"
+                className="w-full text-xs sm:text-sm font-medium h-11 border-dashed border-primary/50 text-foreground hover:bg-primary/10 cursor-pointer gap-2"
+              >
+                <PlusCircle size={16} className="text-primary" />
+                + Walk-In Truck
               </Button>
             </div>
           </div>
@@ -743,20 +789,106 @@ export function LiveOperatorDashboard({
                   </select>
                 </div>
               ) : (
-                <div className="space-y-1.5">
-                  <Label>Select Booking / Vehicle from Queue:</Label>
-                  <select
-                    value={selectedBookingId}
-                    onChange={(e) => setSelectedBookingId(e.target.value)}
-                    className="w-full h-9 rounded-sm border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
-                  >
-                    <option value="">-- Choose vehicle from queue --</option>
-                    {queue.map((q) => (
-                      <option key={q.id} value={q.id}>
-                        {q.plate} {q.trailer ? `+${q.trailer}` : ""} · {q.reference} · {q.driver} ({q.commodity})
-                      </option>
-                    ))}
-                  </select>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold">Vehicle Identification:</Label>
+                    <div className="flex rounded-xs border border-border p-0.5 bg-muted/40">
+                      <button
+                        type="button"
+                        onClick={() => setIsWalkIn(false)}
+                        className={`px-2.5 py-1 text-2xs font-medium rounded-xs transition-colors cursor-pointer ${
+                          !isWalkIn ? "bg-background text-foreground shadow-xs font-semibold" : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        From Queue ({queue.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsWalkIn(true)}
+                        className={`px-2.5 py-1 text-2xs font-medium rounded-xs transition-colors cursor-pointer ${
+                          isWalkIn ? "bg-primary text-primary-foreground shadow-xs font-semibold" : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        + Walk-In / Ad-Hoc Truck
+                      </button>
+                    </div>
+                  </div>
+
+                  {!isWalkIn ? (
+                    <div className="space-y-1.5">
+                      <select
+                        value={selectedBookingId}
+                        onChange={(e) => setSelectedBookingId(e.target.value)}
+                        className="w-full h-9 rounded-sm border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+                      >
+                        <option value="">-- Choose vehicle from queue --</option>
+                        {queue.map((q) => (
+                          <option key={q.id} value={q.id}>
+                            {q.plate} {q.trailer ? `+${q.trailer}` : ""} · {q.reference} · {q.driver} ({q.commodity})
+                          </option>
+                        ))}
+                      </select>
+                      {queue.length === 0 && (
+                        <p className="text-2xs text-amber-500">
+                          Queue is empty. Switch to "+ Walk-In / Ad-Hoc Truck" to enter details directly.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-sm border border-primary/20 bg-primary/5 p-3 space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div className="space-y-1">
+                          <Label className="text-2xs">Truck Plate / Registration *</Label>
+                          <Input
+                            placeholder="e.g. CA 123-456"
+                            value={walkInPlate}
+                            onChange={(e) => setWalkInPlate(e.target.value.toUpperCase())}
+                            className="h-8 font-mono uppercase text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-2xs">Trailer Reg (Optional)</Label>
+                          <Input
+                            placeholder="e.g. TR-994"
+                            value={walkInTrailer}
+                            onChange={(e) => setWalkInTrailer(e.target.value.toUpperCase())}
+                            className="h-8 font-mono uppercase text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div className="space-y-1">
+                          <Label className="text-2xs">Driver Full Name *</Label>
+                          <Input
+                            placeholder="e.g. Sipho Ndlovu"
+                            value={walkInDriver}
+                            onChange={(e) => setWalkInDriver(e.target.value)}
+                            className="h-8 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-2xs">Transporter / Haulier Company</Label>
+                          <Input
+                            placeholder="e.g. Unitrans Logistics"
+                            value={walkInTransporter}
+                            onChange={(e) => setWalkInTransporter(e.target.value)}
+                            className="h-8 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-2xs">Cargo / Commodity</Label>
+                        <Input
+                          placeholder="e.g. Coal (ROM), Washed Coal, Duff Coal"
+                          value={walkInCommodity}
+                          onChange={(e) => setWalkInCommodity(e.target.value)}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

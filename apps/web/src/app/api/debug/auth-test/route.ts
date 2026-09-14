@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const email = url.searchParams.get("email") || "admin@weighbridge.local";
-  const password = url.searchParams.get("password") || "Password123!";
+  const email = url.searchParams.get("email") || "superadmin@weighbridge.co.za";
+  const password = url.searchParams.get("password") || "SuperAdmin2026!";
 
   const diagnostics: Record<string, any> = {
     hasDatabaseUrl: !!process.env.DATABASE_URL,

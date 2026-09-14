@@ -32,9 +32,17 @@ export async function POST(request: Request) {
     productName = "High-Grade Export Coal (RB1 6000 kcal/kg)";
   }
 
+  const customOrderNumber = parsed.data.orderNumber?.trim();
+  if (customOrderNumber) {
+    const existing = await prisma.weighbridgeOrder.findUnique({ where: { orderNumber: customOrderNumber } });
+    if (existing) {
+      return fail(`Order number '${customOrderNumber}' is already registered`, 409);
+    }
+  }
+
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const orderNumber = await nextOrderNumber();
+      const orderNumber = customOrderNumber || (await nextOrderNumber());
       const order = await prisma.weighbridgeOrder.create({
         data: {
           ...parsed.data,
@@ -60,6 +68,7 @@ export async function POST(request: Request) {
       });
       return ok(order, 201);
     } catch (error) {
+      if (customOrderNumber) return fail(`Could not create order with number '${customOrderNumber}'`, 409);
       if (attempt === 2) return fail("Could not allocate an order number, please retry", 409);
     }
   }

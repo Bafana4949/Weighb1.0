@@ -85,28 +85,27 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     || order?.productRef?.name
     || (transaction.commodity && transaction.commodity.toUpperCase() !== "UNKNOWN" ? transaction.commodity : null)
     || (transaction.booking?.commodity && transaction.booking.commodity.toUpperCase() !== "UNKNOWN" ? transaction.booking.commodity : null)
-    || "High-Grade Export Coal (RB1 6000 kcal/kg)";
+    || "General Cargo";
 
   const product = COMMODITY_NAMES[rawProduct.toUpperCase()] || rawProduct;
 
-
   // Supplier details
-  const supplierName = order?.supplierName || (isDispatch ? transaction.site.organisation.name : "Seriti Mining Operations") || "Seriti Resources (Woestalleen Colliery)";
+  const supplierName = order?.supplierName || transaction.site.organisation.name || "—";
   const supplierPhone = transaction.site.organisation.contactPhone;
   const supplierRegNo = transaction.site.organisation.registrationNo;
 
   // Order, stockpile, and comment details
-  const orderNumber = order?.orderNumber || (transaction.booking.reference ? transaction.booking.reference.replace("BK-", "ORD-") : "ORD-2026-0001");
-  const stockpileRef = order?.stockpile || "Stockpile 1 (ROM-A)";
-  const comment = order?.notes || "Standard consignment — verified on-scale";
+  const orderNumber = order?.orderNumber || (transaction.booking.reference ? transaction.booking.reference.replace("BK-", "ORD-") : "—");
+  const stockpileRef = order?.stockpile || "—";
+  const comment = order?.notes || "Weighment verified on-scale";
 
   // Locations
   const dispatchLocation = isDispatch 
-    ? `${transaction.site.name} (${stockpileRef})` 
-    : (order?.originSite?.name || order?.supplierName || "Dispatch Terminal / Pit 1 North");
+    ? (stockpileRef !== "—" ? `${transaction.site.name} (${stockpileRef})` : transaction.site.name)
+    : (order?.originSite?.name || order?.supplierName || transaction.site.name);
 
   const receiptLocation = isDispatch 
-    ? (order?.customerName || order?.destinationSite?.name || "Richards Bay Coal Terminal (RBCT)") 
+    ? (order?.customerName || order?.destinationSite?.name || "—") 
     : transaction.site.name;
 
   const trailerRegs = [

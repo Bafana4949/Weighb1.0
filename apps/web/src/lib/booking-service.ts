@@ -21,8 +21,9 @@ export async function evaluateBookingPolicy(input: {
   if (driver?.blacklistStatus) reasons.push("Driver is blacklisted");
   if (vehicle && config?.requireInsuranceValid && vehicle.insuranceExpiry < new Date()) reasons.push("Vehicle insurance has expired");
   if (driver && config?.requireDriverLicenceValid && driver.licenceExpiry < new Date()) reasons.push("Driver licence has expired");
-  if (vehicle && input.targetTonnageKg + vehicle.tareWeightKg > vehicle.legalMaxGvwKg) reasons.push("Target load exceeds legal gross vehicle weight");
-  if (vehicle && config && input.targetTonnageKg + vehicle.tareWeightKg > config.maxCapacityKg) reasons.push("Expected gross weight exceeds site weighbridge capacity");
+  // Note: Actual tare weight is captured live on the scale by the weighbridge operator for each trip.
+  if (vehicle && vehicle.legalMaxGvwKg > 0 && input.targetTonnageKg > vehicle.legalMaxGvwKg) reasons.push("Target load exceeds legal gross vehicle weight");
+  if (config && input.targetTonnageKg > config.maxCapacityKg) reasons.push("Expected load exceeds site weighbridge capacity");
   return { approved: reasons.length === 0, reasons };
 }
 

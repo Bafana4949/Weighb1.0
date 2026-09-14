@@ -18,9 +18,21 @@ export async function GET(request: NextRequest) {
       status: { in: ["APPROVED", "ACTIVE"] },
       transactions: {
         none: {
-          status: { in: ["IN_PROGRESS", "COMPLETED"] },
+          status: "IN_PROGRESS",
         },
       },
+      OR: [
+        {
+          orderId: { not: null },
+          order: { status: "ACTIVE" },
+        },
+        {
+          orderId: null,
+          transactions: {
+            none: { status: "COMPLETED" },
+          },
+        },
+      ],
     },
     include: {
       vehicle: true,

@@ -572,7 +572,7 @@ model Vehicle {
   model             String
   year              Int?
   vin               String?       @unique
-  tareWeightKg      Int           @map("tare_weight_kg")
+  tareWeightKg      Int           @default(0) @map("tare_weight_kg")
   legalMaxGvwKg     Int           @map("legal_max_gvw_kg")
   insuranceExpiry   DateTime      @db.Date @map("insurance_expiry")
   status            VehicleStatus @default(ACTIVE)
@@ -672,7 +672,7 @@ model Driver {
   lastName           String   @map("last_name")
   idNumberEncrypted  String   @map("id_number_encrypted")
   idNumberHash       String   @unique @map("id_number_hash")
-  rfidTag            String   @unique @map("rfid_tag")
+  rfidTag            String?  @unique @map("rfid_tag")
   photoUrl           String?  @map("photo_url")
   licenceNumber      String   @unique @map("licence_number")
   licenceExpiry      DateTime @db.Date @map("licence_expiry")

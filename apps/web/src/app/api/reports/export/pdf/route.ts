@@ -28,7 +28,10 @@ export async function GET(request: Request) {
   ]);
 
   const averageLoadKg = rawCount ? totalTonnageKg / rawCount : 0;
-  const averageTurnaroundSeconds = turnaroundRows.length ? turnaroundRows.reduce((s, r) => s + r.average_seconds * r.transactions, 0) / turnaroundRows.reduce((s, r) => s + r.transactions, 0) : 0;
+  const totalTurnaroundTx = turnaroundRows.reduce((s, r) => s + r.transactions, 0);
+  const averageTurnaroundSeconds = totalTurnaroundTx > 0
+    ? turnaroundRows.reduce((s, r) => s + r.average_seconds * r.transactions, 0) / totalTurnaroundTx
+    : 0;
 
   const document = React.createElement(ReportDocument, {
     organisationName: organisation?.name ?? "All companies",

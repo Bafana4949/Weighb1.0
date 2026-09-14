@@ -60,27 +60,26 @@ export default async function Waybill({ params }: { params: Promise<{ id: string
     || order?.productRef?.name
     || (t.commodity && t.commodity.toUpperCase() !== "UNKNOWN" ? t.commodity : null)
     || (t.booking?.commodity && t.booking.commodity.toUpperCase() !== "UNKNOWN" ? t.booking.commodity : null)
-    || "High-Grade Export Coal (RB1 6000 kcal/kg)";
+    || "General Cargo";
 
   const product = COMMODITY_NAMES[rawProduct.toUpperCase()] || rawProduct;
 
-
   // Supplier Details
-  const supplierName = order?.supplierName || (isDispatch ? t.site.organisation.name : "Seriti Mining Operations") || "Seriti Resources (Woestalleen Colliery)";
+  const supplierName = order?.supplierName || t.site.organisation.name || "—";
   const supplierPhone = t.site.organisation.contactPhone;
   const supplierRegNo = t.site.organisation.registrationNo;
 
   // Order & Stockpile References
-  const orderNumber = order?.orderNumber || (t.booking.reference ? t.booking.reference.replace("BK-", "ORD-") : "ORD-2026-0001");
-  const stockpileRef = order?.stockpile || "Stockpile 1 (ROM-A)";
+  const orderNumber = order?.orderNumber || (t.booking.reference ? t.booking.reference.replace("BK-", "ORD-") : "—");
+  const stockpileRef = order?.stockpile || "—";
 
   // Locations
   const dispatchLocation = isDispatch 
-    ? `${t.site.name} (${stockpileRef})` 
-    : (order?.originSite?.name || order?.supplierName || "Dispatch Terminal / Pit 1 North");
+    ? (stockpileRef !== "—" ? `${t.site.name} (${stockpileRef})` : t.site.name)
+    : (order?.originSite?.name || order?.supplierName || t.site.name);
 
   const receiptLocation = isDispatch 
-    ? (order?.customerName || order?.destinationSite?.name || "Richards Bay Coal Terminal (RBCT)") 
+    ? (order?.customerName || order?.destinationSite?.name || "—") 
     : t.site.name;
 
   const trailerRegs = [

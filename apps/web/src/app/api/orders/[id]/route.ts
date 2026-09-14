@@ -14,17 +14,41 @@ export async function PUT(request:Request,{params}:{params:Promise<{id:string}>}
   const {id}=await params;
   const before=await scoped(id,a.session!.user.organisationId);
   if(!before)return fail("Order not found",404);
-  const parsed=orderBaseSchema.partial().safeParse(await request.json().catch(()=>null));
-  if(!parsed.success)return fail(parsed.error.issues[0]?.message??"Invalid order update",422);
-  if(a.session!.user.platformRole!=="PLATFORM_SUPER_ADMIN"){delete parsed.data.ratePerTonZar;}
-  if(parsed.data.productId){
-    const prod=await prisma.product.findUnique({where:{id:parsed.data.productId}});
-    if(prod){
-      (parsed.data as any).product=prod.name;
+  const parsed = orderBaseSchema.partial().safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid order update", 422);
+
+  if (parsed.data.orderNumber) {
+    const cleanNo = parsed.data.orderNumber.trim();
+    const existing = await prisma.weighbridgeOrder.findFirst({
+      where: { orderNumber: cleanNo, id: { not: id } },
+    });
+    if (existing) return fail(`Order number '${cleanNo}' is already taken by another order`, 409);
+    parsed.data.orderNumber = cleanNo;
+  }
+
+  if (a.session!.user.platformRole !== "PLATFORM_SUPER_ADMIN") {
+    delete parsed.data.ratePerTonZar;
+  }
+  if (parsed.data.productId) {
+    const prod = await prisma.product.findUnique({ where: { id: parsed.data.productId } });
+    if (prod) {
+      (parsed.data as any).product = prod.name;
     }
   }
-  const updated=await prisma.weighbridgeOrder.update({where:{id},data:parsed.data as Prisma.WeighbridgeOrderUncheckedUpdateInput,include:includeAll});
-  await audit({userId:a.session!.user.id,siteId:before.siteId,action:"ORDER_UPDATED",entityType:"weighbridge_order",entityId:id,beforeData:before,afterData:updated});
+  const updated = await prisma.weighbridgeOrder.update({
+    where: { id },
+    data: parsed.data as Prisma.WeighbridgeOrderUncheckedUpdateInput,
+    include: includeAll,
+  });
+  await audit({
+    userId: a.session!.user.id,
+    siteId: before.siteId,
+    action: "ORDER_UPDATED",
+    entityType: "weighbridge_order",
+    entityId: id,
+    beforeData: before,
+    afterData: updated,
+  });
   return ok(updated);
 }
 export async function DELETE(_:Request,{params}:{params:Promise<{id:string}>}){const a=await requireRole([UserRole.ADMIN]);if(a.error)return a.error;const {id}=await params;const before=await scoped(id,a.session!.user.organisationId);if(!before)return fail("Order not found",404);const updated=await prisma.weighbridgeOrder.update({where:{id},data:{status:"CANCELLED"}});await audit({userId:a.session!.user.id,siteId:before.siteId,action:"ORDER_CANCELLED",entityType:"weighbridge_order",entityId:id,beforeData:{status:before.status},afterData:{status:updated.status}});return ok(updated)}
