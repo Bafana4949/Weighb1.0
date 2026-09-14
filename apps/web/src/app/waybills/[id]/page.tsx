@@ -234,17 +234,17 @@ export default async function Waybill({ params }: { params: Promise<{ id: string
             </span>
           </div>
           <div className="flex flex-wrap gap-2.5">
-            <Button asChild className="bg-zinc-900 hover:bg-zinc-800 text-white">
-              <Link href={`/api/transactions/${t.id}/waybill?copy=CLIENT${reprintFlag}`}>Client / Office Copy (PDF)</Link>
+            <Button asChild className="bg-emerald-700 hover:bg-emerald-800 text-white">
+              <Link href={`/api/transactions/${t.id}/waybill?copy=CLIENT${reprintFlag}`} target="_blank" rel="noopener noreferrer">Client / Office Copy (PDF)</Link>
             </Button>
             <Button asChild className="bg-blue-700 hover:bg-blue-800 text-white">
-              <Link href={`/api/transactions/${t.id}/waybill?copy=DRIVER${reprintFlag}`}>Driver / Transporter Copy (PDF)</Link>
+              <Link href={`/api/transactions/${t.id}/waybill?copy=DRIVER${reprintFlag}`} target="_blank" rel="noopener noreferrer">Driver / Transporter Copy (PDF)</Link>
             </Button>
             <Button asChild variant="outline" className="border-zinc-300">
-              <Link href={`/api/transactions/${t.id}/waybill?copy=SECURITY${reprintFlag}`}>Security / Gate Copy (PDF)</Link>
+              <Link href={`/api/transactions/${t.id}/waybill?copy=SECURITY${reprintFlag}`} target="_blank" rel="noopener noreferrer">Security / Gate Copy (PDF)</Link>
             </Button>
             <Button variant="secondary" asChild>
-              <Link href={`/api/transactions/${t.id}/waybill?format=thermal${reprintFlag}`}>Thermal Receipt Slip (80mm)</Link>
+              <Link href={`/api/transactions/${t.id}/waybill?format=thermal${reprintFlag}`} target="_blank" rel="noopener noreferrer">Thermal Receipt Slip (80mm)</Link>
             </Button>
           </div>
         </div>

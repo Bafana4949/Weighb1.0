@@ -211,10 +211,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     logoDataUrl,
   });
   const buffer = await renderToBuffer(document as unknown as Parameters<typeof renderToBuffer>[0]);
+  const isDownload = url.searchParams.get("download") === "true";
+  const disposition = isDownload ? "attachment" : "inline";
   return new Response(new Uint8Array(buffer), {
     headers: {
       "content-type": "application/pdf",
-      "content-disposition": `attachment; filename="${transaction.waybillNumber}-${copyParam.toLowerCase()}${isReprint ? "-reprint" : ""}.pdf"`,
+      "content-disposition": `${disposition}; filename="${transaction.waybillNumber}-${copyParam.toLowerCase()}${isReprint ? "-reprint" : ""}.pdf"`,
     },
   });
 }
