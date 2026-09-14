@@ -8,7 +8,6 @@ config({ path: path.resolve(__dirname, '.env'), override: true });
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
   transpilePackages: ["@weighbridge/database", "@weighbridge/shared-types", "@weighbridge/mqtt-topics"],
   experimental: { serverActions: { bodySizeLimit: "4mb" } },
   async headers() {
