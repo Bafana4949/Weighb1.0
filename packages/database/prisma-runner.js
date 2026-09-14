@@ -20,7 +20,7 @@ try {
 } catch (e) {}
 
 const [, , ...args] = process.argv;
-const schemaPath = path.resolve(__dirname, 'schema.prisma');
+const schemaPath = `"${path.resolve(__dirname, 'schema.prisma')}"`;
 const schemaArg = args.includes('--schema') ? [] : ['--schema', schemaPath];
 
 const localBin = path.resolve(__dirname, 'node_modules/.bin/prisma' + (process.platform === 'win32' ? '.cmd' : ''));
@@ -37,5 +37,6 @@ if (fs.existsSync(localBin)) {
   cmdArgs = [...args, ...schemaArg];
 }
 
-const result = spawnSync(cmd, cmdArgs, { stdio: 'inherit', shell: true });
+const finalCmd = cmd === 'npx' ? 'npx' : `"${cmd}"`;
+const result = spawnSync(finalCmd, cmdArgs, { stdio: 'inherit', shell: true });
 process.exit(result.status ?? 1);
