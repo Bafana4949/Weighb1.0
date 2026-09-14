@@ -1,4 +1,3 @@
-import { config } from 'dotenv';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,10 +11,16 @@ if (fs.existsSync(configPath)) {
   try { fs.unlinkSync(configPath); } catch (e) {}
 }
 
-config({ path: path.resolve(__dirname, '../../.env'), override: true });
+try {
+  const dotenv = await import('dotenv');
+  const envPath = path.resolve(__dirname, '../../.env');
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath, override: true });
+  }
+} catch (e) {}
 
 const [, , ...args] = process.argv;
 const schemaPath = path.resolve(__dirname, 'schema.prisma');
-const schemaArg = args.includes('--schema') ? [] : ['--schema', `"${schemaPath}"`];
+const schemaArg = args.includes('--schema') ? [] : ['--schema', schemaPath];
 const result = spawnSync('npx', ['prisma', ...args, ...schemaArg], { stdio: 'inherit', shell: true });
 process.exit(result.status ?? 1);
