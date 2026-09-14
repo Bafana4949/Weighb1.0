@@ -16,8 +16,8 @@ export function LoginForm() {
     setLoading(true);
     setError(null);
     const data = new FormData(event.currentTarget);
-    const email = data.get("email") as string;
-    const password = data.get("password") as string;
+    const email = ((data.get("email") as string) || "").trim();
+    const password = ((data.get("password") as string) || "").trim();
 
     try {
       const result = await signIn("credentials", {
@@ -26,14 +26,13 @@ export function LoginForm() {
         redirect: false,
       });
 
-      setLoading(false);
       if (!result || result.error) {
+        setLoading(false);
         setError("Invalid email or password");
         return;
       }
 
-      router.push("/");
-      router.refresh();
+      window.location.href = "/";
     } catch (err: any) {
       setLoading(false);
       setError("Unable to sign in. Please check your credentials or database connection.");
