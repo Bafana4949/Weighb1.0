@@ -50,11 +50,11 @@ export default async function TransporterReports() {
               <CardDescription>Export your historical daily fleet rosters to see which trucks were available on which days.</CardDescription>
             </CardHeader>
             <CardContent>
-              <a href="/api/transporter/reports/roster">
-                <Button className="w-full sm:w-auto" variant="outline">
+              <Button asChild className="w-full sm:w-auto" variant="outline">
+                <a href="/api/transporter/reports/roster" download="roster-history.csv">
                   <Download className="mr-2 h-4 w-4" /> Download Roster CSV
-                </Button>
-              </a>
+                </a>
+              </Button>
             </CardContent>
           </Card>
 
@@ -67,11 +67,11 @@ export default async function TransporterReports() {
               <CardDescription>Export raw data of all orders and bookings assigned to your fleet by clients.</CardDescription>
             </CardHeader>
             <CardContent>
-              <a href="/api/transporter/reports/orders">
-                <Button className="w-full sm:w-auto" variant="outline">
+              <Button asChild className="w-full sm:w-auto" variant="outline">
+                <a href="/api/transporter/reports/orders" download="assigned-orders.csv">
                   <Download className="mr-2 h-4 w-4" /> Download Orders CSV
-                </Button>
-              </a>
+                </a>
+              </Button>
             </CardContent>
           </Card>
 
@@ -84,11 +84,11 @@ export default async function TransporterReports() {
               <CardDescription>Export raw weighbridge transactions including tonnages, timestamps, and waybill numbers.</CardDescription>
             </CardHeader>
             <CardContent>
-              <a href="/api/transporter/reports/transactions">
-                <Button className="w-full sm:w-auto" variant="outline">
+              <Button asChild className="w-full sm:w-auto" variant="outline">
+                <a href="/api/transporter/reports/transactions" download="transporter-transactions.csv">
                   <Download className="mr-2 h-4 w-4" /> Download Transactions CSV
-                </Button>
-              </a>
+                </a>
+              </Button>
             </CardContent>
           </Card>
         </div>

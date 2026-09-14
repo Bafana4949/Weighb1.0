@@ -108,9 +108,22 @@ export default async function RawData({ searchParams }: { searchParams: Promise<
           <h1 className="text-2xl font-semibold text-foreground">Weighbridge Transaction Report</h1>
           <p className="text-xs text-muted-foreground">Every captured weighing, {isoDate(from)} to {isoDate(to)}.</p>
         </div>
-        <div className="flex gap-2">
-          <a href={`/api/reports/export/csv?${exportQuery}`}><Button type="button" variant="outline"><Download size={14} className="mr-1.5" />CSV Export</Button></a>
-          <a href={`/api/reports/export/transactions/pdf?${exportQuery}`}><Button type="button" variant="outline"><FileText size={14} className="mr-1.5" />PDF Export</Button></a>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <a href={`/api/reports/export/csv?${exportQuery}`} download={`weighbridge-transactions-${isoDate(from)}-to-${isoDate(to)}.csv`}>
+              <Download size={14} className="mr-1.5" />CSV Export
+            </a>
+          </Button>
+          <Button asChild variant="outline">
+            <a href={`/api/reports/export/transactions/pdf?${exportQuery}`} target="_blank" rel="noopener noreferrer">
+              <FileText size={14} className="mr-1.5" />View PDF
+            </a>
+          </Button>
+          <Button asChild variant="outline">
+            <a href={`/api/reports/export/transactions/pdf?${exportQuery}&download=true`} download={`transactions-${isoDate(from)}-to-${isoDate(to)}.pdf`}>
+              <Download size={14} className="mr-1.5" />Download PDF
+            </a>
+          </Button>
         </div>
       </div>
 

@@ -43,9 +43,26 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <a href={`/api/reports/export/csv?${exportQuery}`}><Button variant="secondary" size="sm">Download transactions CSV</Button></a>
-        <a href={`/api/reports/export/pdf?${exportQuery}`}><Button variant="secondary" size="sm">Download PDF report</Button></a>
-        <a href={`/api/reports/incidents/export/csv?${exportQuery}`}><Button variant="secondary" size="sm">Download incidents CSV</Button></a>
+        <Button asChild variant="secondary" size="sm">
+          <a href={`/api/reports/export/csv?${exportQuery}`} download={`transactions-${isoDate(range.gte)}-to-${isoDate(range.lte)}.csv`}>
+            Download transactions CSV
+          </a>
+        </Button>
+        <Button asChild variant="secondary" size="sm">
+          <a href={`/api/reports/export/pdf?${exportQuery}`} target="_blank" rel="noopener noreferrer">
+            View PDF report
+          </a>
+        </Button>
+        <Button asChild variant="secondary" size="sm">
+          <a href={`/api/reports/export/pdf?${exportQuery}&download=true`} download={`report-${isoDate(range.gte)}-to-${isoDate(range.lte)}.pdf`}>
+            Download PDF report
+          </a>
+        </Button>
+        <Button asChild variant="secondary" size="sm">
+          <a href={`/api/reports/incidents/export/csv?${exportQuery}`} download={`incidents-${isoDate(range.gte)}-to-${isoDate(range.lte)}.csv`}>
+            Download incidents CSV
+          </a>
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">

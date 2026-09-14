@@ -117,11 +117,13 @@ export async function GET(request: Request) {
   });
 
   const buffer = await renderToBuffer(document as unknown as Parameters<typeof renderToBuffer>[0]);
+  const isDownload = url.searchParams.get("download") === "true";
+  const disposition = isDownload ? "attachment" : "inline";
   
   return new Response(new Uint8Array(buffer), {
     headers: { 
       "content-type": "application/pdf", 
-      "content-disposition": `attachment; filename="transactions-${range.gte.toISOString().slice(0, 10)}-to-${range.lte.toISOString().slice(0, 10)}.pdf"` 
+      "content-disposition": `${disposition}; filename="transactions-${range.gte.toISOString().slice(0, 10)}-to-${range.lte.toISOString().slice(0, 10)}.pdf"` 
     },
   });
 }
