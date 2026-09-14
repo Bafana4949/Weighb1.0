@@ -139,10 +139,13 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
     const form = new FormData(formEl);
     setBusy(true);
     try {
+      const productId = (form.get("productId") as string) || undefined;
+      const selectedProduct = products.find((p) => p.id === productId);
       const payload = {
         type: form.get("type"), siteId: form.get("siteId"),
         sourceId: form.get("sourceId") || undefined, destinationId: form.get("destinationId") || undefined,
-        productId: form.get("productId") || undefined,
+        productId,
+        product: selectedProduct?.name || undefined,
         customerName: form.get("customerName") || undefined, supplierName: form.get("supplierName") || undefined,
         estimatedMassKg: Math.round(Number(form.get("estimatedMassTons")) * 1000),
         stockpile: form.get("stockpile") || undefined,
@@ -154,7 +157,7 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not create order");
       setOrders((current) => [{ ...body.data, bookings: [] }, ...current]);
-      toast({ title: "Order created", body: body.data.orderNumber });
+      toast({ title: "Order created", body: `${body.data.orderNumber} · ${body.data.product}` });
       formEl.reset();
       setCreateOpen(false);
     } catch (error) { toast({ title: "Could not create order", body: String(error), severity: "HIGH" }); }
@@ -167,9 +170,12 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
     const form = new FormData(event.currentTarget);
     setBusy(true);
     try {
+      const productId = (form.get("productId") as string) || undefined;
+      const selectedProduct = products.find((p) => p.id === productId);
       const payload = {
         sourceId: form.get("sourceId") || undefined, destinationId: form.get("destinationId") || undefined,
-        productId: form.get("productId") || undefined,
+        productId,
+        product: selectedProduct?.name || undefined,
         customerName: form.get("customerName") || undefined, supplierName: form.get("supplierName") || undefined,
         estimatedMassKg: Math.round(Number(form.get("estimatedMassTons")) * 1000),
         stockpile: form.get("stockpile") || undefined,
@@ -181,7 +187,7 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not update order");
       setOrders((current) => current.map((o) => o.id === editing.id ? { ...body.data, bookings: o.bookings } : o));
-      toast({ title: "Order updated", body: body.data.orderNumber });
+      toast({ title: "Order updated", body: `${body.data.orderNumber} · ${body.data.product}` });
       setEditing(null);
     } catch (error) { toast({ title: "Could not update order", body: String(error), severity: "HIGH" }); }
     finally { setBusy(false); }

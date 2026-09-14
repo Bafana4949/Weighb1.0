@@ -15,5 +15,6 @@ if (fs.existsSync(configPath)) {
 config({ path: path.resolve(__dirname, '../../.env') });
 
 const [, , ...args] = process.argv;
-const result = spawnSync('npx', ['prisma', ...args], { stdio: 'inherit', shell: true });
+const schemaArg = args.includes('--schema') ? [] : ['--schema', path.resolve(__dirname, 'schema.prisma')];
+const result = spawnSync('npx', ['prisma', ...args, ...schemaArg], { stdio: 'inherit', shell: true });
 process.exit(result.status ?? 1);

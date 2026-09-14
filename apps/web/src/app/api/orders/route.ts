@@ -7,4 +7,62 @@ import { safeUserSelect } from "@/lib/utils";
 import { orderSchema } from "@/lib/validation";
 async function nextOrderNumber(){const count=await prisma.weighbridgeOrder.count();return `ORD-${String(count+1).padStart(6,"0")}`}
 export async function GET(request:Request){const a=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const url=new URL(request.url);const status=url.searchParams.get("status") as OrderStatus|null;const site=url.searchParams.get("site");const scope=a.session!.user.role==="TRANSPORTER"?{}:{site:mineScope(a.session!.user.organisationId)};const orders=await prisma.weighbridgeOrder.findMany({where:{...(status?{status}:{}),...(site?{siteId:site}:{}),...scope},include:{site:true,originSite:true,destinationSite:true,source:true,destination:true,productRef:true,createdBy:{select:safeUserSelect},bookings:{include:{transactions:true}}},orderBy:{createdAt:"desc"}});return ok(orders)}
-export async function POST(request:Request){const a=await requireRole([UserRole.ADMIN]);if(a.error)return a.error;const parsed=orderSchema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return fail(parsed.error.issues[0]?.message??"Invalid order",422);if(a.session!.user.platformRole!=="PLATFORM_SUPER_ADMIN"){delete parsed.data.ratePerTonZar;}const [site]=await Promise.all([prisma.site.findUnique({where:{id:parsed.data.siteId}})]);if(!site||!site.isActive)return fail("Weighbridge site is unavailable",422);const callerOrg=a.session!.user.organisationId;if(callerOrg&&site.organisationId!==callerOrg)return fail("Weighbridge site is unavailable",422);for(let attempt=0;attempt<3;attempt++){try{const orderNumber=await nextOrderNumber();const order=await prisma.weighbridgeOrder.create({data:{...parsed.data, product: parsed.data.product || "UNKNOWN", orderNumber,createdById:a.session!.user.id},include:{site:true,source:true,destination:true,productRef:true,createdBy:{select:safeUserSelect}}});await audit({userId:a.session!.user.id,siteId:site.id,action:"ORDER_CREATED",entityType:"weighbridge_order",entityId:order.id,afterData:order});return ok(order,201)}catch(error){if(attempt===2)return fail("Could not allocate an order number, please retry",409)}}return fail("Could not create order",500)}
+export async function POST(request: Request) {
+  const a = await requireRole([UserRole.ADMIN]);
+  if (a.error) return a.error;
+  const parsed = orderSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid order", 422);
+  if (a.session!.user.platformRole !== "PLATFORM_SUPER_ADMIN") {
+    delete parsed.data.ratePerTonZar;
+  }
+  const site = await prisma.site.findUnique({ where: { id: parsed.data.siteId } });
+  if (!site || !site.isActive) return fail("Weighbridge site is unavailable", 422);
+  const callerOrg = a.session!.user.organisationId;
+  if (callerOrg && site.organisationId !== callerOrg) return fail("Weighbridge site is unavailable", 422);
+
+  // Look up product name from Product record if productId is provided
+  let productName = parsed.data.product;
+  if (parsed.data.productId) {
+    const prod = await prisma.product.findUnique({ where: { id: parsed.data.productId } });
+    if (prod) {
+      productName = prod.name;
+    }
+  }
+  if (!productName || productName.toUpperCase() === "UNKNOWN") {
+    productName = "High-Grade Export Coal (RB1 6000 kcal/kg)";
+  }
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const orderNumber = await nextOrderNumber();
+      const order = await prisma.weighbridgeOrder.create({
+        data: {
+          ...parsed.data,
+          product: productName,
+          orderNumber,
+          createdById: a.session!.user.id,
+        },
+        include: {
+          site: true,
+          source: true,
+          destination: true,
+          productRef: true,
+          createdBy: { select: safeUserSelect },
+        },
+      });
+      await audit({
+        userId: a.session!.user.id,
+        siteId: site.id,
+        action: "ORDER_CREATED",
+        entityType: "weighbridge_order",
+        entityId: order.id,
+        afterData: order,
+      });
+      return ok(order, 201);
+    } catch (error) {
+      if (attempt === 2) return fail("Could not allocate an order number, please retry", 409);
+    }
+  }
+  return fail("Could not create order", 500);
+}
+

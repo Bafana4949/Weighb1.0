@@ -51,11 +51,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const additionalTrailers = bookingDef.trailer2Id ? [bookingDef.trailer2Id] : [];
 
       const booking = await createBooking({
+        siteId: order.siteId,
         vehicleId: bookingDef.vehicleId,
         driverId: bookingDef.driverId,
-        siteId: order.siteId,
-        commodity: order.productRef?.name ?? order.product ?? "Unknown",
         targetTonnageKg,
+        commodity: (order.product && order.product.toUpperCase() !== "UNKNOWN" ? order.product : null)
+          || order.productRef?.name
+          || "High-Grade Export Coal (RB1 6000 kcal/kg)",
         windowStart: new Date(parsed.data.windowStart),
         windowEnd: new Date(parsed.data.windowEnd),
         trailerId: bookingDef.trailer1Id ?? undefined,

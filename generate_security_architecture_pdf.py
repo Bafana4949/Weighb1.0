@@ -1,0 +1,1055 @@
+"""
+Weighbridge & Site Access Control Automation System
+Security Architecture Specification & Threat Modeling PDF Generator
+Generates an executive-grade, multi-page vector PDF containing all security diagrams, threat trees, and audit matrices.
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+def generate_security_html_content() -> str:
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Weighbridge System — Security Architecture & Threat Flow Report</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  @page {
+    size: A4 portrait;
+    margin: 12mm 12mm 15mm 12mm;
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: 'Inter', sans-serif;
+      font-size: 8pt;
+      color: #94a3b8;
+    }
+    @bottom-left {
+      content: "CONFIDENTIAL — Weighbridge Security Architecture & Threat Analysis";
+      font-family: 'Inter', sans-serif;
+      font-size: 8pt;
+      color: #94a3b8;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #1e293b;
+    background-color: #ffffff;
+    line-height: 1.45;
+    font-size: 9pt;
+  }
+
+  .page-break {
+    page-break-before: always;
+  }
+
+  .avoid-break {
+    page-break-inside: avoid;
+  }
+
+  /* Cover Page */
+  .cover-page {
+    height: 96vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 35px 25px 25px 25px;
+    background: linear-gradient(145deg, #090d16 0%, #0f172a 50%, #1e1b4b 100%);
+    color: #ffffff;
+    border-radius: 12px;
+  }
+
+  .cover-header {
+    border-bottom: 2px solid rgba(255, 255, 255, 0.15);
+    padding-bottom: 20px;
+  }
+
+  .cover-badge {
+    display: inline-block;
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    color: #fca5a5;
+    font-size: 9pt;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 20px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 15px;
+  }
+
+  .cover-title {
+    font-size: 24pt;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .cover-subtitle {
+    font-size: 11pt;
+    color: #94a3b8;
+    font-weight: 400;
+    max-width: 90%;
+  }
+
+  .cover-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin: 20px 0;
+  }
+
+  .cover-stat-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .cover-stat-num {
+    font-size: 16pt;
+    font-weight: 800;
+    color: #38bdf8;
+    margin-bottom: 2px;
+  }
+
+  .cover-stat-label {
+    font-size: 7.5pt;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .cover-footer {
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    padding-top: 15px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 8pt;
+    color: #94a3b8;
+  }
+
+  /* Section Styling */
+  .section-container {
+    padding: 5px 0 15px 0;
+  }
+
+  .section-header {
+    border-bottom: 2px solid #0f172a;
+    padding-bottom: 6px;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .section-title {
+    font-size: 13pt;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  .section-tag {
+    font-size: 8pt;
+    font-weight: 600;
+    color: #475569;
+    background: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  h3 {
+    font-size: 10pt;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 10px 0 5px 0;
+  }
+
+  p {
+    margin-bottom: 8px;
+    color: #334155;
+    font-size: 8.5pt;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 8pt;
+  }
+
+  th {
+    background-color: #0f172a;
+    color: #ffffff;
+    font-weight: 600;
+    text-align: left;
+    padding: 6px 8px;
+    border: 1px solid #0f172a;
+  }
+
+  td {
+    padding: 5px 8px;
+    border: 1px solid #cbd5e1;
+    color: #334155;
+  }
+
+  tr:nth-child(even) td {
+    background-color: #f8fafc;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 7pt;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .badge-red { background: #fee2e2; color: #b91c1c; border: 1px solid #f87171; }
+  .badge-amber { background: #fef3c7; color: #b45309; border: 1px solid #fbbf24; }
+  .badge-green { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+  .badge-blue { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+  .badge-purple { background: #f3e8ff; color: #6b21a8; border: 1px solid #d8b4fe; }
+
+  /* Diagram Containers */
+  .diagram-wrapper {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 10px;
+    margin: 10px 0;
+    text-align: center;
+  }
+
+  .diagram-caption {
+    font-size: 7.5pt;
+    font-weight: 600;
+    color: #64748b;
+    margin-top: 6px;
+    text-align: center;
+  }
+
+  .callout {
+    background: #eff6ff;
+    border-left: 4px solid #2563eb;
+    padding: 8px 12px;
+    border-radius: 0 6px 6px 0;
+    margin: 8px 0;
+    font-size: 8pt;
+  }
+
+  .callout-warn {
+    background: #fffbeb;
+    border-left: 4px solid #d97706;
+  }
+
+  .callout-danger {
+    background: #fef2f2;
+    border-left: 4px solid #dc2626;
+  }
+
+  .code-block {
+    background: #0f172a;
+    color: #e2e8f0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 7.5pt;
+    padding: 8px 10px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 6px 0;
+    line-height: 1.35;
+  }
+</style>
+</head>
+<body>
+
+  <!-- COVER PAGE -->
+  <div class="cover-page">
+    <div class="cover-header">
+      <div class="cover-badge">Cybersecurity & Threat Modeling Audit</div>
+      <div class="cover-title">Weighbridge & Industrial Access Control Automation System</div>
+      <div class="cover-subtitle">Enterprise Security Architecture, Threat Vector Modeling, Trust Boundary Mapping, and Forensic Hash-Chain Specification</div>
+    </div>
+
+    <div class="cover-stats-grid">
+      <div class="cover-stat-card">
+        <div class="cover-stat-num">5</div>
+        <div class="cover-stat-label">Trust Boundaries</div>
+      </div>
+      <div class="cover-stat-card">
+        <div class="cover-stat-num">AES-GCM</div>
+        <div class="cover-stat-label">Field-Level PII Crypt</div>
+      </div>
+      <div class="cover-stat-card">
+        <div class="cover-stat-num">SHA-256</div>
+        <div class="cover-stat-label">Chain-Head Ledger</div>
+      </div>
+      <div class="cover-stat-card">
+        <div class="cover-stat-num">CRITICAL</div>
+        <div class="cover-stat-label">MQTT/API Key Risk</div>
+      </div>
+    </div>
+
+    <div>
+      <h4 style="color: #93c5fd; font-size: 9pt; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em;">Security Architecture Scope</h4>
+      <p style="color: #cbd5e1; font-size: 8.5pt; line-height: 1.4;">
+        This document details the complete end-to-end security architecture of the Weighbridge Automation System. It encompasses attack vector identification across cloud and industrial edge domains, trust boundary delineations, cryptographic integrity verification, multi-tenant RBAC enforcement, and actionable remediation for identified architectural vulnerabilities.
+      </p>
+    </div>
+
+    <div class="cover-footer">
+      <div>Author: Senior Security Architect & Systems Analyst</div>
+      <div>Target Codebase: Weighbridge Production Prototype (Next.js 15 / Python AsyncIO / PIC18)</div>
+      <div>Classification: RESTRICTED / AUDIT READY</div>
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- SECTION 1: RECONNAISSANCE & DATA CLASSIFICATION -->
+  <div class="section-container">
+    <div class="section-header">
+      <div class="section-title">1. System Reconnaissance & Data Classification</div>
+      <div class="section-tag">Phase 1 Recon</div>
+    </div>
+
+    <h3>1.1 Codebase Surface & Entry/Exit Point Discovery</h3>
+    <p>
+      The architecture spans a multi-tier hybrid topology comprising a Cloud SaaS Control Plane (Next.js 15, Prisma ORM, PostgreSQL 16), an On-Premise Industrial Edge Gateway (Python AsyncIO Site Daemon, SQLite store-and-forward, Mosquitto MQTT broker), and Physical Fieldbus Hardware (PIC18 Microcontroller, ANPR Cameras, UHF RFID, Load Cells).
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Subsystem</th>
+          <th>Interface / Protocol</th>
+          <th>AuthN / AuthZ Mechanism</th>
+          <th>Security Posture & Findings</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Cloud Web Portal</strong></td>
+          <td>HTTPS (Port 3010 / 443)<br/>Next.js 15 App Router</td>
+          <td>NextAuth v5 (JWT in Cookies)<br/>Coarse & Granular RBAC</td>
+          <td><span class="badge badge-green">Secured</span> Protected via session JWTs and RBAC middleware. Public routes strictly whitelisted.</td>
+        </tr>
+        <tr>
+          <td><strong>Public Onboarding</strong></td>
+          <td><code>/api/transporters/apply</code><br/><code>/api/auth/*</code></td>
+          <td>None (Public Open Ingress)</td>
+          <td><span class="badge badge-amber">Rate Limited</span> Sliding-window memory rate limiter blunts brute force attempts.</td>
+        </tr>
+        <tr>
+          <td><strong>Debug / Seed Routes</strong></td>
+          <td><code>/api/debug</code><br/><code>/api/seed-rbac</code></td>
+          <td>None (Unauthenticated)</td>
+          <td><span class="badge badge-red">VULNERABILITY</span> Sensitive database metadata exposed without token check.</td>
+        </tr>
+        <tr>
+          <td><strong>Cloud Ingestion API</strong></td>
+          <td><code>/api/transactions/reconcile</code><br/><code>/api/incidents</code></td>
+          <td>Static Shared Header<br/><code>x-site-api-key</code></td>
+          <td><span class="badge badge-red">CRITICAL RISK</span> Single universal key shared across all sites with no per-tenant scoping.</td>
+        </tr>
+        <tr>
+          <td><strong>Real-Time Stream</strong></td>
+          <td>Socket.IO (WSS / HTTP Polling)</td>
+          <td>Handshake Auth (<code>auth.siteId</code>)</td>
+          <td><span class="badge badge-amber">Room Scoped</span> Validates site room assignment; unverified user token validation in handshake.</td>
+        </tr>
+        <tr>
+          <td><strong>Edge Message Broker</strong></td>
+          <td>Mosquitto MQTT (Port 1883 / 9001)</td>
+          <td><code>allow_anonymous true</code></td>
+          <td><span class="badge badge-red">EXPOSED</span> Unauthenticated telemetry & alert bus accessible across local site network.</td>
+        </tr>
+        <tr>
+          <td><strong>Fieldbus Controller</strong></td>
+          <td>PIC18 UART Serial / TCP 7001</td>
+          <td>Framing: <code>#WT:...;ST:...$</code></td>
+          <td><span class="badge badge-amber">Plaintext OT</span> Unencrypted RS-232/TCP field communication; reliant on physical perimeter security.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>1.2 Data Classification Matrix (POPIA / GDPR & Commercial Confidentiality)</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Classification</th>
+          <th>Data Elements</th>
+          <th>Storage Location</th>
+          <th>Encryption State</th>
+          <th>Regulatory Impact</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="badge badge-red">Restricted PII</span></td>
+          <td>Driver National ID Number, ID Photo, License Number, Contact Info</td>
+          <td>PostgreSQL (Cloud)<br/>SQLite (Edge Cache)</td>
+          <td><strong>At Rest:</strong> AES-256-GCM (Ciphertext + IV + AuthTag)<br/><strong>Lookup:</strong> SHA-256 Peppered Hash</td>
+          <td>POPIA Act No. 4 / GDPR Compliance Mandatory</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-purple">Security Secrets</span></td>
+          <td>Password Hashes, Password Reset Tokens, Journey QR Tokens, API Keys</td>
+          <td>PostgreSQL, Edge Configs</td>
+          <td><strong>Passwords:</strong> bcrypt (Cost 10+)<br/><strong>Tokens:</strong> SHA-256 Hashed with TTL</td>
+          <td>Critical Authentication Asset</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-blue">Commercial IP</span></td>
+          <td>Net Weight, Mine Ticket Number, Tonnage Allocations, Tariffs, Commodity</td>
+          <td>PostgreSQL Ledger, Edge SQLite</td>
+          <td><strong>At Rest:</strong> Standard DB Encryption<br/><strong>Integrity:</strong> Cryptographic SHA-256 Hash Chain</td>
+          <td>Commercial Mining Confidentiality</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-green">Telemetry / OT</span></td>
+          <td>Scale Raw Readings, Sensor Positions (P1/P2), Gate Event Metadata</td>
+          <td>Mosquitto MQTT, SystemLogs</td>
+          <td><strong>In Transit:</strong> Plaintext JSON/ASCII<br/><strong>At Rest:</strong> PostgreSQL JSONB</td>
+          <td>Operational Quality Assurance</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- SECTION 2: ARCHITECTURAL SECURITY LANDSCAPE -->
+  <div class="section-container">
+    <div class="section-header">
+      <div class="section-title">2. Architectural Security Landscape (Context Diagram)</div>
+      <div class="section-tag">Diagram 1: Context</div>
+    </div>
+
+    <p>
+      The Architectural Security Landscape depicts external actors, cloud edge perimeter protections, internal service boundaries, multi-tenant isolation walls, and edge industrial integrations.
+    </p>
+
+    <div class="diagram-wrapper">
+      <svg viewBox="0 0 760 480" width="100%" height="440" xmlns="http://www.w3.org/2000/svg">
+        <!-- Background Grids -->
+        <rect width="760" height="480" fill="#ffffff" rx="6"/>
+
+        <!-- External Perimeter (Zone 0) -->
+        <rect x="15" y="15" width="170" height="450" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="100" y="35" font-family="Inter" font-size="9" font-weight="800" fill="#991b1b" text-anchor="middle">Zone 0: Untrusted Actors</text>
+
+        <rect x="25" y="55" width="150" height="55" rx="5" fill="#ffffff" stroke="#f87171"/>
+        <text x="100" y="75" font-family="Inter" font-size="8" font-weight="700" fill="#0f172a" text-anchor="middle">🚚 Transporter / Haulier</text>
+        <text x="100" y="90" font-family="Inter" font-size="7" fill="#64748b" text-anchor="middle">Web Portal (HTTPS / MFA)</text>
+
+        <rect x="25" y="125" width="150" height="55" rx="5" fill="#ffffff" stroke="#f87171"/>
+        <text x="100" y="145" font-family="Inter" font-size="8" font-weight="700" fill="#0f172a" text-anchor="middle">👤 Scale Operator / Kiosk</text>
+        <text x="100" y="160" font-family="Inter" font-size="7" fill="#64748b" text-anchor="middle">Local LAN / HTTPS Workstation</text>
+
+        <rect x="25" y="195" width="150" height="55" rx="5" fill="#ffffff" stroke="#f87171"/>
+        <text x="100" y="215" font-family="Inter" font-size="8" font-weight="700" fill="#0f172a" text-anchor="middle">🏢 Mining Administrator</text>
+        <text x="100" y="230" font-family="Inter" font-size="7" fill="#64748b" text-anchor="middle">Admin Console (RBAC Guard)</text>
+
+        <rect x="25" y="265" width="150" height="55" rx="5" fill="#ffffff" stroke="#f87171"/>
+        <text x="100" y="285" font-family="Inter" font-size="8" font-weight="700" fill="#0f172a" text-anchor="middle">🚛 Truck & Driver Asset</text>
+        <text x="100" y="300" font-family="Inter" font-size="7" fill="#64748b" text-anchor="middle">RFID Tag / Plate / QR Token</text>
+
+        <rect x="25" y="335" width="150" height="55" rx="5" fill="#fee2e2" stroke="#dc2626"/>
+        <text x="100" y="355" font-family="Inter" font-size="8" font-weight="700" fill="#b91c1c" text-anchor="middle">🥷 Threat Actor / Attacker</text>
+        <text x="100" y="370" font-family="Inter" font-size="7" fill="#991b1b" text-anchor="middle">Public Internet / RF Sniffer</text>
+
+        <!-- Cloud DMZ & Ingress (Zone 1) -->
+        <rect x="210" y="15" width="160" height="450" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+        <text x="290" y="35" font-family="Inter" font-size="9" font-weight="800" fill="#92400e" text-anchor="middle">Zone 1: Cloud DMZ & WAF</text>
+
+        <rect x="220" y="65" width="140" height="60" rx="5" fill="#ffffff" stroke="#fbbf24"/>
+        <text x="290" y="85" font-family="Inter" font-size="8" font-weight="700" fill="#0f172a" text-anchor="middle">🛡️ Cloud WAF / Proxy</text>
+        <text x="290" y="100" font-family="Inter" font-size="7" fill="#64748b" text-anchor="middle">TLS 1.3 Termination</text>
+        <text x="290" y="112" font-family="Inter" font-size="6.5" fill="#d97706" text-anchor="middle">Sliding Window Rate Limit</text>
+
+        <rect x="220" y="145" width="140" height="75" rx="5" fill="#ffffff" stroke="#fbbf24"/>
+        <text x="290" y="165" font-family="Inter" font-size="8" font-weight="700" fill="#0f172a" text-anchor="middle">⚡ Next.js App Gateway</text>
+        <text x="290" y="180" font-family="Inter" font-size="7" fill="#64748b" text-anchor="middle">Edge Middleware Session Auth</text>
+        <text x="290" y="195" font-family="Inter" font-size="7" fill="#64748b" text-anchor="middle">Role Access Enforcement</text>
+        <text x="290" y="207" font-family="Inter" font-size="6.5" fill="#2563eb" text-anchor="middle">Zod Schema Sanitizer</text>
+
+        <rect x="220" y="240" width="140" height="60" rx="5" fill="#ffffff" stroke="#fbbf24"/>
+        <text x="290" y="260" font-family="Inter" font-size="8" font-weight="700" fill="#0f172a" text-anchor="middle">🔌 Socket.IO Gateway</text>
+        <text x="290" y="275" font-family="Inter" font-size="7" fill="#64748b" text-anchor="middle">WSS Handshake Scoping</text>
+        <text x="290" y="288" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Site & User Multiplexing</text>
+
+        <!-- Cloud Core VPC (Zone 4) -->
+        <rect x="395" y="15" width="170" height="450" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+        <text x="480" y="35" font-family="Inter" font-size="9" font-weight="800" fill="#166534" text-anchor="middle">Zone 4: Cloud Core & Ledger</text>
+
+        <rect x="405" y="55" width="150" height="55" rx="5" fill="#ffffff" stroke="#86efac"/>
+        <text x="480" y="73" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">🔑 NextAuth RBAC Core</text>
+        <text x="480" y="86" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">RolePermission Matrix</text>
+        <text x="480" y="98" font-family="Inter" font-size="6.5" fill="#16a34a" text-anchor="middle">mineScope(orgId) Isolation</text>
+
+        <rect x="405" y="125" width="150" height="60" rx="5" fill="#ffffff" stroke="#86efac"/>
+        <text x="480" y="143" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">⛓️ Hash Chain Reconcile</text>
+        <text x="480" y="156" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Serializable Isolation Tx</text>
+        <text x="480" y="168" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">H_curr = SHA256(Tx || H_prev)</text>
+        <text x="480" y="179" font-family="Inter" font-size="6.5" fill="#2563eb" text-anchor="middle">Confirmation Hash Proof</text>
+
+        <rect x="405" y="195" width="150" height="50" rx="5" fill="#ffffff" stroke="#86efac"/>
+        <text x="480" y="213" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">🚨 Fraud & Anomaly Engine</text>
+        <text x="480" y="226" font-family="Inter" font-size="6.5" fill="#dc2626" text-anchor="middle">Tare Drift / Cloned Plate Check</text>
+        <text x="480" y="238" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Cross-Site Variance Heuristics</text>
+
+        <rect x="405" y="255" width="150" height="50" rx="5" fill="#ffffff" stroke="#86efac"/>
+        <text x="480" y="273" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">📋 Audit Logger (SystemLog)</text>
+        <text x="480" y="286" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Actor, IP, UserAgent Tracking</text>
+        <text x="480" y="297" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Before / After JSON State Diffs</text>
+
+        <rect x="405" y="315" width="150" height="75" rx="5" fill="#0f172a" stroke="#334155"/>
+        <text x="480" y="333" font-family="Inter" font-size="8" font-weight="700" fill="#38bdf8" text-anchor="middle">🗄️ PostgreSQL 16 DB</text>
+        <text x="480" y="347" font-family="Inter" font-size="6.5" fill="#cbd5e1" text-anchor="middle">Prisma Client ORM</text>
+        <text x="480" y="359" font-family="Inter" font-size="6.5" fill="#86efac" text-anchor="middle">AES-256-GCM Encrypted ID Numbers</text>
+        <text x="480" y="371" font-family="Inter" font-size="6.5" fill="#cbd5e1" text-anchor="middle">Immutable Chain-Head Records</text>
+        <text x="480" y="382" font-family="Inter" font-size="6.5" fill="#94a3b8" text-anchor="middle">Private Docker Subnet (15432)</text>
+
+        <!-- Industrial Edge Domain (Zone 2 & 3) -->
+        <rect x="585" y="15" width="160" height="450" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="665" y="35" font-family="Inter" font-size="9" font-weight="800" fill="#1e40af" text-anchor="middle">Zone 2 & 3: Industrial Edge</text>
+
+        <rect x="595" y="55" width="140" height="75" rx="5" fill="#ffffff" stroke="#93c5fd"/>
+        <text x="665" y="73" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">⚙️ Edge Site Daemon</text>
+        <text x="665" y="86" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Python AsyncIO State Machine</text>
+        <text x="665" y="98" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Local ANPR Inference (0.75 Thresh)</text>
+        <text x="665" y="110" font-family="Inter" font-size="6.5" fill="#2563eb" text-anchor="middle">72h Offline Store-and-Forward</text>
+        <text x="665" y="122" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">SyncWorker (POST /reconcile)</text>
+
+        <rect x="595" y="140" width="140" height="50" rx="5" fill="#ffffff" stroke="#93c5fd"/>
+        <text x="665" y="158" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">💾 Local SQLite DB</text>
+        <text x="665" y="171" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">/data/edge.db (WAL Mode)</text>
+        <text x="665" y="182" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Encrypted Backup Archives</text>
+
+        <rect x="595" y="200" width="140" height="55" rx="5" fill="#ffffff" stroke="#f87171"/>
+        <text x="665" y="218" font-family="Inter" font-size="7.5" font-weight="700" fill="#b91c1c" text-anchor="middle">📨 Mosquitto Broker</text>
+        <text x="665" y="231" font-family="Inter" font-size="6.5" fill="#dc2626" text-anchor="middle">Port 1883 / 9001 (Anonymous)</text>
+        <text x="665" y="243" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Telemetry & Alert Pub/Sub</text>
+
+        <rect x="595" y="265" width="140" height="60" rx="5" fill="#ede9fe" stroke="#8b5cf6"/>
+        <text x="665" y="283" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">🎛️ PIC18F MCU Controller</text>
+        <text x="665" y="296" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">RS-232 / TCP 7001 ASCII Frame</text>
+        <text x="665" y="308" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Opto-Isolated GPIO Sensoring</text>
+        <text x="665" y="319" font-family="Inter" font-size="6.5" fill="#7c3aed" text-anchor="middle">Actuator Relays (@CMD:GATE)</text>
+
+        <rect x="595" y="335" width="140" height="55" rx="5" fill="#ffffff" stroke="#cbd5e1"/>
+        <text x="665" y="353" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">🚧 Field Hardware Array</text>
+        <text x="665" y="366" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">ANPR IP Cam, RFID Scanner</text>
+        <text x="665" y="377" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Digital Load Cells, Boom Gates</text>
+
+        <!-- Dynamic Data Flow Vectors -->
+        <!-- User to WAF -->
+        <path d="M 175 80 L 220 80" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <!-- Edge to WAF -->
+        <path d="M 595 90 L 360 90" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <text x="480" y="84" font-family="Inter" font-size="6.5" font-weight="700" fill="#2563eb" text-anchor="middle">HTTPS POST (x-site-api-key)</text>
+
+        <!-- WAF to Next App -->
+        <path d="M 290 125 L 290 145" stroke="#2563eb" stroke-width="1.5"/>
+        <!-- Next App to Core Services -->
+        <path d="M 360 170 L 405 155" stroke="#16a34a" stroke-width="1.5"/>
+        <path d="M 360 190 L 405 220" stroke="#16a34a" stroke-width="1.5"/>
+        <!-- Core Services to DB -->
+        <path d="M 480 185 L 480 315" stroke="#16a34a" stroke-width="1.5"/>
+
+        <!-- Edge Controller to Hardware -->
+        <path d="M 665 130 L 665 140" stroke="#3b82f6" stroke-width="1.5"/>
+        <path d="M 665 190 L 665 200" stroke="#3b82f6" stroke-width="1.5"/>
+        <path d="M 665 255 L 665 265" stroke="#8b5cf6" stroke-width="1.5"/>
+        <path d="M 665 325 L 665 335" stroke="#8b5cf6" stroke-width="1.5"/>
+      </svg>
+      <div class="diagram-caption">Figure 1: Architectural Security Landscape & Perimeter Isolation Boundaries</div>
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- SECTION 3: INTERNAL SECURITY FLOW -->
+  <div class="section-container">
+    <div class="section-header">
+      <div class="section-title">3. Internal Security Flow & Cryptographic Handshake</div>
+      <div class="section-tag">Diagram 2: Sequence</div>
+    </div>
+
+    <p>
+      The sequence below details the multi-party cryptographic verification executed on every physical weighment transaction, from vehicle entry to cryptographic ledger sealing in PostgreSQL.
+    </p>
+
+    <div class="diagram-wrapper">
+      <svg viewBox="0 0 760 500" width="100%" height="480" xmlns="http://www.w3.org/2000/svg">
+        <rect width="760" height="500" fill="#ffffff" rx="6"/>
+
+        <!-- Lifelines Columns -->
+        <!-- Driver -->
+        <line x1="60" y1="45" x2="60" y2="480" stroke="#cbd5e1" stroke-dasharray="3,3"/>
+        <rect x="15" y="15" width="90" height="30" rx="4" fill="#0f172a"/>
+        <text x="60" y="34" font-family="Inter" font-size="7.5" font-weight="700" fill="#ffffff" text-anchor="middle">🚛 Truck/Driver</text>
+
+        <!-- OT Hardware -->
+        <line x1="170" y1="45" x2="170" y2="480" stroke="#cbd5e1" stroke-dasharray="3,3"/>
+        <rect x="125" y="15" width="90" height="30" rx="4" fill="#6b21a8"/>
+        <text x="170" y="34" font-family="Inter" font-size="7.5" font-weight="700" fill="#ffffff" text-anchor="middle">📷 ANPR / MCU</text>
+
+        <!-- Edge Daemon -->
+        <line x1="280" y1="45" x2="280" y2="480" stroke="#cbd5e1" stroke-dasharray="3,3"/>
+        <rect x="235" y="15" width="90" height="30" rx="4" fill="#1e40af"/>
+        <text x="280" y="34" font-family="Inter" font-size="7.5" font-weight="700" fill="#ffffff" text-anchor="middle">⚙️ Edge Daemon</text>
+
+        <!-- Cloud API Gateway -->
+        <line x1="390" y1="45" x2="390" y2="480" stroke="#cbd5e1" stroke-dasharray="3,3"/>
+        <rect x="345" y="15" width="90" height="30" rx="4" fill="#b45309"/>
+        <text x="390" y="34" font-family="Inter" font-size="7.5" font-weight="700" fill="#ffffff" text-anchor="middle">🛡️ Cloud API GW</text>
+
+        <!-- Reconcile Engine -->
+        <line x1="510" y1="45" x2="510" y2="480" stroke="#cbd5e1" stroke-dasharray="3,3"/>
+        <rect x="465" y="15" width="90" height="30" rx="4" fill="#15803d"/>
+        <text x="510" y="34" font-family="Inter" font-size="7.5" font-weight="700" fill="#ffffff" text-anchor="middle">⛓️ Reconcile Core</text>
+
+        <!-- PostgreSQL DB -->
+        <line x1="640" y1="45" x2="640" y2="480" stroke="#cbd5e1" stroke-dasharray="3,3"/>
+        <rect x="595" y="15" width="90" height="30" rx="4" fill="#0f172a"/>
+        <text x="640" y="34" font-family="Inter" font-size="7.5" font-weight="700" fill="#38bdf8" text-anchor="middle">🗄️ PostgreSQL 16</text>
+
+        <!-- Sequence Step 1: Physical Capture -->
+        <line x1="60" y1="65" x2="170" y2="65" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="115" y="60" font-family="Inter" font-size="6.5" font-weight="600" fill="#1e293b" text-anchor="middle">1. Approaches Scale Deck</text>
+
+        <line x1="170" y1="85" x2="280" y2="85" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="225" y="80" font-family="Inter" font-size="6.5" font-weight="600" fill="#1e293b" text-anchor="middle">2. OCR Plate + Tag Frame #WT;RF;P1;P2$</text>
+
+        <!-- Step 2: Edge Pre-Validation -->
+        <line x1="280" y1="110" x2="390" y2="110" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="335" y="105" font-family="Inter" font-size="6.5" font-weight="600" fill="#1e293b" text-anchor="middle">3. GET /api/bookings/active (x-site-api-key)</text>
+
+        <line x1="390" y1="130" x2="640" y2="130" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="515" y="125" font-family="Inter" font-size="6.5" font-weight="600" fill="#1e293b" text-anchor="middle">4. Query Active Booking Window & Tare Baseline</text>
+
+        <line x1="640" y1="150" x2="280" y2="150" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <text x="460" y="145" font-family="Inter" font-size="6.5" font-weight="600" fill="#15803d" text-anchor="middle">5. 200 OK: Booking Verified (Target: 34,000kg, Baseline Tare: 14,200kg)</text>
+
+        <!-- Step 3: Weighment & Positioning -->
+        <rect x="250" y="170" width="60" height="25" rx="3" fill="#eff6ff" stroke="#3b82f6"/>
+        <text x="280" y="185" font-family="Inter" font-size="6" font-weight="700" fill="#1e40af" text-anchor="middle">Positioning Hold &gt;= 2s</text>
+
+        <line x1="170" y1="205" x2="280" y2="205" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="225" y="200" font-family="Inter" font-size="6.5" font-weight="600" fill="#1e293b" text-anchor="middle">6. Scale Stable (#WT:048200;ST:STABLE$)</text>
+
+        <rect x="245" y="218" width="70" height="35" rx="3" fill="#fef3c7" stroke="#d97706"/>
+        <text x="280" y="230" font-family="Inter" font-size="6" font-weight="700" fill="#92400e" text-anchor="middle">Hash Computation</text>
+        <text x="280" y="240" font-family="Inter" font-size="5.5" fill="#b45309" text-anchor="middle">H_curr = SHA256(Tx||H_prev)</text>
+        <text x="280" y="249" font-family="Inter" font-size="5.5" fill="#b45309" text-anchor="middle">Store SQLite /data/edge.db</text>
+
+        <!-- Step 4: Reconcile Post -->
+        <line x1="280" y1="270" x2="390" y2="270" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="335" y="265" font-family="Inter" font-size="6.5" font-weight="600" fill="#1e293b" text-anchor="middle">7. POST /api/transactions/reconcile</text>
+
+        <line x1="390" y1="290" x2="510" y2="290" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="450" y="285" font-family="Inter" font-size="6.5" font-weight="600" fill="#1e293b" text-anchor="middle">8. Zod Validation & Rate Limit Check</text>
+
+        <!-- Step 5: Ledger Ingestion -->
+        <line x1="510" y1="315" x2="640" y2="315" stroke="#16a34a" stroke-width="1.5"/>
+        <text x="575" y="310" font-family="Inter" font-size="6.5" font-weight="600" fill="#166534" text-anchor="middle">9. Serializable Tx: Chain-Head Match Check</text>
+
+        <rect x="475" y="330" width="70" height="30" rx="3" fill="#f0fdf4" stroke="#16a34a"/>
+        <text x="510" y="342" font-family="Inter" font-size="6" font-weight="700" fill="#166534" text-anchor="middle">Integrity Assertions</text>
+        <text x="510" y="352" font-family="Inter" font-size="5.5" fill="#15803d" text-anchor="middle">Net == Gross - Tare</text>
+        <text x="510" y="358" font-family="Inter" font-size="5.5" fill="#15803d" text-anchor="middle">H_prev == DB.Head</text>
+
+        <line x1="510" y1="375" x2="640" y2="375" stroke="#16a34a" stroke-width="1.5"/>
+        <text x="575" y="370" font-family="Inter" font-size="6.5" font-weight="600" fill="#166534" text-anchor="middle">10. INSERT Tx (COMPLETED) + Log Audit</text>
+
+        <line x1="510" y1="400" x2="390" y2="400" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <text x="450" y="395" font-family="Inter" font-size="6.5" font-weight="600" fill="#15803d" text-anchor="middle">11. Trigger Fraud Checks (Tare Drift)</text>
+
+        <line x1="390" y1="420" x2="280" y2="420" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <text x="335" y="415" font-family="Inter" font-size="6.5" font-weight="600" fill="#15803d" text-anchor="middle">12. 201 Created (confirmation_hash)</text>
+
+        <!-- Step 6: Physical Actuation -->
+        <line x1="280" y1="445" x2="170" y2="445" stroke="#7c3aed" stroke-width="1.5"/>
+        <text x="225" y="440" font-family="Inter" font-size="6.5" font-weight="600" fill="#6b21a8" text-anchor="middle">13. @CMD:GATE_OPEN;TGT:EXIT$\r\n</text>
+
+        <line x1="170" y1="465" x2="60" y2="465" stroke="#16a34a" stroke-width="1.5"/>
+        <text x="115" y="460" font-family="Inter" font-size="6.5" font-weight="600" fill="#15803d" text-anchor="middle">14. Green Light Active & Gate Raised</text>
+      </svg>
+      <div class="diagram-caption">Figure 2: End-to-End Cryptographic Handshake & Physical Barrier Control Flow</div>
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- SECTION 4: TRUST BOUNDARY MAP -->
+  <div class="section-container">
+    <div class="section-header">
+      <div class="section-title">4. Trust Boundary Map & Network Segmentation</div>
+      <div class="section-tag">Diagram 3: Boundaries</div>
+    </div>
+
+    <p>
+      Physical and logical separation isolates untrusted public clients from the cloud data plane and protects the fieldbus microcontroller from network-borne exploits.
+    </p>
+
+    <div class="diagram-wrapper">
+      <svg viewBox="0 0 760 490" width="100%" height="470" xmlns="http://www.w3.org/2000/svg">
+        <rect width="760" height="490" fill="#ffffff" rx="6"/>
+
+        <!-- ZONE 0: Public Untrusted -->
+        <rect x="15" y="15" width="220" height="460" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+        <text x="125" y="35" font-family="Inter" font-size="9" font-weight="800" fill="#b91c1c" text-anchor="middle">🔴 Zone 0: Untrusted Public Realm</text>
+
+        <rect x="25" y="55" width="200" height="45" rx="4" fill="#ffffff" stroke="#f87171"/>
+        <text x="125" y="75" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">Public Web Browsers</text>
+        <text x="125" y="88" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Transporter Portals / Driver Mobile</text>
+
+        <rect x="25" y="115" width="200" height="45" rx="4" fill="#fee2e2" stroke="#dc2626"/>
+        <text x="125" y="135" font-family="Inter" font-size="7.5" font-weight="700" fill="#991b1b" text-anchor="middle">🥷 Threat Actor / Botnets</text>
+        <text x="125" y="148" font-family="Inter" font-size="6.5" fill="#b91c1c" text-anchor="middle">DDoS, SQLi, Credential Stuffing</text>
+
+        <rect x="25" y="175" width="200" height="45" rx="4" fill="#ffffff" stroke="#f87171"/>
+        <text x="125" y="195" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">Third-Party SMTP & SMS</text>
+        <text x="125" y="208" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Twilio API & Corporate Mail Gateways</text>
+
+        <!-- BOUNDARY 1 -->
+        <line x1="250" y1="15" x2="250" y2="475" stroke="#f97316" stroke-width="2.5" stroke-dasharray="6,4"/>
+        <text x="250" y="240" font-family="Inter" font-size="7.5" font-weight="800" fill="#c2410c" text-anchor="middle" transform="rotate(-90 250 240)">BOUNDARY 1: TLS 1.3 / WAF PERIMETER</text>
+
+        <!-- ZONE 1 & 4: Cloud Core -->
+        <rect x="265" y="15" width="230" height="460" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+        <text x="380" y="35" font-family="Inter" font-size="9" font-weight="800" fill="#166534" text-anchor="middle">🟢 Zone 1 & 4: Secure Cloud VPC</text>
+
+        <rect x="275" y="55" width="210" height="50" rx="4" fill="#ffffff" stroke="#86efac"/>
+        <text x="380" y="73" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">Cloud DMZ & Rate Limiter</text>
+        <text x="380" y="85" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Memory Token Bucket (240 rpm / IP)</text>
+        <text x="380" y="96" font-family="Inter" font-size="6.5" fill="#16a34a" text-anchor="middle">Next.js Edge Middleware Filter</text>
+
+        <rect x="275" y="115" width="210" height="65" rx="4" fill="#ffffff" stroke="#86efac"/>
+        <text x="380" y="133" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">Application Server (Node.js)</text>
+        <text x="380" y="146" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">NextAuth v5 + RBAC Permission Engine</text>
+        <text x="380" y="158" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Reconciliation Ledger & Fraud Engine</text>
+        <text x="380" y="169" font-family="Inter" font-size="6.5" fill="#2563eb" text-anchor="middle">Socket.IO Notification Multiplexer</text>
+
+        <rect x="275" y="190" width="210" height="75" rx="4" fill="#0f172a" stroke="#334155"/>
+        <text x="380" y="210" font-family="Inter" font-size="8" font-weight="700" fill="#38bdf8" text-anchor="middle">🗄️ PostgreSQL 16 Cluster</text>
+        <text x="380" y="224" font-family="Inter" font-size="6.5" fill="#cbd5e1" text-anchor="middle">Isolated Docker Bridge Network</text>
+        <text x="380" y="236" font-family="Inter" font-size="6.5" fill="#86efac" text-anchor="middle">AES-256-GCM Encrypted ID Columns</text>
+        <text x="380" y="248" font-family="Inter" font-size="6.5" fill="#cbd5e1" text-anchor="middle">Prisma Serializable Isolation Level</text>
+
+        <!-- BOUNDARY 2 -->
+        <line x1="510" y1="15" x2="510" y2="475" stroke="#3b82f6" stroke-width="2.5" stroke-dasharray="6,4"/>
+        <text x="510" y="240" font-family="Inter" font-size="7.5" font-weight="800" fill="#1d4ed8" text-anchor="middle" transform="rotate(-90 510 240)">BOUNDARY 2: WAN SYNC (HTTPS / API KEY)</text>
+
+        <!-- ZONE 3 & 2: Industrial Edge -->
+        <rect x="525" y="15" width="220" height="460" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="635" y="35" font-family="Inter" font-size="9" font-weight="800" fill="#1e40af" text-anchor="middle">🔵 Zone 3: Site Edge LAN</text>
+
+        <rect x="535" y="55" width="200" height="60" rx="4" fill="#ffffff" stroke="#93c5fd"/>
+        <text x="635" y="73" font-family="Inter" font-size="7.5" font-weight="700" fill="#0f172a" text-anchor="middle">⚙️ Edge Site Daemon</text>
+        <text x="635" y="86" font-family="Inter" font-size="6.5" fill="#64748b" text-anchor="middle">Python AsyncIO / SQLite Local Cache</text>
+        <text x="635" y="98" font-family="Inter" font-size="6.5" fill="#16a34a" text-anchor="middle">Offline Autonomous Operation</text>
+
+        <rect x="535" y="125" width="200" height="45" rx="4" fill="#fee2e2" stroke="#f87171"/>
+        <text x="635" y="143" font-family="Inter" font-size="7.5" font-weight="700" fill="#b91c1c" text-anchor="middle">📨 Mosquitto Broker (1883)</text>
+        <text x="635" y="156" font-family="Inter" font-size="6.5" fill="#dc2626" text-anchor="middle">⚠️ Anonymous Access Enabled</text>
+
+        <!-- BOUNDARY 3 -->
+        <rect x="535" y="180" width="200" height="15" rx="3" fill="#f3e8ff" stroke="#a855f7" stroke-dasharray="2,2"/>
+        <text x="635" y="191" font-family="Inter" font-size="6.5" font-weight="700" fill="#6b21a8" text-anchor="middle">BOUNDARY 3: OT FIELDBUS (OPTO-ISOLATED / SERIAL)</text>
+
+        <!-- ZONE 2: OT Domain -->
+        <rect x="535" y="205" width="200" height="110" rx="6" fill="#ede9fe" stroke="#8b5cf6"/>
+        <text x="635" y="222" font-family="Inter" font-size="8" font-weight="800" fill="#5b21b6" text-anchor="middle">🟣 Zone 2: Physical OT Domain</text>
+
+        <rect x="545" y="232" width="180" height="35" rx="3" fill="#ffffff" stroke="#c4b5fd"/>
+        <text x="635" y="247" font-family="Inter" font-size="7" font-weight="700" fill="#0f172a" text-anchor="middle">PIC18F Microcontroller Controller</text>
+        <text x="635" y="258" font-family="Inter" font-size="6" fill="#64748b" text-anchor="middle">Hardware UART / Watchdog Timer</text>
+
+        <rect x="545" y="272" width="180" height="35" rx="3" fill="#ffffff" stroke="#c4b5fd"/>
+        <text x="635" y="287" font-family="Inter" font-size="7" font-weight="700" fill="#0f172a" text-anchor="middle">Physical Barrier Gates & Scales</text>
+        <text x="635" y="298" font-family="Inter" font-size="6" fill="#64748b" text-anchor="middle">12V/24V Industrial Relays / IR Sensors</text>
+      </svg>
+      <div class="diagram-caption">Figure 3: Multi-Zone Network Trust Boundary Map & Isolation Segments</div>
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- SECTION 5: THREAT MODELING & ATTACK VECTORS -->
+  <div class="section-container">
+    <div class="section-header">
+      <div class="section-title">5. Threat Actor Perspective & Attack Vector Mapping</div>
+      <div class="section-tag">STRIDE & MITRE ATT&CK</div>
+    </div>
+
+    <h3>5.1 STRIDE Threat Analysis Matrix</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Threat Category</th>
+          <th>Specific System Attack Vector</th>
+          <th>Impacted Component</th>
+          <th>Severity</th>
+          <th>Mitigation in Place / Required</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Spoofing</strong></td>
+          <td>Physical license plate clone or RF tag replay on weigh deck approach.</td>
+          <td>ANPR Camera / RFID Reader</td>
+          <td><span class="badge badge-amber">Medium</span></td>
+          <td><strong>Multi-Factor Validation:</strong> Mandatory 3-way correlation (Plate + RFID + Booking Window Token) prevents single-factor bypass.</td>
+        </tr>
+        <tr>
+          <td><strong>Tampering</strong></td>
+          <td>Serial frame interception modifying gross weight: <code>#WT:080000$</code> -> <code>#WT:040000$</code>.</td>
+          <td>PIC18 &lt;-&gt; Site Daemon Serial Link</td>
+          <td><span class="badge badge-red">High</span></td>
+          <td><strong>Cryptographic Hash Chain:</strong> SHA-256 seal rejects out-of-sequence head tampering; Tare baseline deviation triggers fraud alert.</td>
+        </tr>
+        <tr>
+          <td><strong>Repudiation</strong></td>
+          <td>Transporter disputes recorded commodity tonnage or denies collection waybill.</td>
+          <td>Cloud Postgres Ledger</td>
+          <td><span class="badge badge-green">Low</span></td>
+          <td><strong>Immutable Confirmation Hash:</strong> Waybill hash generated via SHA-256(IntegrityHash || Timestamp) stored with Operator ID.</td>
+        </tr>
+        <tr>
+          <td><strong>Information Disclosure</strong></td>
+          <td>Unauthenticated reconnaissance via <code>/api/debug</code> leaking all active site IDs.</td>
+          <td>Next.js API Gateway</td>
+          <td><span class="badge badge-red">High</span></td>
+          <td><strong>Remediation:</strong> Remove debug routes from production builds or enforce <code>requirePlatformSuperAdmin()</code> guard.</td>
+        </tr>
+        <tr>
+          <td><strong>Denial of Service</strong></td>
+          <td>Flood of unauthenticated reconciliation requests exhausting Postgres pool.</td>
+          <td><code>POST /api/transactions/reconcile</code></td>
+          <td><span class="badge badge-amber">Medium</span></td>
+          <td><strong>Rate Limiting:</strong> In-memory sliding window throttles source IP to 240 req/min; serializable retries capped at 3 attempts.</td>
+        </tr>
+        <tr>
+          <td><strong>Elevation of Privilege</strong></td>
+          <td>Leaked <code>SITE_DAEMON_API_KEY</code> used by attacker to forge transactions across all sites.</td>
+          <td><code>requireSiteOrRole()</code></td>
+          <td><span class="badge badge-red">CRITICAL</span></td>
+          <td><strong>Remediation:</strong> Replace universal static key with per-site rotating asymmetric Ed25519 signing keys or mTLS certificates.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>5.2 MITRE ATT&CK Matrix Alignment</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Tactic</th>
+          <th>Technique ID</th>
+          <th>Observed Vulnerability / Exploit Scenario</th>
+          <th>Detection Mechanism</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Initial Access</strong></td>
+          <td>T1190 (Exploit Public App)</td>
+          <td>Prototype pollution / ReDoS via legacy <code>xlsx</code> dependency in report parser.</td>
+          <td>Zod schema input sanitization; strict upload size quotas.</td>
+        </tr>
+        <tr>
+          <td><strong>Lateral Movement</strong></td>
+          <td>T1021 (Remote Services)</td>
+          <td>Unauthenticated Mosquitto broker allows rogue MQTT subscriber to listen to all site traffic.</td>
+          <td>Local network segmentation; host-based firewall.</td>
+        </tr>
+        <tr>
+          <td><strong>Defense Evasion</strong></td>
+          <td>T1562 (Impair Defenses)</td>
+          <td>Driver attempts rapid transit between mines to bypass tare inspection.</td>
+          <td><strong>Clone Detection Engine:</strong> Inter-site transit &lt; 20 mins triggers CRITICAL incident.</td>
+        </tr>
+        <tr>
+          <td><strong>Exfiltration</strong></td>
+          <td>T1041 (Exfiltration Over C2)</td>
+          <td>Exfiltration of driver national ID numbers via compromised cloud account.</td>
+          <td><strong>Field-Level Encryption:</strong> Driver IDs stored as AES-256-GCM ciphertext in database.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- SECTION 6: RISK GAP ANALYSIS & SINGLE BIGGEST VULNERABILITY -->
+  <div class="section-container">
+    <div class="section-header">
+      <div class="section-title">6. Security Risk Gap Analysis & Architectural Remediation</div>
+      <div class="section-tag">Executive Finding</div>
+    </div>
+
+    <div class="callout callout-danger">
+      <h4 style="color: #991b1b; font-size: 10pt; font-weight: 800; margin-bottom: 4px;">THE SINGLE BIGGEST ARCHITECTURAL VULNERABILITY:</h4>
+      <p style="color: #7f1d1d; font-size: 8.5pt; font-weight: 600; line-height: 1.4;">
+        <strong>Universal Static Shared API Key (<code>SITE_DAEMON_API_KEY</code>) Combined with Unauthenticated Local MQTT Broker (<code>allow_anonymous: true</code>).</strong>
+      </p>
+    </div>
+
+    <h3>6.1 Vulnerability Deep-Dive & Blast Radius Analysis</h3>
+    <p>
+      In the current implementation, every edge daemon instance across all remote weighbridge sites uses a single, shared static secret passed in the <code>x-site-api-key</code> HTTP header to authenticate against cloud endpoints (such as <code>/api/transactions/reconcile</code>, <code>/api/incidents</code>, and <code>/api/bookings/active</code>).
+    </p>
+    
+    <div class="code-block">
+// apps/web/src/lib/api.ts (Lines 59-65) - CURRENT VULNERABLE PATTERN:
+export async function requireSiteOrRole(request: NextRequest, roles: UserRole[]) {
+  const configured = process.env.SITE_DAEMON_API_KEY;
+  const key = request.headers.get("x-site-api-key");
+  // CRITICAL: A single global key authenticates ANY site without validating siteId bindings!
+  if (configured && key && key === configured) return { error: null, actor: { type: "site" as const, id: "edge-daemon" } };
+  ...
+}
+    </div>
+
+    <p>
+      <strong>Exploitation Path & Consequence:</strong>
+    </p>
+    <ul style="padding-left: 18px; margin-bottom: 10px; font-size: 8.5pt; color: #334155;">
+      <li><strong>1. Physical Compromise of One Remote Edge Gateway:</strong> An adversary gaining physical or local LAN access to a single scale site extracts <code>SITE_DAEMON_API_KEY</code> from <code>config.yaml</code> or environment variables.</li>
+      <li><strong>2. Fleet-Wide Impersonation:</strong> Because the cloud API does not cryptographically bind the API key to a specific <code>site_id</code>, the compromised key allows the attacker to forge weighbridge transactions, inject false calibration states, or exfiltrate scheduled bookings for <em>every mine and weighbridge in the entire enterprise network</em>.</li>
+      <li><strong>3. Field Actuator Overwrite via Anonymous MQTT:</strong> Because Mosquitto runs with <code>allow_anonymous true</code> on ports 1883 and 9001 without TLS, an attacker on the local LAN can inject <code>@CMD:GATE_OPEN</code> commands directly into the broker, opening security boom gates without cloud authorization.</li>
+    </ul>
+
+    <h3>6.2 Recommended Target Architecture (Zero-Trust Edge Identity)</h3>
+    <p>
+      To achieve defense-in-depth, replace the universal static key with <strong>Per-Site Asymmetric Ed25519 Key Pairs</strong> and <strong>mTLS (Mutual TLS)</strong>:
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Component</th>
+          <th>Current Vulnerable State</th>
+          <th>Target Remediated State</th>
+          <th>Implementation Effort</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Edge-to-Cloud AuthN</strong></td>
+          <td>Single shared <code>SITE_DAEMON_API_KEY</code> string.</td>
+          <td><strong>Per-Site Ed25519 Request Signing:</strong> Each edge gateway signs HTTP payload + timestamp with private key; cloud validates against public key mapped to <code>site.id</code>.</td>
+          <td><span class="badge badge-amber">Medium (2 Days)</span></td>
+        </tr>
+        <tr>
+          <td><strong>MQTT Message Security</strong></td>
+          <td>Plaintext TCP on 1883, <code>allow_anonymous true</code>.</td>
+          <td><strong>MQTT over TLS (Port 8883):</strong> ACL rules restricting topics by client certificate; anonymous access disabled.</td>
+          <td><span class="badge badge-green">Low (1 Day)</span></td>
+        </tr>
+        <tr>
+          <td><strong>Debug Endpoint Exposure</strong></td>
+          <td><code>/api/debug</code> and <code>/api/seed-rbac</code> publicly reachable.</td>
+          <td><strong>Gated / Removed:</strong> Remove debug routes from production builds; protect seeding with <code>requirePlatformSuperAdmin()</code>.</td>
+          <td><span class="badge badge-green">Low (1 Hour)</span></td>
+        </tr>
+        <tr>
+          <td><strong>Dependency Hardening</strong></td>
+          <td>Legacy <code>xlsx</code> v0.18.5 with known prototype pollution.</td>
+          <td><strong>Upgrade:</strong> Migrate to <code>exceljs</code> or patched SheetJS v0.20.2+; isolate parsing in worker sandbox.</td>
+          <td><span class="badge badge-green">Low (4 Hours)</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout callout-warn" style="margin-top: 15px;">
+      <strong>Compliance Note:</strong> Implementing per-site asymmetric key signing satisfies ISO 27001 (A.10.1 Cryptographic Controls) and NIST SP 800-82 (Guide to Industrial Control Systems Security).
+    </div>
+  </div>
+
+</body>
+</html>
+"""
+
+def main():
+    print("=" * 70)
+    print("Generating Weighbridge Security Architecture & Threat Flow Report...")
+    print("=" * 70)
+
+    workspace_dir = Path(__file__).parent.resolve()
+    presentation_dir = workspace_dir / "presentation-materials"
+    docs_dir = workspace_dir / "docs"
+    presentation_dir.mkdir(parents=True, exist_ok=True)
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    html_file = presentation_dir / "Weighbridge_Security_Architecture_and_Threat_Flow_Report.html"
+    docs_html_file = docs_dir / "Weighbridge_Security_Architecture_and_Threat_Flow_Report.html"
+    pdf_presentation_file = presentation_dir / "Weighbridge_Security_Architecture_and_Threat_Flow_Report.pdf"
+    pdf_docs_file = docs_dir / "Weighbridge_Security_Architecture_and_Threat_Flow_Report.pdf"
+
+    html_content = generate_security_html_content()
+    html_file.write_text(html_content, encoding="utf-8")
+    docs_html_file.write_text(html_content, encoding="utf-8")
+    print(f"[*] HTML source written to: {html_file}")
+    print(f"[*] HTML source copied to: {docs_html_file}")
+
+    # Browser Candidates for PDF generation
+    browsers = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ]
+    
+    browser_bin = None
+    for candidate in browsers:
+        if os.path.exists(candidate):
+            browser_bin = candidate
+            break
+
+    if not browser_bin:
+        print("[!] No Chrome or Edge executable found. Standalone HTML generated.")
+        return
+
+    print(f"[*] Compiling PDF using headless browser: {browser_bin}")
+    cmd = [
+        browser_bin,
+        "--headless=new",
+        "--disable-gpu",
+        "--no-pdf-header-footer",
+        f"--print-to-pdf={pdf_presentation_file}",
+        str(html_file),
+    ]
+
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0 and pdf_presentation_file.exists():
+            size_kb = pdf_presentation_file.stat().st_size / 1024
+            print(f"[OK] Successfully generated Presentation PDF: {pdf_presentation_file} ({size_kb:.1f} KB)")
+            import shutil
+            shutil.copy2(pdf_presentation_file, pdf_docs_file)
+            print(f"[OK] Successfully copied to Docs directory: {pdf_docs_file}")
+        else:
+            print(f"[!] Headless compilation returned code {res.returncode}: {res.stderr}")
+    except Exception as e:
+        print(f"[!] PDF generation exception: {e}")
+
+if __name__ == "__main__":
+    main()

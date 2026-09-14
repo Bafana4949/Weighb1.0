@@ -64,7 +64,13 @@ class WeighingStateMachine:
         previous = self.state
         self.state = new_state
         LOGGER.info("State %s -> %s (%s)", previous, new_state, reason)
-        self.mqtt.publish("state", {"state": new_state, "previous_state": previous, "reason": reason}, qos=0, retain=True, lane_number=self.lane_number)
+        booking_data = self.booking.model_dump(mode="json") if self.booking else None
+        self.mqtt.publish("state", {
+            "state": new_state,
+            "previous_state": previous,
+            "reason": reason,
+            "booking": booking_data,
+        }, qos=0, retain=True, lane_number=self.lane_number)
         if new_state == WeighingState.IDLE:
             await asyncio.to_thread(self.database.clear_session, self.session_id)
         else:

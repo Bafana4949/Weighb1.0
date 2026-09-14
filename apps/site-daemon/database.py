@@ -190,11 +190,11 @@ class EdgeDatabase:
         with self._write_lock, self._connect() as connection:
             row = connection.execute("SELECT value FROM metadata WHERE key='last_hash'").fetchone()
             current = row[0] if row else GENESIS_HASH
-            transaction_count = connection.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
-            if current != GENESIS_HASH or transaction_count != 0:
-                return False
-            connection.execute("UPDATE metadata SET value=?, updated_at=? WHERE key='last_hash'", (chain_hash.lower(), iso()))
-            return True
+            pending_count = connection.execute("SELECT COUNT(*) FROM sync_queue WHERE status != 'synced'").fetchone()[0]
+            if pending_count == 0 or current == GENESIS_HASH:
+                connection.execute("UPDATE metadata SET value=?, updated_at=? WHERE key='last_hash'", (chain_hash.lower(), iso()))
+                return True
+            return False
 
     def cache_booking(self, booking: ActiveBooking) -> None:
         payload = booking.model_dump(mode="json")

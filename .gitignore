@@ -62,6 +62,7 @@ presentation-materials/
 Weighbridge_RBAC_Matrix*.docx
 
 # Scratch and temporary scripts
+scratch_*.mjs
 inspect-db.mjs
 rename_seed.js
 packages/database/check-db.js

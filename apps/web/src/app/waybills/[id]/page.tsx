@@ -22,7 +22,7 @@ export default async function Waybill({ params }: { params: Promise<{ id: string
       booking: {
         include: {
           transporterOrganisation: true,
-          order: { include: { originSite: true, destinationSite: true } },
+          order: { include: { originSite: true, destinationSite: true, productRef: true } },
           additionalTrailers: { include: { trailer: true }, orderBy: { position: "asc" } },
         },
       },
@@ -39,36 +39,45 @@ export default async function Waybill({ params }: { params: Promise<{ id: string
   const transactionType: "DISPATCH" | "RECEIPT" = isDispatch ? "DISPATCH" : "RECEIPT";
 
   // Status: Complete or Incomplete
-  const isComplete = (t.tareWeightKg > 0 && t.grossWeightKg > 0 && t.exitAt !== null) || !!t.reconciledAt;
+  const isComplete = (t.tareWeightKg > 0 && t.grossWeightKg > 0 && t.exitAt !== null) || t.status === "COMPLETED";
   const status: "COMPLETE" | "INCOMPLETE" = isComplete ? "COMPLETE" : "INCOMPLETE";
 
   // Product name resolution
   const COMMODITY_NAMES: Record<string, string> = {
     COAL: "High-Grade Export Coal (RB1 6000 kcal/kg)",
+    "RB1 EXPORT COAL": "High-Grade Export Coal (RB1 6000 kcal/kg)",
     IRON_ORE: "High-Grade Magnetite Iron Ore 64% Fe",
+    "IRON ORE": "High-Grade Magnetite Iron Ore 64% Fe",
     CHROME: "Washed Metallurgical Chrome Ore 42%",
+    "CHROME ORE": "Washed Metallurgical Chrome Ore 42%",
     PLATINUM: "PGM Platinum Concentrate Ore",
     GOLD: "Gold-Bearing Quartz Reef Ore",
     COPPER: "Refined Copper Cathode / Ore",
     MANGANESE: "High-Grade Lumpy Manganese Ore 44%",
   };
-  let product = order?.product || (t.commodity ? (COMMODITY_NAMES[t.commodity.toUpperCase()] || t.commodity) : null);
-  if (!product || product.toUpperCase() === "UNKNOWN") {
-    product = "High-Grade Export Coal (RB1 6000 kcal/kg)";
-  }
+
+  const rawProduct = (order?.product && order.product.toUpperCase() !== "UNKNOWN" ? order.product : null)
+    || order?.productRef?.name
+    || (t.commodity && t.commodity.toUpperCase() !== "UNKNOWN" ? t.commodity : null)
+    || (t.booking?.commodity && t.booking.commodity.toUpperCase() !== "UNKNOWN" ? t.booking.commodity : null)
+    || "High-Grade Export Coal (RB1 6000 kcal/kg)";
+
+  const product = COMMODITY_NAMES[rawProduct.toUpperCase()] || rawProduct;
 
 
   // Supplier Details
-  const supplierName = isDispatch 
-    ? t.site.organisation.name 
-    : (order?.supplierName || "Seriti Mining Operations");
+  const supplierName = order?.supplierName || (isDispatch ? t.site.organisation.name : "Seriti Mining Operations") || "Seriti Resources (Woestalleen Colliery)";
   const supplierPhone = t.site.organisation.contactPhone;
   const supplierRegNo = t.site.organisation.registrationNo;
 
+  // Order & Stockpile References
+  const orderNumber = order?.orderNumber || (t.booking.reference ? t.booking.reference.replace("BK-", "ORD-") : "ORD-2026-0001");
+  const stockpileRef = order?.stockpile || "Stockpile 1 (ROM-A)";
+
   // Locations
   const dispatchLocation = isDispatch 
-    ? `${t.site.name} (${order?.stockpile ? `Pit ${order.stockpile}` : "Main Stockpile 1"})` 
-    : (order?.originSite?.name || order?.supplierName || "Dispatch Terminal / Pit A");
+    ? `${t.site.name} (${stockpileRef})` 
+    : (order?.originSite?.name || order?.supplierName || "Dispatch Terminal / Pit 1 North");
 
   const receiptLocation = isDispatch 
     ? (order?.customerName || order?.destinationSite?.name || "Richards Bay Coal Terminal (RBCT)") 
@@ -134,13 +143,13 @@ export default async function Waybill({ params }: { params: Promise<{ id: string
             <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Dispatch Location (Origin)</p>
             <p className="mt-1 text-sm font-bold text-zinc-900">{dispatchLocation}</p>
             <p className="mt-2 text-xs text-zinc-600">Supplier: <span className="font-semibold">{supplierName}</span></p>
-            <p className="text-xs text-zinc-600">Stockpile / Pit: <span className="font-mono font-semibold">{order?.stockpile ?? "Pit A - ROM"}</span></p>
+            <p className="text-xs text-zinc-600">Stockpile / Pit: <span className="font-mono font-semibold">{stockpileRef}</span></p>
           </div>
 
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
             <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Receipt Location (Destination)</p>
             <p className="mt-1 text-sm font-bold text-zinc-900">{receiptLocation}</p>
-            <p className="mt-2 text-xs text-zinc-600">Contract Order: <span className="font-mono font-semibold">{order?.orderNumber ?? "—"}</span></p>
+            <p className="mt-2 text-xs text-zinc-600">Contract Order: <span className="font-mono font-semibold">{orderNumber}</span></p>
             <p className="text-xs text-zinc-600">External Ref: <span className="font-mono font-semibold">{t.booking.reference}</span></p>
           </div>
         </div>

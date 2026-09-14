@@ -58,13 +58,14 @@ services:
     profiles: ["cloud"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-weighbridge}:${POSTGRES_PASSWORD:-weighbridge_dev_change_me}@postgres:5432/${POSTGRES_DB:-weighbridge}?schema=public
+      DIRECT_URL: postgresql://${POSTGRES_USER:-weighbridge}:${POSTGRES_PASSWORD:-weighbridge_dev_change_me}@postgres:5432/${POSTGRES_DB:-weighbridge}?schema=public
       AUTH_SECRET: ${AUTH_SECRET:-development-secret-change-before-production}
       AUTH_TRUST_HOST: "true"
       NEXT_PUBLIC_APP_URL: http://localhost:3010
       NEXT_PUBLIC_SOCKET_URL: http://localhost:3010
       SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-dev-site-key-change-me}
       MQTT_URL: mqtt://mosquitto:1883
-      SITE_DAEMON_URL: http://site-daemon-dual:8000
+      SITE_DAEMON_URL: http://site-daemon:8000
       SMTP_HOST: ${SMTP_HOST:-smtp.ethereal.email}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}

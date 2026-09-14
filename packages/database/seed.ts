@@ -1,6 +1,6 @@
 import { createCipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { PrismaClient, BookingStatus, IncidentType, OrganisationType, Severity, UserRole } from "@prisma/client";
+import { PrismaClient, BookingStatus, IncidentType, OrganisationType, OrderStatus, OrderType, Severity, UserRole } from "@prisma/client";
 import { config } from "dotenv";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -395,7 +395,12 @@ async function main(): Promise<void> {
   const destMineA = await prisma.destination.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "Richards Bay Terminal", code: "RBCT", description: "Export terminal", latitude: -28.79, longitude: 32.04 } });
   const destMineB = await prisma.destination.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "Kendal Power Station", code: "KENDAL", description: "Eskom local delivery", latitude: -26.09, longitude: 28.97 } });
   const productMineA = await prisma.product.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "RB1 Export Coal", code: "RB1", description: "High grade export coal, 6000 kcal/kg", unitOfMeasure: "TONNE" } });
-  const productMineB = await prisma.product.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "Eskom Grade Coal", code: "ESKOM", description: "Local power station feed, 4800 kcal/kg", unitOfMeasure: "TONNE" } });
+  const productMineB = await prisma.product.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "RB2 Coal", code: "RB2", description: "Standard export thermal coal, 5500 kcal/kg", unitOfMeasure: "TONNE" } });
+  const productMineC = await prisma.product.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "RB3 Coal", code: "RB3", description: "Secondary grade export coal, 5000 kcal/kg", unitOfMeasure: "TONNE" } });
+  const productMineD = await prisma.product.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "Duff Coal", code: "DUFF", description: "Fine duff power station feed, 0-6mm", unitOfMeasure: "TONNE" } });
+  const productMineE = await prisma.product.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "Eskom Grade Coal", code: "ESKOM", description: "Local power station feed, 4800 kcal/kg", unitOfMeasure: "TONNE" } });
+  const productMineF = await prisma.product.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "Peas Coal", code: "PEAS", description: "Washed industrial sized peas, 6-25mm", unitOfMeasure: "TONNE" } });
+  const productMineG = await prisma.product.create({ data: { organisationId: mine.id, createdByUserId: mineAdmin.id, name: "Nuts Coal", code: "NUTS", description: "Industrial boiler sized nuts, 25-50mm", unitOfMeasure: "TONNE" } });
 
   const sourceClientB = await prisma.source.create({ data: { organisationId: clientB.id, createdByUserId: clientBAdmin.id, name: "Kumba Iron Ore", code: "KUMBA", description: "Iron ore reserve", latitude: -27.7, longitude: 23.0 } });
   const destClientB = await prisma.destination.create({ data: { organisationId: clientB.id, createdByUserId: clientBAdmin.id, name: "Saldanha Steel", code: "SALDANHA", description: "Steel mill", latitude: -33.02, longitude: 18.01 } });
@@ -447,15 +452,86 @@ async function main(): Promise<void> {
     trailers.push(await prisma.trailer.create({ data: { vehicleId: vehicles[i]!.id, trailerId: `TRL-${String(i + 1).padStart(4, "0")}`, registrationNo: `TR ${100 + i} GP`, type: "Side tipper", tareWeightKg: 7800 + i * 100 } }));
   }
 
+  const orders = [
+    await prisma.weighbridgeOrder.create({
+      data: {
+        orderNumber: `ORD-${now.getFullYear()}-00001`,
+        type: OrderType.DISPATCH,
+        siteId: site.id,
+        originSiteId: site.id,
+        destinationSiteId: secondSite.id,
+        customerName: "Richards Bay Coal Terminal (RBCT)",
+        supplierName: "Seriti Resources (Woestalleen Colliery)",
+        product: "High-Grade Export Coal (RB1 6000 kcal/kg)",
+        stockpile: "Stockpile 1 (ROM-A)",
+        notes: "Priority export shipment - Certified Grade A",
+        estimatedMassKg: 500000,
+        status: OrderStatus.ACTIVE,
+        createdById: admin.id,
+      },
+    }),
+    await prisma.weighbridgeOrder.create({
+      data: {
+        orderNumber: `ORD-${now.getFullYear()}-00002`,
+        type: OrderType.DISPATCH,
+        siteId: site.id,
+        originSiteId: site.id,
+        customerName: "Saldanha Steel Works",
+        supplierName: "Seriti Resources (Woestalleen Colliery)",
+        product: "High-Grade Magnetite Iron Ore 64% Fe",
+        stockpile: "Stockpile 2 (Pit 1 North)",
+        notes: "Heavy industrial export batch",
+        estimatedMassKg: 350000,
+        status: OrderStatus.ACTIVE,
+        createdById: admin.id,
+      },
+    }),
+    await prisma.weighbridgeOrder.create({
+      data: {
+        orderNumber: `ORD-${now.getFullYear()}-00003`,
+        type: OrderType.RECEIPT,
+        siteId: site.id,
+        originSiteId: secondSite.id,
+        destinationSiteId: site.id,
+        customerName: "Woestalleen Processing Plant",
+        supplierName: "Dwarsrivier Chrome Mining (Pty) Ltd",
+        product: "Washed Metallurgical Chrome Ore 42%",
+        stockpile: "Stockpile 3 (ROM-B)",
+        notes: "Inbound blend feed raw stock",
+        estimatedMassKg: 400000,
+        status: OrderStatus.ACTIVE,
+        createdById: admin.id,
+      },
+    }),
+    await prisma.weighbridgeOrder.create({
+      data: {
+        orderNumber: `ORD-${now.getFullYear()}-00004`,
+        type: OrderType.DISPATCH,
+        siteId: site.id,
+        originSiteId: site.id,
+        customerName: "Kendal Power Station (Eskom)",
+        supplierName: "Seriti Resources (Woestalleen Colliery)",
+        product: "Eskom Grade Coal (4800 kcal/kg)",
+        stockpile: "Stockpile 4 (Eskom Feed)",
+        notes: "Direct Eskom power grid supply",
+        estimatedMassKg: 600000,
+        status: OrderStatus.ACTIVE,
+        createdById: admin.id,
+      },
+    }),
+  ];
+
   const bookings = [];
   for (let i = 0; i < 8; i += 1) {
-    const status = i < 5 ? BookingStatus.APPROVED : BookingStatus.PENDING;
+    const status = BookingStatus.PENDING;
+    const assignedOrder = orders[i % orders.length]!;
     bookings.push(await prisma.booking.create({
       data: {
         reference: `BK-${now.getFullYear()}-${String(i + 1).padStart(5, "0")}`,
         journeyToken: `JT-${randomUUID().slice(0, 8).toUpperCase()}`,
         transporterOrganisationId: haulier.id,
         siteId: site.id,
+        orderId: assignedOrder.id,
         vehicleId: vehicles[i]!.id,
         trailerId: trailers[i % trailers.length]!.id,
         driverId: drivers[i % drivers.length]!.id,
@@ -466,9 +542,9 @@ async function main(): Promise<void> {
         windowEnd: new Date(now.getTime() + (6 + i) * 60 * 60 * 1000),
         status,
         createdById: transporter.id,
-        approvedById: status === BookingStatus.APPROVED ? admin.id : null,
-        approvedAt: status === BookingStatus.APPROVED ? new Date(now.getTime() - 2 * 60 * 60 * 1000) : null,
-        approvalReason: status === BookingStatus.APPROVED ? "Auto-approved: all compliance checks passed" : null,
+        approvedById: null,
+        approvedAt: null,
+        approvalReason: null,
       },
     }));
   }
@@ -476,6 +552,23 @@ async function main(): Promise<void> {
   // Two approved bookings for the dual-lane site (EX-OO1) — one per lane, so
   // a live daemon pointed at config.dual.docker.yaml has a real truck to
   // check in on each independent deck.
+  const dualSiteOrder = await prisma.weighbridgeOrder.create({
+    data: {
+      orderNumber: `ORD-${now.getFullYear()}-EX001`,
+      type: OrderType.DISPATCH,
+      siteId: secondSite.id,
+      originSiteId: secondSite.id,
+      customerName: "Richards Bay Coal Terminal (RBCT)",
+      supplierName: "Exxaro Resources (Leeuwpan Colliery)",
+      product: "High-Grade Export Coal (RB1 6000 kcal/kg)",
+      stockpile: "Stockpile 1 (ROM-East)",
+      notes: "Dual-lane rapid dispatch consignment",
+      estimatedMassKg: 800000,
+      status: OrderStatus.ACTIVE,
+      createdById: admin.id,
+    },
+  });
+
   const dualSiteBookings = [];
   for (let i = 0; i < 2; i += 1) {
     dualSiteBookings.push(await prisma.booking.create({
@@ -484,6 +577,7 @@ async function main(): Promise<void> {
         journeyToken: `JT-${randomUUID().slice(0, 8).toUpperCase()}`,
         transporterOrganisationId: haulier.id,
         siteId: secondSite.id,
+        orderId: dualSiteOrder.id,
         vehicleId: vehicles[8 + i]!.id,
         trailerId: trailers[(8 + i) % trailers.length]!.id,
         driverId: drivers[(8 + i) % drivers.length]!.id,
@@ -501,15 +595,57 @@ async function main(): Promise<void> {
     }));
   }
 
+  // Completed historical bookings so the 5 live bookings remain in the arrival queue
+  const historicalBookings = [];
+  for (let i = 0; i < 16; i += 1) {
+    const assignedOrder = orders[i % orders.length]!;
+    const v = vehicles[i % vehicles.length]!;
+    const t = trailers[i % trailers.length]!;
+    const d = drivers[i % drivers.length]!;
+    historicalBookings.push(await prisma.booking.create({
+      data: {
+        reference: `BK-${now.getFullYear()}-H${String(i + 1).padStart(4, "0")}`,
+        journeyToken: `JT-${randomUUID().slice(0, 8).toUpperCase()}`,
+        transporterOrganisationId: haulier.id,
+        siteId: site.id,
+        orderId: assignedOrder.id,
+        vehicleId: v.id,
+        trailerId: t.id,
+        driverId: d.id,
+        commodity: assignedOrder.product,
+        commodityDescription: "Export grade mineral consignment",
+        targetTonnageKg: 36000 + (i % 5) * 500,
+        windowStart: new Date(now.getTime() - (7 - (i % 7)) * 24 * 60 * 60 * 1000),
+        windowEnd: new Date(now.getTime() - (7 - (i % 7)) * 24 * 60 * 60 * 1000 + 4 * 60 * 60 * 1000),
+        status: BookingStatus.COMPLETED,
+        createdById: transporter.id,
+        approvedById: admin.id,
+        approvedAt: new Date(now.getTime() - (7 - (i % 7)) * 24 * 60 * 60 * 1000),
+        approvalReason: "Auto-approved: all compliance checks passed",
+      },
+    }));
+  }
+
   let previousHash = "0".repeat(64);
   const transactions = [];
-  for (let i = 0; i < 12; i += 1) {
-    const booking = bookings[i % 5]!;
-    const vehicle = vehicles[i % 5]!;
+  for (let i = 0; i < 16; i += 1) {
+    const booking = historicalBookings[i]!;
+    const vehicle = vehicles[i % vehicles.length]!;
     const driver = drivers[i % drivers.length]!;
-    const gross = vehicle.tareWeightKg + 33000 + i * 180;
+    const gross = vehicle.tareWeightKg + 32500 + (i % 6) * 450;
     const net = gross - vehicle.tareWeightKg;
-    const capturedAt = new Date(now.getTime() - (12 - i) * 3 * 60 * 60 * 1000);
+    
+    // Spread 6 transactions today (within the last 6 hours) and 10 across the past 6 days
+    let capturedAt: Date;
+    if (i >= 10) {
+      // Today: 45 min, 1.5 hr, 2.5 hr, 3.5 hr, 4.5 hr, 5.5 hr ago
+      const hoursAgo = 0.75 + (15 - i) * 0.9;
+      capturedAt = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
+    } else {
+      // Past 6 days
+      capturedAt = new Date(now.getTime() - (6 - Math.floor(i / 2)) * 24 * 60 * 60 * 1000 - (i % 5) * 2 * 60 * 60 * 1000);
+    }
+
     const integrityHash = sha(JSON.stringify({ bookingId: booking.id, gross, net, capturedAt: capturedAt.toISOString(), previousHash }));
     transactions.push(await prisma.weighbridgeTransaction.create({
       data: {
@@ -519,24 +655,24 @@ async function main(): Promise<void> {
         trailerId: booking.trailerId,
         driverId: driver.id,
         siteId: booking.siteId,
-        operatorId: i % 3 === 0 ? operator.id : null,
+        operatorId: i % 2 === 0 ? operator.id : null,
         grossWeightKg: gross,
         tareWeightKg: vehicle.tareWeightKg,
         netWeightKg: net,
         commodity: booking.commodity,
         overload: false,
         overloadVarianceKg: 0,
-        anprConfidence: 0.93,
-        entryPhotoUrl: `/seed/evidence/entry-${i + 1}.jpg`,
-        scalePhotoUrl: `/seed/evidence/scale-${i + 1}.jpg`,
+        anprConfidence: 0.94,
+        entryPhotoUrl: `/seed/evidence/entry-${(i % 5) + 1}.jpg`,
+        scalePhotoUrl: `/seed/evidence/scale-${(i % 5) + 1}.jpg`,
         waybillNumber: waybill(site.code, i + 1),
         confirmationHash: sha(`cloud-confirmation-${i}`),
         previousHash,
         integrityHash,
-        entryAt: new Date(capturedAt.getTime() - 22 * 60 * 1000),
+        entryAt: new Date(capturedAt.getTime() - 14 * 60 * 1000),
         capturedAt,
-        exitAt: new Date(capturedAt.getTime() + 7 * 60 * 1000),
-        turnaroundSeconds: 29 * 60,
+        exitAt: new Date(capturedAt.getTime() + 6 * 60 * 1000),
+        turnaroundSeconds: 20 * 60,
       },
     }));
     previousHash = integrityHash;

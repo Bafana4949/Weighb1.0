@@ -24,7 +24,7 @@ The system operates on a hybrid **Cloud + Distributed Edge** architecture:
 ```
                       ┌──────────────────────────────────────────────┐
                       │             PUBLIC CLOUD SERVER              │
-                      │  (Ubuntu 22.04 LTS / AWS / Azure / DigitalOcean)│
+                      │Ubuntu 22.04 LTS / AWS / Azure / DigitalOcean)│
                       │                                              │
                       │   ┌──────────────────────────────────────┐   │
                       │   │       NGINX / Caddy (Reverse Proxy)  │   │

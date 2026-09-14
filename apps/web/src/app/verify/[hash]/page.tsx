@@ -14,7 +14,7 @@ export default async function Verify({ params }: { params: Promise<{ hash: strin
       booking: {
         include: {
           transporterOrganisation: true,
-          order: { include: { originSite: true, destinationSite: true } },
+          order: { include: { originSite: true, destinationSite: true, productRef: true } },
         },
       },
     },
@@ -26,22 +26,29 @@ export default async function Verify({ params }: { params: Promise<{ hash: strin
   const order = t.booking.order;
   const isDispatch = order?.type ? order.type === "DISPATCH" : true;
   const transactionType = isDispatch ? "DISPATCH" : "RECEIPT";
-  const isComplete = (t.tareWeightKg > 0 && t.grossWeightKg > 0 && t.exitAt !== null) || !!t.reconciledAt;
+  const isComplete = (t.tareWeightKg > 0 && t.grossWeightKg > 0 && t.exitAt !== null) || t.status === "COMPLETED";
   const status = isComplete ? "COMPLETE" : "INCOMPLETE";
 
   const COMMODITY_NAMES: Record<string, string> = {
     COAL: "High-Grade Export Coal (RB1 6000 kcal/kg)",
+    "RB1 EXPORT COAL": "High-Grade Export Coal (RB1 6000 kcal/kg)",
     IRON_ORE: "High-Grade Magnetite Iron Ore 64% Fe",
+    "IRON ORE": "High-Grade Magnetite Iron Ore 64% Fe",
     CHROME: "Washed Metallurgical Chrome Ore 42%",
+    "CHROME ORE": "Washed Metallurgical Chrome Ore 42%",
     PLATINUM: "PGM Platinum Concentrate Ore",
     GOLD: "Gold-Bearing Quartz Reef Ore",
     COPPER: "Refined Copper Cathode / Ore",
     MANGANESE: "High-Grade Lumpy Manganese Ore 44%",
   };
-  let product = order?.product || (t.commodity ? (COMMODITY_NAMES[t.commodity.toUpperCase()] || t.commodity) : null);
-  if (!product || product.toUpperCase() === "UNKNOWN") {
-    product = "High-Grade Export Coal (RB1 6000 kcal/kg)";
-  }
+
+  const rawProduct = (order?.product && order.product.toUpperCase() !== "UNKNOWN" ? order.product : null)
+    || order?.productRef?.name
+    || (t.commodity && t.commodity.toUpperCase() !== "UNKNOWN" ? t.commodity : null)
+    || (t.booking?.commodity && t.booking.commodity.toUpperCase() !== "UNKNOWN" ? t.booking.commodity : null)
+    || "High-Grade Export Coal (RB1 6000 kcal/kg)";
+
+  const product = COMMODITY_NAMES[rawProduct.toUpperCase()] || rawProduct;
 
 
   const supplierName = isDispatch ? t.site.organisation.name : (order?.supplierName || "Seriti Mining Operations");

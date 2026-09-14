@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Mining Weighbridge Digital Twin · External Order Dispatcher</title>
+  <style>
+    :root {
+      --primary: #3b82f6;
+      --accent: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --bg: #030712;
+      --panel-bg: rgba(15, 23, 42, 0.88);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+    }
+
+    /* Top Navigation Header */
+    header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      padding: 0 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(180deg, rgba(3, 7, 18, 0.95) 0%, rgba(3, 7, 18, 0) 100%);
+      z-index: 10;
+      pointer-events: none;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      pointer-events: auto;
+    }
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      background: linear-gradient(135deg, #2563eb, #059669);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 0 20px rgba(37, 99, 235, 0.5);
+    }
+    .brand-info h1 {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: linear-gradient(90deg, #fff, #94a3b8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .brand-info p {
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+
+    .top-controls {
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    }
+    .btn {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .btn:hover {
+      background: rgba(30, 41, 59, 0.9);
+      border-color: rgba(255, 255, 255, 0.25);
+      transform: translateY(-1px);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      border-color: #3b82f6;
+      box-shadow: 0 0 15px rgba(37, 99, 235, 0.4);
+    }
+    .btn-dispatch {
+      background: linear-gradient(135deg, #059669, #047857);
+      border-color: #10b981;
+      font-weight: 700;
+      box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+    }
+
+    /* Camera Bar */
+    .camera-bar {
+      position: absolute;
+      top: 68px;
+      left: 24px;
+      display: flex;
+      gap: 6px;
+      z-index: 10;
+      background: var(--panel-bg);
+      padding: 4px;
+      border-radius: 10px;
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(12px);
+    }
+    .cam-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .cam-btn.active, .cam-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+    .cam-btn.active {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.15);
+    }
+
+    /* Floating Order Dispatcher Panel (External & Non-Invasive) */
+    .dispatcher-panel {
+      position: absolute;
+      top: 68px;
+      right: 24px;
+      width: 340px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.6);
+      z-index: 20;
+    }
+    .dispatcher-title {
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .form-group {
+      margin-bottom: 8px;
+    }
+    .form-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 700;
+      margin-bottom: 3px;
+      display: block;
+    }
+    .form-select, .form-input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-family: inherit;
+      outline: none;
+      transition: border 0.2s;
+    }
+    .form-select:focus, .form-input:focus {
+      border-color: #38bdf8;
+    }
+    .preset-chips {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .chip {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 3px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .chip:hover, .chip.active {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: #3b82f6;
+      color: #60a5fa;
+    }
+
+    /* Bottom SCADA HUDs */
+    .hud-left {
+      position: absolute;
+      bottom: 24px;
+      left: 24px;
+      width: 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 10;
+    }
+    .scada-card {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+    }
+    .weight-display {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 6px 12px;
+      border-radius: 8px;
+      margin: 6px 0;
+    }
+    .weight-val {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 24px;
+      font-weight: 900;
+      color: #fff;
+    }
+    .telemetry-card {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 8px 12px;
+      backdrop-filter: blur(16px);
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 10px;
+      height: 90px;
+      overflow-y: auto;
+      color: #38bdf8;
+      line-height: 1.4;
+    }
+
+    /* 3D Waybill Receipt Modal */
+    .waybill-modal {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0.85);
+      width: 320px;
+      background: #ffffff;
+      color: #0f172a;
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(16, 185, 129, 0.3);
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 11px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      z-index: 100;
+    }
+    .waybill-modal.show {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .waybill-header { text-align: center; border-bottom: 2px dashed #cbd5e1; padding-bottom: 8px; margin-bottom: 8px; }
+    .waybill-header h2 { font-size: 13px; font-weight: 800; color: #0f172a; }
+    .waybill-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+    .waybill-divider { border-top: 1px dashed #cbd5e1; margin: 6px 0; }
+    .waybill-highlight { font-size: 12px; font-weight: 900; color: #059669; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-logo">⚖️</div>
+      <div class="brand-info">
+        <h1>WEIGHBRIDGE 3D DIGITAL TWIN · ORDER RUNNER</h1>
+        <p>External Vehicle Dispatcher & Metrology Workflow Simulator</p>
+      </div>
+    </div>
+    <div class="top-controls">
+      <button id="btnSound" class="btn">🔊 Audio: ON</button>
+      <button id="btnSpeed" class="btn">1.0x Speed</button>
+    </div>
+  </header>
+
+  <!-- Camera Controls -->
+  <div class="camera-bar">
+    <button class="cam-btn active" data-cam="isometric">🎥 Isometric 3D</button>
+    <button class="cam-btn" data-cam="lane1">🚚 Inbound Tare</button>
+    <button class="cam-btn" data-cam="lane2">🚛 Outbound Gross</button>
+    <button class="cam-btn" data-cam="pit">⛏️ Mining Pit</button>
+  </div>
+
+  <!-- External Order Dispatcher Panel -->
+  <div class="dispatcher-panel">
+    <div class="dispatcher-title">
+      <span>📋 Select or Create Order</span>
+      <span style="font-size:9px; color:#10b981; font-weight:700;">● EXTERNAL SIM</span>
+    </div>
+
+    <!-- Quick Presets -->
+    <div class="preset-chips">
+      <div class="chip active" onclick="loadPreset('seriti')">Seriti Coal</div>
+      <div class="chip" onclick="loadPreset('exxaro')">Exxaro Chrome</div>
+      <div class="chip" onclick="loadPreset('glencore')">Glencore Iron</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Order Number / Reference</label>
+      <input type="text" id="orderRef" class="form-input" value="ORD-000104">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Vehicle License Plate</label>
+      <input type="text" id="truckPlate" class="form-input" value="WP 84 ND GP">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Assigned Driver & RFID Card</label>
+      <input type="text" id="driverName" class="form-input" value="John Mokoena (DRV00421)">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Commodity / Stockpile</label>
+      <input type="text" id="commodity" class="form-input" value="Export Coal Grade A">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Target Net Cargo (kg)</label>
+      <input type="number" id="targetNetKg" class="form-input" value="34000">
+    </div>
+
+    <button id="btnDispatch" class="btn btn-dispatch" style="width: 100%; justify-content: center; margin-top: 8px;">
+      🚀 Dispatch Truck with This Order
+    </button>
+  </div>
+
+  <!-- Left SCADA HUD -->
+  <div class="hud-left">
+    <div class="scada-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; font-weight:800;">
+        <span id="activePhaseLabel" style="color:#38bdf8;">ACTIVE PHASE: IDLE</span>
+        <span id="activeOrderDisplay" style="color:#f59e0b;">ORD-000104</span>
+      </div>
+      <div class="weight-display">
+        <div>
+          <span style="font-size:10px; color:#94a3b8; font-weight:700;">ACTIVE SCALE DECK</span>
+          <div id="truckPlateDisplay" style="font-size:12px; color:#fff; font-weight:800;">WP 84 ND GP</div>
+        </div>
+        <div>
+          <span id="liveWeightDisplay" class="weight-val">0</span>
+          <span style="font-size:11px; color:#94a3b8;">kg</span>
+        </div>
+      </div>
+      <div style="font-size:10px; color:#94a3b8; display:flex; justify-content:space-between;">
+        <span>Tare: <strong id="tareDisplay">--</strong></span>
+        <span>Net: <strong id="netDisplay">--</strong></span>
+        <span>Gross: <strong id="grossDisplay">--</strong></span>
+      </div>
+    </div>
+
+    <!-- Live Telemetry Stream -->
+    <div id="telemetryLog" class="telemetry-card">
+      <div>[0.0s] SCADA READY: Select an order and click Dispatch.</div>
+    </div>
+  </div>
+
+  <!-- 3D Waybill Receipt Modal -->
+  <div id="waybillModal" class="waybill-modal">
+    <div class="waybill-header">
+      <h2 id="wbCompany">SERITI RESOURCES</h2>
+      <p style="font-size:9px; color:#64748b;">OFFICIAL LEGAL-FOR-TRADE WAYBILL</p>
+    </div>
+    <div class="waybill-row"><span>ORDER REF:</span><strong id="wbOrderRef">ORD-000104</strong></div>
+    <div class="waybill-row"><span>VEHICLE:</span><strong id="wbPlate">WP 84 ND GP</strong></div>
+    <div class="waybill-row"><span>DRIVER:</span><strong id="wbDriver">John Mokoena</strong></div>
+    <div class="waybill-row"><span>COMMODITY:</span><strong id="wbCommodity">Export Coal Grade A</strong></div>
+    <div class="waybill-divider"></div>
+    <div class="waybill-row"><span>TARE WT:</span><strong id="wbTare">18,480 kg</strong></div>
+    <div class="waybill-row"><span>GROSS WT:</span><strong id="wbGross">52,480 kg</strong></div>
+    <div class="waybill-row waybill-highlight"><span>NET CARGO:</span><span id="wbNet">34,000 kg</span></div>
+    <div class="waybill-divider"></div>
+    <p style="font-size:8px; text-align:center; color:#64748b;">SHA-256: 7f83b1...904b<br>VERIFIED BY EDGE DAEMON</p>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <script>
+    // Presets
+    const PRESETS = {
+      seriti: {
+        order: 'ORD-000104',
+        plate: 'WP 84 ND GP',
+        driver: 'John Mokoena (DRV00421)',
+        commodity: 'Export Coal Grade A',
+        netKg: 34000
+      },
+      exxaro: {
+        order: 'ORD-000105',
+        plate: 'DL 92 XP GP',
+        driver: 'Sipho Dlamini (DRV00712)',
+        commodity: 'Chrome Ore Concentrate',
+        netKg: 42000
+      },
+      glencore: {
+        order: 'ORD-000106',
+        plate: 'KZ 77 BB GP',
+        driver: 'Themba Khumalo (DRV00999)',
+        commodity: 'Run-of-Mine Iron Ore',
+        netKg: 38500
+      }
+    };
+
+    function loadPreset(key) {
+      document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+      const p = PRESETS[key];
+      document.getElementById('orderRef').value = p.order;
+      document.getElementById('truckPlate').value = p.plate;
+      document.getElementById('driverName').value = p.driver;
+      document.getElementById('commodity').value = p.commodity;
+      document.getElementById('targetNetKg').value = p.netKg;
+    }
+
+    // Audio
+    class SoundEngine {
+      constructor() { this.ctx = null; this.enabled = true; }
+      init() { if (!this.ctx) { const AC = window.AudioContext || window.webkitAudioContext; this.ctx = new AC(); } }
+      beep(freq = 800, dur = 0.08, type = 'sine') {
+        if (!this.enabled || !this.ctx) return;
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + dur);
+        } catch(e) {}
+      }
+      gate() { this.beep(160, 0.25, 'sawtooth'); }
+      scan() { this.beep(1200, 0.06, 'sine'); }
+      success() {
+        this.beep(587.33, 0.1, 'sine');
+        setTimeout(() => this.beep(880, 0.18, 'sine'), 90);
+      }
+    }
+    const audio = new SoundEngine();
+
+    // 3D Three.js Scene Setup
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0f1d);
+    scene.fog = new THREE.FogExp2(0x0a0f1d, 0.012);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.maxPolarAngle = Math.PI / 2 - 0.05;
+
+    function setCam(mode) {
+      if (mode === 'isometric') {
+        camera.position.set(-45, 35, 55);
+        controls.target.set(0, 2, 0);
+      } else if (mode === 'lane1') {
+        camera.position.set(-25, 8, -12);
+        controls.target.set(5, 2, -12);
+      } else if (mode === 'lane2') {
+        camera.position.set(25, 8, 12);
+        controls.target.set(-5, 2, 12);
+      } else if (mode === 'pit') {
+        camera.position.set(40, 25, 0);
+        controls.target.set(25, 2, 0);
+      }
+    }
+    setCam('isometric');
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xdbeafe, 0.6));
+    const sun = new THREE.DirectionalLight(0xfffbeb, 1.4);
+    sun.position.set(-50, 70, 40);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
+    scene.add(sun);
+
+    // Ground & Asphalt
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(240, 160), new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.85 }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Central Island & Scale House
+    const island = new THREE.Mesh(new THREE.BoxGeometry(70, 0.4, 8), new THREE.MeshStandardMaterial({ color: 0x475569 }));
+    island.position.set(0, 0.2, 0);
+    island.receiveShadow = true;
+    scene.add(island);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(14, 4.5, 6), new THREE.MeshStandardMaterial({ color: 0x334155 }));
+    cabin.position.set(0, 2.25, 0);
+    cabin.castShadow = true;
+    scene.add(cabin);
+
+    // Scale Decks
+    function makeDeck(x, z) {
+      const g = new THREE.Group();
+      const d = new THREE.Mesh(new THREE.BoxGeometry(24, 0.4, 4.2), new THREE.MeshStandardMaterial({ color: 0x1e3a5f, roughness: 0.4, metalness: 0.6 }));
+      d.position.set(0, 0.45, 0);
+      d.castShadow = true;
+      g.add(d);
+      g.position.set(x, 0, z);
+      scene.add(g);
+      return g;
+    }
+    const deckL1 = makeDeck(0, -12);
+    const deckL2 = makeDeck(0, 12);
+
+    // Boom Gates
+    function makeGate(x, z) {
+      const g = new THREE.Group();
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.6, 0.8), new THREE.MeshStandardMaterial({ color: 0xf97316 }));
+      box.position.set(0, 0.8, 0);
+      g.add(box);
+
+      const pivot = new THREE.Group();
+      pivot.position.set(0, 1.3, 0);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 4.8), new THREE.MeshStandardMaterial({ color: 0xf8fafc }));
+      arm.position.set(0, 0, 2.4);
+      pivot.add(arm);
+      g.add(pivot);
+
+      g.position.set(x, 0, z);
+      scene.add(g);
+      return { g, pivot };
+    }
+    const gL1Entry = makeGate(-15, -14.5);
+    const gL1Exit = makeGate(15, -14.5);
+    const gL2Entry = makeGate(15, 14.5);
+    const gL2Exit = makeGate(-15, 14.5);
+
+    // 3D Single Dynamic Truck (Performs the Full Lifecycle Journey)
+    const truck = new THREE.Group();
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(3.5, 3.2, 2.6), new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.3 }));
+    cab.position.set(6.2, 2.0, 0);
+    cab.castShadow = true;
+    truck.add(cab);
+
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(16.0, 0.6, 2.2), new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.7 }));
+    chassis.position.set(0, 0.8, 0);
+    chassis.castShadow = true;
+    truck.add(chassis);
+
+    const trailer = new THREE.Mesh(new THREE.BoxGeometry(11.5, 2.2, 2.5), new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.5 }));
+    trailer.position.set(-1.8, 1.8, 0);
+    trailer.castShadow = true;
+    truck.add(trailer);
+
+    // Coal Load mesh (Hidden when tare empty, shown when loaded)
+    const coalLoad = new THREE.Mesh(new THREE.DodecahedronGeometry(2.0, 1), new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.9 }));
+    coalLoad.scale.set(2.4, 0.6, 1.1);
+    coalLoad.position.set(-1.8, 3.1, 0);
+    coalLoad.visible = false;
+    truck.add(coalLoad);
+
+    truck.position.set(-65, 0, -12);
+    scene.add(truck);
+
+    // Lifecycle Simulation Engine
+    let activeOrder = PRESETS.seriti;
+    let simStage = 'IDLE'; // IDLE, L1_APPROACH, L1_WEIGH_IN, TO_PIT, LOADING_PIT, TO_L2, L2_WEIGH_OUT, DEPARTED
+    let truckPos = { x: -65, z: -12, rotY: 0 };
+    let liveWeight = 0;
+    let tareWeight = 18480;
+    let simSpeed = 1.0;
+    let stageTimer = 0;
+
+    function log(msg) {
+      const el = document.getElementById('telemetryLog');
+      const row = document.createElement('div');
+      row.textContent = `[SCADA] ${msg}`;
+      el.appendChild(row);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function startOrderDispatch() {
+      audio.init();
+      activeOrder = {
+        order: document.getElementById('orderRef').value,
+        plate: document.getElementById('truckPlate').value,
+        driver: document.getElementById('driverName').value,
+        commodity: document.getElementById('commodity').value,
+        netKg: parseInt(document.getElementById('targetNetKg').value) || 34000
+      };
+
+      document.getElementById('activeOrderDisplay').textContent = activeOrder.order;
+      document.getElementById('truckPlateDisplay').textContent = activeOrder.plate;
+      document.getElementById('tareDisplay').textContent = '--';
+      document.getElementById('netDisplay').textContent = '--';
+      document.getElementById('grossDisplay').textContent = '--';
+      document.getElementById('waybillModal').classList.remove('show');
+
+      // Reset truck position to start
+      truckPos = { x: -65, z: -12, rotY: 0 };
+      coalLoad.visible = false;
+      simStage = 'L1_APPROACH';
+      stageTimer = 0;
+      liveWeight = 0;
+
+      log(`DISPATCH INITIATED: ${activeOrder.order} · Vehicle ${activeOrder.plate}`);
+    }
+
+    function updateLifecycle() {
+      if (simStage === 'IDLE') return;
+
+      // STAGE 1: INBOUND TARE APPROACH (Left -> Right on Lane 1)
+      if (simStage === 'L1_APPROACH') {
+        document.getElementById('activePhaseLabel').textContent = 'PHASE 1: INBOUND TARE APPROACH';
+        truckPos.x += 0.22 * simSpeed;
+        if (truckPos.x >= -28 && truckPos.x < -27) {
+          audio.scan();
+          log(`ANPR SCAN: ${activeOrder.plate} (Confidence 98%) matched active booking!`);
+        }
+        if (truckPos.x >= -22 && truckPos.x < -21) {
+          audio.beep(900, 0.08);
+          audio.gate();
+          log(`RFID AUTH: Driver ${activeOrder.driver} Verified. Lifting Gate 1A.`);
+        }
+        if (truckPos.x >= -22) {
+          gL1Entry.pivot.rotation.x = Math.max(-Math.PI / 2, gL1Entry.pivot.rotation.x - 0.05 * simSpeed);
+        }
+        if (truckPos.x >= 0) {
+          simStage = 'L1_WEIGH_IN';
+          stageTimer = 0;
+          log('POSITIONING: Truck centered on Inbound Deck 1. Locking P1/P2 Beams.');
+        }
+      }
+
+      // STAGE 2: TARE WEIGHING ON DECK 1
+      else if (simStage === 'L1_WEIGH_IN') {
+        document.getElementById('activePhaseLabel').textContent = 'PHASE 2: CAPTURING TARE WEIGHT';
+        gL1Entry.pivot.rotation.x = Math.min(0, gL1Entry.pivot.rotation.x + 0.05 * simSpeed);
+        if (liveWeight < tareWeight) {
+          liveWeight += 350 * simSpeed;
+          if (liveWeight >= tareWeight) {
+            liveWeight = tareWeight;
+            audio.success();
+            document.getElementById('tareDisplay').textContent = `${tareWeight.toLocaleString()} kg`;
+            log(`TARE LOCKED: ${tareWeight.toLocaleString()} kg. Opening Exit Gate to Mining Pit.`);
+            simStage = 'TO_PIT';
+            audio.gate();
+          }
+        }
+      }
+
+      // STAGE 3: DRIVE TO MINING PIT STOCKPILES
+      else if (simStage === 'TO_PIT') {
+        document.getElementById('activePhaseLabel').textContent = 'PHASE 3: TRANSIT TO MINE STOCKPILE';
+        gL1Exit.pivot.rotation.x = Math.max(-Math.PI / 2, gL1Exit.pivot.rotation.x - 0.05 * simSpeed);
+        truckPos.x += 0.25 * simSpeed;
+        if (truckPos.x > 18) {
+          liveWeight = Math.max(0, liveWeight - 500 * simSpeed);
+        }
+        if (truckPos.x >= 45) {
+          // Turn toward mining pit
+          truckPos.rotY = Math.PI / 2;
+          simStage = 'LOADING_PIT';
+          stageTimer = 0;
+          log(`PIT LOADING: Loading ${activeOrder.netKg.toLocaleString()} kg of ${activeOrder.commodity}...`);
+        }
+      }
+
+      // STAGE 4: LOADING AT THE PIT
+      else if (simStage === 'LOADING_PIT') {
+        document.getElementById('activePhaseLabel').textContent = `PHASE 4: LOADING ${activeOrder.commodity.toUpperCase()}`;
+        stageTimer += simSpeed;
+        if (stageTimer > 40) {
+          coalLoad.visible = true; // Show cargo in truck bed
+        }
+        if (stageTimer > 70) {
+          simStage = 'TO_L2';
+          truckPos.rotY = Math.PI; // Face Left (Lane 2 Outbound)
+          truckPos.z = 12;
+          truckPos.x = 55;
+          log('DISPATCH LOADED: Truck returning to Outbound Weighbridge Lane 2.');
+        }
+      }
+
+      // STAGE 5: OUTBOUND GROSS WEIGH-IN (Right -> Left on Lane 2)
+      else if (simStage === 'TO_L2') {
+        document.getElementById('activePhaseLabel').textContent = 'PHASE 5: OUTBOUND GROSS WEIGH-OUT';
+        truckPos.x -= 0.22 * simSpeed;
+        if (truckPos.x <= 22) {
+          gL2Entry.pivot.rotation.x = Math.min(Math.PI / 2, gL2Entry.pivot.rotation.x + 0.05 * simSpeed);
+        }
+        if (truckPos.x <= 0) {
+          simStage = 'L2_WEIGH_OUT';
+          stageTimer = 0;
+          log('POSITIONING: Loaded truck centered on Outbound Deck 2. Locking P1/P2 Beams.');
+        }
+      }
+
+      // STAGE 6: GROSS MEASUREMENT & WAYBILL ISSUANCE
+      else if (simStage === 'L2_WEIGH_OUT') {
+        document.getElementById('activePhaseLabel').textContent = 'PHASE 6: LOCKING GROSS & GENERATING WAYBILL';
+        gL2Entry.pivot.rotation.x = Math.max(0, gL2Entry.pivot.rotation.x - 0.05 * simSpeed);
+        const targetGross = tareWeight + activeOrder.netKg;
+        if (liveWeight < targetGross) {
+          liveWeight += 1200 * simSpeed;
+          if (liveWeight >= targetGross) {
+            liveWeight = targetGross;
+            audio.success();
+            document.getElementById('grossDisplay').textContent = `${targetGross.toLocaleString()} kg`;
+            document.getElementById('netDisplay').textContent = `${activeOrder.netKg.toLocaleString()} kg`;
+
+            // Populate Waybill Modal
+            document.getElementById('wbOrderRef').textContent = activeOrder.order;
+            document.getElementById('wbPlate').textContent = activeOrder.plate;
+            document.getElementById('wbDriver').textContent = activeOrder.driver;
+            document.getElementById('wbCommodity').textContent = activeOrder.commodity;
+            document.getElementById('wbTare').textContent = `${tareWeight.toLocaleString()} kg`;
+            document.getElementById('wbGross').textContent = `${targetGross.toLocaleString()} kg`;
+            document.getElementById('wbNet').textContent = `${activeOrder.netKg.toLocaleString()} kg`;
+            document.getElementById('waybillModal').classList.add('show');
+
+            log(`WAYBILL GENERATED: ${activeOrder.order} · Net Cargo: ${activeOrder.netKg.toLocaleString()} kg.`);
+            simStage = 'DEPARTED';
+            stageTimer = 0;
+            audio.gate();
+          }
+        }
+      }
+
+      // STAGE 7: DEPARTURE & RELEASE TO HIGHWAY
+      else if (simStage === 'DEPARTED') {
+        document.getElementById('activePhaseLabel').textContent = 'PHASE 7: EXIT RELEASED TO PUBLIC HIGHWAY';
+        stageTimer += simSpeed;
+        gL2Exit.pivot.rotation.x = Math.min(Math.PI / 2, gL2Exit.pivot.rotation.x + 0.05 * simSpeed);
+        if (stageTimer > 80) {
+          document.getElementById('waybillModal').classList.remove('show');
+          truckPos.x -= 0.25 * simSpeed;
+          if (truckPos.x < -18) {
+            liveWeight = Math.max(0, liveWeight - 1500 * simSpeed);
+          }
+          if (truckPos.x < -65) {
+            simStage = 'IDLE';
+            gL2Exit.pivot.rotation.x = 0;
+            document.getElementById('activePhaseLabel').textContent = 'CYCLE COMPLETE · READY FOR NEXT DISPATCH';
+            log(`CYCLE COMPLETED: Order ${activeOrder.order} fulfilled. System returned to IDLE.`);
+          }
+        }
+      }
+
+      // Apply Truck Transform
+      truck.position.set(truckPos.x, 0, truckPos.z);
+      truck.rotation.y = truckPos.rotY;
+      document.getElementById('liveWeightDisplay').textContent = Math.round(liveWeight).toLocaleString();
+    }
+
+    // Render loop
+    function animate() {
+      requestAnimationFrame(animate);
+      updateLifecycle();
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Event Listeners
+    document.getElementById('btnDispatch').addEventListener('click', startOrderDispatch);
+
+    document.getElementById('btnSpeed').addEventListener('click', function() {
+      if (simSpeed === 1.0) simSpeed = 2.0;
+      else if (simSpeed === 2.0) simSpeed = 0.5;
+      else simSpeed = 1.0;
+      this.textContent = `${simSpeed.toFixed(1)}x Speed`;
+    });
+
+    document.getElementById('btnSound').addEventListener('click', function() {
+      audio.enabled = !audio.enabled;
+      this.textContent = `🔊 Audio: ${audio.enabled ? 'ON' : 'OFF'}`;
+    });
+
+    document.querySelectorAll('.cam-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.cam-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        setCam(this.dataset.cam);
+      });
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>

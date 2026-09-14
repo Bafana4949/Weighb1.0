@@ -83,7 +83,7 @@ export default async function Sites({ searchParams }: { searchParams: Promise<{ 
               👑 Platform Super Admin Mode
             </Badge>
           ) : (
-            <Badge variant="outline" className="bg-surface text-muted-foreground border-border font-medium px-3 py-1 text-xs">
+            <Badge variant="muted" className="bg-surface text-muted-foreground border-border font-medium px-3 py-1 text-xs">
               🏢 Mine Client Organization Scope
             </Badge>
           )}

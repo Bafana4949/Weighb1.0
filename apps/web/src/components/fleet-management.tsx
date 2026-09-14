@@ -137,11 +137,19 @@ function TrailerSection({ initialTrailers, vehicles, isAdmin }: { initialTrailer
 
   return <Card>
     <CardHeader className="flex-row items-center justify-between">
-      <CardTitle>Trailers</CardTitle>
-      {isAdmin && <div className="flex gap-1.5">
-        <Button size="sm" variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}><Upload size={14} className="mr-1.5" />Import CSV</Button>
-        <Button size="sm" onClick={() => setCreateOpen(true)} disabled={vehicles.length === 0}><Plus size={14} className="mr-1.5" />New trailer</Button>
-      </div>}
+      <div>
+        <CardTitle>Trailers</CardTitle>
+        {!isAdmin && <p className="text-xs text-muted-foreground mt-0.5">Read-only view. Complete the onboarding template to request additions/changes from your Mine Admin.</p>}
+      </div>
+      <div className="flex gap-1.5">
+        <Button size="sm" variant="outline" onClick={() => downloadTemplate("trailers-onboarding-template.csv", ["vehiclePlate", "trailerId", "registrationNo", "type", "tareWeightKg"])}>
+          Download Template
+        </Button>
+        {isAdmin && <>
+          <Button size="sm" variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}><Upload size={14} className="mr-1.5" />Import CSV</Button>
+          <Button size="sm" onClick={() => setCreateOpen(true)} disabled={vehicles.length === 0}><Plus size={14} className="mr-1.5" />New trailer</Button>
+        </>}
+      </div>
     </CardHeader>
     <CardContent className="p-0">
       <Table>
@@ -320,15 +328,23 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
 
   return <Card>
     <CardHeader className="flex-row items-center justify-between">
-      <CardTitle>Vehicles</CardTitle>
-      {isAdmin && <div className="flex gap-1.5">
-        <Button size="sm" variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}><Upload size={14} className="mr-1.5" />Import CSV</Button>
-        <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={14} className="mr-1.5" />New vehicle</Button>
-      </div>}
+      <div>
+        <CardTitle>Vehicles</CardTitle>
+        {!isAdmin && <p className="text-xs text-muted-foreground mt-0.5">Read-only view. Complete the onboarding template to request additions/changes from your Mine Admin.</p>}
+      </div>
+      <div className="flex gap-1.5">
+        <Button size="sm" variant="outline" onClick={() => downloadTemplate("vehicles-onboarding-template.csv", ["plate", "make", "model", "year", "vin", "tareWeightKg", "legalMaxGvwKg", "insuranceExpiry"])}>
+          Download Template
+        </Button>
+        {isAdmin && <>
+          <Button size="sm" variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}><Upload size={14} className="mr-1.5" />Import CSV</Button>
+          <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={14} className="mr-1.5" />New vehicle</Button>
+        </>}
+      </div>
     </CardHeader>
     <CardContent className="p-0">
       <Table>
-        <TableHeader><TableRow><TableHead>Plate</TableHead>{isAdmin && <TableHead>Organisation</TableHead>}<TableHead>Make / model</TableHead><TableHead>Tare / legal max</TableHead><TableHead>Insurance</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>Plate</TableHead>{isAdmin && <TableHead>Organisation</TableHead>}<TableHead>Make / model</TableHead><TableHead>Tare / legal max</TableHead><TableHead>Insurance</TableHead><TableHead>Status</TableHead>{isAdmin && <TableHead>Actions</TableHead>}</TableRow></TableHeader>
         <TableBody>{vehicles.length ? vehicles.map((v) => <TableRow key={v.id}>
           <TableCell className="font-mono">{v.plate}</TableCell>
           {isAdmin && <TableCell>{v.organisation?.name ?? "—"}</TableCell>}
@@ -336,11 +352,11 @@ function VehicleSection({ initialVehicles, organisations, isAdmin, pagination }:
           <TableCell className="font-mono text-xs">{v.tareWeightKg.toLocaleString()} / {v.legalMaxGvwKg.toLocaleString()} kg</TableCell>
           <TableCell className="text-xs">{new Date(v.insuranceExpiry).toLocaleDateString("en-ZA")}</TableCell>
           <TableCell><Badge variant={v.status === "ACTIVE" ? "default" : v.status === "MAINTENANCE" ? "warning" : "destructive"}>{v.status}</Badge></TableCell>
-          <TableCell><div className="flex gap-1.5">
-            {isAdmin && <Button variant="ghost" size="sm" onClick={() => setEditing(v)} disabled={busy}><Pencil size={13} className="mr-1" />Edit</Button>}
-            {isAdmin && <Button variant="ghost" size="sm" onClick={() => openAssignments(v)} disabled={busy}><Handshake size={13} className="mr-1" />Assignments</Button>}
-            {isAdmin && <Button variant="ghost" size="sm" onClick={() => deactivate(v)} disabled={busy || v.status === "SUSPENDED"}><TruckX size={13} className="mr-1" />Deactivate</Button>}
-          </div></TableCell>
+          {isAdmin && <TableCell><div className="flex gap-1.5">
+            <Button variant="ghost" size="sm" onClick={() => setEditing(v)} disabled={busy}><Pencil size={13} className="mr-1" />Edit</Button>
+            <Button variant="ghost" size="sm" onClick={() => openAssignments(v)} disabled={busy}><Handshake size={13} className="mr-1" />Assignments</Button>
+            <Button variant="ghost" size="sm" onClick={() => deactivate(v)} disabled={busy || v.status === "SUSPENDED"}><TruckX size={13} className="mr-1" />Deactivate</Button>
+          </div></TableCell>}
         </TableRow>) : <TableRow><TableCell colSpan={isAdmin ? 7 : 6} className="p-8 text-center text-sm text-muted-foreground">No vehicles registered yet</TableCell></TableRow>}</TableBody>
       </Table>
     </CardContent>
@@ -532,26 +548,34 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
 
   return <Card>
     <CardHeader className="flex-row items-center justify-between">
-      <CardTitle>Drivers</CardTitle>
-      {isAdmin && <div className="flex gap-1.5">
-        <Button size="sm" variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}><Upload size={14} className="mr-1.5" />Import CSV</Button>
-        <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={14} className="mr-1.5" />New driver</Button>
-      </div>}
+      <div>
+        <CardTitle>Drivers</CardTitle>
+        {!isAdmin && <p className="text-xs text-muted-foreground mt-0.5">Read-only view. Complete the onboarding template to request additions/changes from your Mine Admin.</p>}
+      </div>
+      <div className="flex gap-1.5">
+        <Button size="sm" variant="outline" onClick={() => downloadTemplate("drivers-onboarding-template.csv", ["firstName", "lastName", "idNumber", "rfidTag", "licenceNumber", "licenceExpiry"])}>
+          Download Template
+        </Button>
+        {isAdmin && <>
+          <Button size="sm" variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}><Upload size={14} className="mr-1.5" />Import CSV</Button>
+          <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={14} className="mr-1.5" />New driver</Button>
+        </>}
+      </div>
     </CardHeader>
     <CardContent className="p-0">
       <Table>
-        <TableHeader><TableRow><TableHead>Driver</TableHead>{isAdmin && <TableHead>Organisation</TableHead>}<TableHead>RFID tag</TableHead><TableHead>Licence</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>Driver</TableHead>{isAdmin && <TableHead>Organisation</TableHead>}<TableHead>RFID tag</TableHead><TableHead>Licence</TableHead><TableHead>Status</TableHead>{isAdmin && <TableHead>Actions</TableHead>}</TableRow></TableHeader>
         <TableBody>{drivers.length ? drivers.map((d) => <TableRow key={d.id}>
           <TableCell>{d.firstName} {d.lastName}</TableCell>
           {isAdmin && <TableCell>{d.organisation?.name ?? "—"}</TableCell>}
           <TableCell className="font-mono text-xs">{d.rfidTag}</TableCell>
           <TableCell><p className="font-mono text-xs">{d.licenceNumber}</p><p className="text-2xs text-muted-foreground">Expires {new Date(d.licenceExpiry).toLocaleDateString("en-ZA")}</p></TableCell>
           <TableCell>{d.blacklistStatus ? <Badge variant="destructive" title={d.blacklistReason ?? undefined}>BLACKLISTED</Badge> : new Date(d.licenceExpiry) < new Date() ? <Badge variant="destructive" title="This driver cannot be booked until their licence is renewed">LICENCE EXPIRED</Badge> : <Badge variant="default">ACTIVE</Badge>}</TableCell>
-          <TableCell><div className="flex gap-1.5">
-            {isAdmin && <Button variant="ghost" size="sm" onClick={() => setEditing(d)} disabled={busy}><Pencil size={13} className="mr-1" />Edit</Button>}
-            {isAdmin && <Button variant="ghost" size="sm" onClick={() => toggleBlacklist(d)} disabled={busy}>{d.blacklistStatus ? <ShieldCheck size={13} className="mr-1" /> : <Ban size={13} className="mr-1" />}{d.blacklistStatus ? "Clear" : "Blacklist"}</Button>}
-            {isAdmin && <Button variant="ghost" size="sm" onClick={() => deactivate(d)} disabled={busy}><Users size={13} className="mr-1" />Remove</Button>}
-          </div></TableCell>
+          {isAdmin && <TableCell><div className="flex gap-1.5">
+            <Button variant="ghost" size="sm" onClick={() => setEditing(d)} disabled={busy}><Pencil size={13} className="mr-1" />Edit</Button>
+            <Button variant="ghost" size="sm" onClick={() => toggleBlacklist(d)} disabled={busy}>{d.blacklistStatus ? <ShieldCheck size={13} className="mr-1" /> : <Ban size={13} className="mr-1" />}{d.blacklistStatus ? "Clear" : "Blacklist"}</Button>
+            <Button variant="ghost" size="sm" onClick={() => deactivate(d)} disabled={busy}><Users size={13} className="mr-1" />Remove</Button>
+          </div></TableCell>}
         </TableRow>) : <TableRow><TableCell colSpan={isAdmin ? 6 : 5} className="p-8 text-center text-sm text-muted-foreground">No drivers registered yet</TableCell></TableRow>}</TableBody>
       </Table>
     </CardContent>

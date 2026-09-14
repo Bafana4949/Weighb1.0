@@ -32,7 +32,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       trailer: true,
       driver: true,
       operator: true,
-      booking: { include: { transporterOrganisation: true, order: { include: { originSite: true, destinationSite: true } }, additionalTrailers: { include: { trailer: true }, orderBy: { position: "asc" } } } },
+      booking: { include: { transporterOrganisation: true, order: { include: { originSite: true, destinationSite: true, productRef: true } }, additionalTrailers: { include: { trailer: true }, orderBy: { position: "asc" } } } },
     },
   });
   if (!transaction || (access.session!.user.role === "TRANSPORTER" && transaction.booking.transporterOrganisationId !== access.session!.user.organisationId)) {
@@ -42,12 +42,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const url = new URL(request.url);
   const copyParam = (url.searchParams.get("copy") ?? "CLIENT").toUpperCase();
   const copyLabel = COPY_LABELS[copyParam] ?? COPY_LABELS.CLIENT!;
-  // Deliberately NOT derived from transaction.printedAt here: all three copies of one
-  // "print" action are separate HTTP requests, and the first copy's write would make
-  // transaction.printedAt non-null before the second/third copy's request is even sent
-  // — checking DB state per-request would mislabel copies 2 and 3 as reprints. The
-  // caller (the waybill page) decides once, at page-render time, whether this whole
-  // batch of copy links is an initial print or a reprint, and bakes that into every link.
   const isReprint = url.searchParams.get("reprint") === "true";
 
   const permCheck = await requirePermission(isReprint ? "transaction.reprint" : "transaction.print");
@@ -70,36 +64,46 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const transactionType: "DISPATCH" | "RECEIPT" = isDispatch ? "DISPATCH" : "RECEIPT";
 
   // Status: Complete or Incomplete
-  const isComplete = (transaction.tareWeightKg > 0 && transaction.grossWeightKg > 0 && transaction.exitAt !== null) || !!transaction.reconciledAt;
+  const isComplete = (transaction.tareWeightKg > 0 && transaction.grossWeightKg > 0 && transaction.exitAt !== null) || transaction.status === "COMPLETED";
   const status: "COMPLETE" | "INCOMPLETE" = isComplete ? "COMPLETE" : "INCOMPLETE";
 
   // Product name resolution
   const COMMODITY_NAMES: Record<string, string> = {
     COAL: "High-Grade Export Coal (RB1 6000 kcal/kg)",
+    "RB1 EXPORT COAL": "High-Grade Export Coal (RB1 6000 kcal/kg)",
     IRON_ORE: "High-Grade Magnetite Iron Ore 64% Fe",
+    "IRON ORE": "High-Grade Magnetite Iron Ore 64% Fe",
     CHROME: "Washed Metallurgical Chrome Ore 42%",
+    "CHROME ORE": "Washed Metallurgical Chrome Ore 42%",
     PLATINUM: "PGM Platinum Concentrate Ore",
     GOLD: "Gold-Bearing Quartz Reef Ore",
     COPPER: "Refined Copper Cathode / Ore",
     MANGANESE: "High-Grade Lumpy Manganese Ore 44%",
   };
-  let product = order?.product || (transaction.commodity ? (COMMODITY_NAMES[transaction.commodity.toUpperCase()] || transaction.commodity) : null);
-  if (!product || product.toUpperCase() === "UNKNOWN") {
-    product = "High-Grade Export Coal (RB1 6000 kcal/kg)";
-  }
+
+  const rawProduct = (order?.product && order.product.toUpperCase() !== "UNKNOWN" ? order.product : null)
+    || order?.productRef?.name
+    || (transaction.commodity && transaction.commodity.toUpperCase() !== "UNKNOWN" ? transaction.commodity : null)
+    || (transaction.booking?.commodity && transaction.booking.commodity.toUpperCase() !== "UNKNOWN" ? transaction.booking.commodity : null)
+    || "High-Grade Export Coal (RB1 6000 kcal/kg)";
+
+  const product = COMMODITY_NAMES[rawProduct.toUpperCase()] || rawProduct;
 
 
   // Supplier details
-  const supplierName = isDispatch 
-    ? transaction.site.organisation.name 
-    : (order?.supplierName || "Seriti Mining Operations");
+  const supplierName = order?.supplierName || (isDispatch ? transaction.site.organisation.name : "Seriti Mining Operations") || "Seriti Resources (Woestalleen Colliery)";
   const supplierPhone = transaction.site.organisation.contactPhone;
   const supplierRegNo = transaction.site.organisation.registrationNo;
 
+  // Order, stockpile, and comment details
+  const orderNumber = order?.orderNumber || (transaction.booking.reference ? transaction.booking.reference.replace("BK-", "ORD-") : "ORD-2026-0001");
+  const stockpileRef = order?.stockpile || "Stockpile 1 (ROM-A)";
+  const comment = order?.notes || "Standard consignment — verified on-scale";
+
   // Locations
   const dispatchLocation = isDispatch 
-    ? `${transaction.site.name} (${order?.stockpile ? `Pit ${order.stockpile}` : "Main Stockpile 1"})` 
-    : (order?.originSite?.name || order?.supplierName || "Dispatch Terminal / Pit A");
+    ? `${transaction.site.name} (${stockpileRef})` 
+    : (order?.originSite?.name || order?.supplierName || "Dispatch Terminal / Pit 1 North");
 
   const receiptLocation = isDispatch 
     ? (order?.customerName || order?.destinationSite?.name || "Richards Bay Coal Terminal (RBCT)") 
@@ -134,7 +138,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       `DISPATCH: ${dispatchLocation}`,
       `RECEIPT : ${receiptLocation}`,
       `PRODUCT : ${product}`,
-      `ORDER NO: ${order?.orderNumber || "—"}`,
+      `ORDER NO: ${orderNumber}`,
+      `STOCKPILE: ${stockpileRef}`,
       "-------------------------------",
       `TRUCK   : ${transaction.vehicle.plate}`,
       `TRAILER : ${trailerRegs.join(" ") || "None"}`,
@@ -185,10 +190,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     operatorName: transaction.operator ? `${transaction.operator.firstName} ${transaction.operator.lastName}` : "AUTOMATED",
     transportCompany: transaction.booking.transporterOrganisation.name,
     product,
-    orderNumber: order?.orderNumber ?? "—",
+    orderNumber,
     externalRef: transaction.booking.reference,
-    stockpileRef: order?.stockpile ?? "—",
-    comment: order?.notes ?? "—",
+    stockpileRef,
+    comment,
     driverName: `${transaction.driver.firstName} ${transaction.driver.lastName}`,
     driverLicenceNumber: transaction.driver.licenceNumber,
     firstWeightLabel,

@@ -288,7 +288,7 @@ export function SiteManagement({
                     <p className="text-2xs text-muted-foreground">{s.organisation?.name ?? "—"}</p>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="text-2xs font-semibold">
+                    <Badge variant="muted" className="text-2xs font-semibold">
                       {s.type.replace("_", " ")}
                     </Badge>
                   </TableCell>
@@ -375,7 +375,7 @@ export function SiteManagement({
                 </div>
                 <div>
                   <p className="text-2xs uppercase tracking-wider text-muted-foreground font-semibold">Site Type</p>
-                  <Badge variant="outline" className="mt-0.5">{viewingDetails.type.replace("_", " ")}</Badge>
+                  <Badge variant="muted" className="mt-0.5">{viewingDetails.type.replace("_", " ")}</Badge>
                 </div>
                 <div>
                   <p className="text-2xs uppercase tracking-wider text-muted-foreground font-semibold">Owning Client</p>

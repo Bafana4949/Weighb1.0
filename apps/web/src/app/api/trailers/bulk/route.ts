@@ -19,7 +19,7 @@ const trailerRowSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const auth = await requireRole([UserRole.TRANSPORTER, UserRole.ADMIN]);
+  const auth = await requireRole([UserRole.ADMIN]);
   if (auth.error) return auth.error;
 
   const parsed = bulkSchema.safeParse(await request.json().catch(() => null));

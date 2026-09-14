@@ -33,10 +33,6 @@ TEST_PLATES_DIR = SITE_DAEMON_DIR / "test_plates"
 # the real pre-existing fixtures instead of a generated stand-in.
 _STATIC_SAMPLES = {
     "AB123CDGP": "sample_01.png",
-    "CD456EFMP": "sample_02.png",
-    "EF789GHGP": "sample_03.png",
-    "GH234JKNW": "sample_04.png",
-    "UV135WXKZN": "sample_05.png",
 }
 
 _CANVAS_SIZE = (800, 450)
@@ -85,14 +81,14 @@ def render_plate_image(plate: str) -> str:
     filename = f"generated-{_slug(plate)}.png"
     destination = TEST_PLATES_DIR / filename
 
-    image = Image.new("RGB", _CANVAS_SIZE, (40, 44, 52))
+    image = Image.new("RGB", _CANVAS_SIZE, (35, 38, 45))
     draw = ImageDraw.Draw(image)
-    draw.rectangle((90, 90, 710, 340), fill=(130, 135, 142))  # vehicle body
+    draw.rectangle((90, 90, 710, 340), fill=(120, 125, 132))  # vehicle body
     left, top, right, bottom = _PLATE_BOX
-    draw.rounded_rectangle((left, top, right, bottom), radius=10, fill=(245, 242, 230), outline=(10, 10, 10), width=4)
+    draw.rounded_rectangle((left, top, right, bottom), radius=8, fill=(255, 255, 255), outline=(0, 0, 0), width=6)
 
     text = plate.upper()
-    font = _load_bold_font(56)
+    font = _load_bold_font(52)
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
     box_width, box_height = right - left, bottom - top
@@ -100,7 +96,7 @@ def render_plate_image(plate: str) -> str:
         left + (box_width - text_width) / 2 - bbox[0],
         top + (box_height - text_height) / 2 - bbox[1],
     )
-    draw.text(origin, text, font=font, fill=(10, 10, 10))
+    draw.text(origin, text, font=font, fill=(0, 0, 0))
 
     image.save(destination)
     return f"test_plates/{filename}"

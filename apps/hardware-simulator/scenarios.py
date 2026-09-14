@@ -125,7 +125,7 @@ def detect_site(daemon_url: str) -> str:
     return site_id
 
 
-def get_queued_plates(web_url: str, api_key: str, site: str) -> list[str]:
+def get_queued_bookings(web_url: str, api_key: str, site: str) -> list[dict[str, object]]:
     request = urllib.request.Request(
         f"{web_url.rstrip('/')}/api/bookings/queue?site={site}",
         headers={"x-site-api-key": api_key},
@@ -135,22 +135,28 @@ def get_queued_plates(web_url: str, api_key: str, site: str) -> list[str]:
             body = json.loads(response.read())
     except urllib.error.URLError as error:
         raise RuntimeError(f"Could not reach cloud API at {web_url}: {error}") from error
-    queue = body.get("data") or []
-    return [item["plate"] for item in queue]
+    return body.get("data") or []
+
+
+def get_queued_plates(web_url: str, api_key: str, site: str) -> list[str]:
+    bookings = get_queued_bookings(web_url, api_key, site)
+    return [str(item["plate"]) for item in bookings]
+
 
 def next_queued_plate(web_url: str, api_key: str, site: str) -> str:
     """Ask the cloud which vehicles currently have an approved booking in the
-    arrival window, and pick one — so 'normal' can be run with no arguments
-    and still simulate a real, different truck each time instead of the
-    operator having to look up and type a plate."""
-    queue = get_queued_plates(web_url, api_key, site)
-    if not queue:
+    arrival window, and pick the next scheduled one (FIFO)."""
+    bookings = get_queued_bookings(web_url, api_key, site)
+    if not bookings:
         raise RuntimeError(
             "No approved bookings in the current arrival window — nothing to simulate. "
-            "If this is a fresh database, run `npm run db:migrate && npm run db:seed` once. "
-            "Otherwise create a booking as the transporter user first, or pass --plate explicitly."
+            "Assign a truck from an Order as Mine Admin or create a booking as Transporter first."
         )
-    return random.choice(queue)
+    first = bookings[0]
+    plate = str(first["plate"])
+    order_info = first.get("orderNumber") or first.get("reference")
+    print(f"Auto-selected next truck from the arrival queue: {plate} ({order_info})")
+    return plate
 
 
 def ramp(start: int, stop: int, seconds: float, jitter: int = 0) -> None:
@@ -179,7 +185,8 @@ def scenario_normal_weighment(
         print(f"Auto-detected daemon site: {site}")
     if plate is None:
         plate = next_queued_plate(web_url, api_key, site)
-        print(f"Auto-selected next truck from the arrival queue: {plate}")
+    else:
+        print(f"Using explicitly specified truck plate: {plate}")
     if HAS_PIL:
         print("Capturing registration automatically via ANPR (rendering plate photo, running OCR)...")
         result = check_in_via_anpr(plate, daemon_url)
