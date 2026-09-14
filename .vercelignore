@@ -1,0 +1,7 @@
+pnpm-lock.yaml
+*.bak*
+.env.local
+.env*.local
+node_modules
+apps/web/.next
+.next

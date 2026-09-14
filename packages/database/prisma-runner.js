@@ -22,5 +22,20 @@ try {
 const [, , ...args] = process.argv;
 const schemaPath = path.resolve(__dirname, 'schema.prisma');
 const schemaArg = args.includes('--schema') ? [] : ['--schema', schemaPath];
-const result = spawnSync('npx', ['prisma', ...args, ...schemaArg], { stdio: 'inherit', shell: true });
+
+const localBin = path.resolve(__dirname, 'node_modules/.bin/prisma' + (process.platform === 'win32' ? '.cmd' : ''));
+const rootBin = path.resolve(__dirname, '../../node_modules/.bin/prisma' + (process.platform === 'win32' ? '.cmd' : ''));
+
+let cmd = 'npx';
+let cmdArgs = ['--yes', 'prisma@6.8.2', ...args, ...schemaArg];
+
+if (fs.existsSync(localBin)) {
+  cmd = localBin;
+  cmdArgs = [...args, ...schemaArg];
+} else if (fs.existsSync(rootBin)) {
+  cmd = rootBin;
+  cmdArgs = [...args, ...schemaArg];
+}
+
+const result = spawnSync(cmd, cmdArgs, { stdio: 'inherit', shell: true });
 process.exit(result.status ?? 1);
