@@ -3,15 +3,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dotNext = path.resolve(__dirname, '.next');
-const nestedTarget = path.resolve(__dirname, 'apps', 'web', '.next');
+const localNext = path.resolve(__dirname, '.next');
+const rootNext = path.resolve(__dirname, '..', '..', '.next');
 
-if (fs.existsSync(dotNext)) {
+if (fs.existsSync(localNext)) {
   try {
-    fs.mkdirSync(path.dirname(nestedTarget), { recursive: true });
-    fs.cpSync(dotNext, nestedTarget, { recursive: true });
-    console.log('✓ Synced .next to apps/web/.next for Vercel output compatibility');
+    fs.mkdirSync(rootNext, { recursive: true });
+    fs.cpSync(localNext, rootNext, { recursive: true });
+    console.log('✓ Synced apps/web/.next to root .next for Vercel deployment');
   } catch (err) {
-    console.warn('Warning syncing .next output directory:', err);
+    console.warn('Warning syncing .next to root:', err);
   }
 }
