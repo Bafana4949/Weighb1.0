@@ -160,10 +160,9 @@ export default async function Waybill({ params }: { params: Promise<{ id: string
           <Field label="Trailer(s)" value={trailerReg ?? "None (Rigid)"} />
           <Field label="Transporter / Carrier" value={t.booking.transporterOrganisation.name} strong />
           <Field label="Driver Name" value={`${t.driver.firstName} ${t.driver.lastName}`} />
-          <Field label="Driver Licence No." value={t.driver.licenceNumber} />
-          <Field label="Weighbridge Operator" value={t.operator ? `${t.operator.firstName} ${t.operator.lastName}` : "AUTOMATED SCALE DECK"} />
+          <Field label="Weighbridge Operator" value={t.operator ? `${t.operator.firstName} ${t.operator.lastName}` : "MANUAL WEIGHBRIDGE"} />
           <Field label="Product Consignment" value={product} highlight />
-          <Field label="Axle Compliance" value={t.overload ? `FAIL (Overload +${formatKg(t.overloadVarianceKg)})` : "LEGAL COMPLIANT (PASS)"} status={!t.overload} />
+          <Field label="Scale Reading Mode" value="CERTIFIED MANUAL SCALE" />
         </dl>
 
         {/* 1st & 2nd Weighment Stages Table */}
@@ -211,7 +210,7 @@ export default async function Waybill({ params }: { params: Promise<{ id: string
           </div>
           <div className="w-1/2">
             <p className="text-xs uppercase font-bold text-zinc-500">Weighbridge Official</p>
-            <p className="mt-1 font-bold text-zinc-900">{t.operator ? `${t.operator.firstName} ${t.operator.lastName}` : "AUTOMATED SYSTEM"}</p>
+            <p className="mt-1 font-bold text-zinc-900">{t.operator ? `${t.operator.firstName} ${t.operator.lastName}` : "MANUAL WEIGHBRIDGE"}</p>
             <p className="text-xs text-zinc-600">Certified Metrology Scale</p>
             <div className="mt-8 border-t border-zinc-900 pt-1 text-xs text-zinc-500">Operator Signature</div>
           </div>

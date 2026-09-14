@@ -1,1 +1,0 @@
-# Replaced by requirements-core.txt, requirements-anpr.txt, requirements-dev.txt

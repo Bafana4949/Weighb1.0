@@ -211,9 +211,9 @@ export function WaybillDocument(props: WaybillDocumentProps) {
               <Text style={styles.cardValue}>{props.operatorName}</Text>
             </View>
             <View style={styles.cardRow}>
-              <Text style={styles.cardLabel}>Load Compliance:</Text>
-              <Text style={[styles.cardValue, { color: props.overload ? "#b91c1c" : "#15803d" }]}>
-                {props.overload ? `FAIL (+${formatKg(props.overloadVarianceKg)})` : "LEGAL COMPLIANT (PASS)"}
+              <Text style={styles.cardLabel}>Operation Mode:</Text>
+              <Text style={[styles.cardValue, { color: "#15803d" }]}>
+                CERTIFIED MANUAL SCALE
               </Text>
             </View>
             {props.comment !== "—" && (

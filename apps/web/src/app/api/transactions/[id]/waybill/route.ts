@@ -155,7 +155,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       `GROSS   : ${formatKg(transaction.grossWeightKg)}`,
       `TARE    : ${formatKg(transaction.tareWeightKg)}`,
       `NET     : ${formatKg(transaction.netWeightKg)}`,
-      `AXLE    : ${transaction.overload ? `OVERLOAD (+${formatKg(transaction.overloadVarianceKg)})` : "PASS (LEGAL)"}`,
+      `MODE    : CERTIFIED MANUAL SCALE`,
       "===============================",
       `HASH: ${transaction.integrityHash}`,
     ].filter((line): line is string => line !== null).join("\n");

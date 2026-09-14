@@ -1,116 +1,914 @@
 "use client";
 import { useEffect, useState } from "react";
-import { io } from "socket.io-client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, DoorOpen, Siren, TrafficCone, Truck } from "lucide-react";
+import {
+  Truck,
+  Scale,
+  CheckCircle2,
+  Printer,
+  RefreshCw,
+  FileText,
+  Clock,
+  ExternalLink,
+  PlusCircle,
+  ArrowDownCircle,
+  ArrowUpCircle,
+} from "lucide-react";
 import { WeightGauge } from "@/components/weight-gauge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { StatusDot } from "@/components/status-dot";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { useToast } from "@/components/providers";
 import { formatKg } from "@/lib/utils";
 
-type Telemetry = { weight_kg: number; position_sensor_1: boolean; position_sensor_2: boolean; rfid_tag?: string | null; scale_status: string };
-type QueueItem = { id: string; reference: string; plate: string; driver: string; trailer: string; transporter: string; commodity: string; orderNumber?: string | null; customerName?: string | null; stockpile?: string | null; status: string };
-type ActiveBooking = { plate: string; reference: string; rfid: string } | null;
+type QueueItem = {
+  id: string;
+  reference: string;
+  plate: string;
+  driver: string;
+  trailer: string;
+  transporter: string;
+  commodity: string;
+  orderNumber?: string | null;
+  customerName?: string | null;
+  stockpile?: string | null;
+  status: string;
+};
 
-export function LiveOperatorDashboard({ siteCode, availableSites, initialQueue, stats }: { siteCode: string; availableSites: {code: string, name: string}[]; initialQueue: QueueItem[]; stats: { trucks: number; tonnage: number; turnaround: number; pending: number } }) {
-  const [telemetry, setTelemetry] = useState<Telemetry>({ weight_kg: 0, position_sensor_1: false, position_sensor_2: false, scale_status: "UNSTABLE" });
-  const [state, setState] = useState("IDLE");
-  const [connected, setConnected] = useState(false);
-  const [syncPending, setSyncPending] = useState(0);
-  const [hardwareOnline, setHardwareOnline] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [activeBooking, setActiveBooking] = useState<ActiveBooking>(null);
+type ActiveWeighment = {
+  id: string;
+  bookingId: string;
+  bookingRef: string;
+  plate: string;
+  driver: string;
+  trailer: string;
+  transporter: string;
+  commodity: string;
+  orderNumber?: string | null;
+  customerName?: string | null;
+  supplierName?: string | null;
+  stockpile?: string | null;
+  firstWeightKg: number;
+  firstWeightType: "TARE" | "GROSS";
+  firstWeightCapturedAt: string;
+  minutesInYard: number;
+};
+
+export function LiveOperatorDashboard({
+  siteCode,
+  availableSites,
+  initialQueue,
+  stats,
+}: {
+  siteCode: string;
+  availableSites: { code: string; name: string }[];
+  initialQueue: QueueItem[];
+  stats: { trucks: number; tonnage: number; turnaround: number; pending: number };
+}) {
+  const [manualWeightKg, setManualWeightKg] = useState<number>(0);
   const [queue, setQueue] = useState<QueueItem[]>(initialQueue);
+  const [activeWeighments, setActiveWeighments] = useState<ActiveWeighment[]>([]);
+  const [loadingManual, setLoadingManual] = useState(false);
+
+  // Manual Weighment Modal States
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"FIRST" | "SECOND" | "DIRECT">("FIRST");
+  const [selectedBookingId, setSelectedBookingId] = useState<string>("");
+  const [selectedWeighmentId, setSelectedWeighmentId] = useState<string>("");
+  const [firstWeightInput, setFirstWeightInput] = useState<string>("");
+  const [secondWeightInput, setSecondWeightInput] = useState<string>("");
+  const [weighType, setWeighType] = useState<"DISPATCH" | "RECEIPT">("DISPATCH");
+  const [mineTicketInput, setMineTicketInput] = useState<string>("");
+  const [notesInput, setNotesInput] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const [completedResult, setCompletedResult] = useState<any>(null);
+
   const toast = useToast();
   const router = useRouter();
 
+  // Fetch Queue from server
   const fetchQueue = async () => {
     try {
       const response = await fetch(`/api/bookings/queue?site=${siteCode}`, { cache: "no-store" });
       if (!response.ok) return;
       const body = await response.json();
       if (Array.isArray(body.data)) setQueue(body.data);
-    } catch { /* Keep showing the last known queue on transient errors. */ }
+    } catch {
+      /* Keep showing last known queue */
+    }
+  };
+
+  // Fetch In-Progress Manual Weighments
+  const fetchActiveWeighments = async () => {
+    try {
+      setLoadingManual(true);
+      const res = await fetch(`/api/transactions/manual?site=${siteCode}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data?.activeWeighments)) {
+        setActiveWeighments(data.data.activeWeighments);
+      }
+    } catch {
+      /* Ignore transient error */
+    } finally {
+      setLoadingManual(false);
+    }
   };
 
   useEffect(() => {
-    const socketUrl = typeof window !== "undefined" ? window.location.origin : (process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:3010");
-    const socket = io(socketUrl, { auth: { siteId: siteCode } });
-    socket.on("connect", () => setConnected(true));
-    socket.on("disconnect", () => setConnected(false));
-    socket.on("telemetry", (message) => {
-      if (!message.payload.lane || message.payload.lane === "north" || message.payload.lane === "default") {
-        setTelemetry(message.payload);
-      }
-    });
-    socket.on("state", (message) => {
-      if (!message.payload.lane || message.payload.lane === "north" || message.payload.lane === "default") {
-        setState(message.payload.state);
-        if (message.payload.booking) {
-          setActiveBooking({
-            plate: message.payload.booking.plate,
-            reference: message.payload.booking.reference,
-            rfid: message.payload.booking.driver_rfid,
-          });
-        } else if (message.payload.state === "IDLE" || message.payload.state === "COMPLETE") {
-          setActiveBooking(null);
-        }
-      }
-    });
-    socket.on("hardware:status", (message) => setHardwareOnline(message.payload.health === "ONLINE"));
-    socket.on("sync", (message) => setSyncPending(message.payload.pending_count ?? 0));
-    socket.on("alerts", (message) => toast({ title: message.payload.title ?? "Site alert", body: message.payload.description, severity: message.payload.severity }));
-    socket.on("transaction", (message) => {
-      toast({ title: "Transaction captured", body: `${message.payload.waybill_number} · ${formatKg(message.payload.net_weight_kg)}` });
-      fetchQueue();
-    });
-    return () => { socket.disconnect(); };
-  }, [siteCode, toast]);
-
-  useEffect(() => {
-    const timer = setInterval(async () => {
-      try {
-        const response = await fetch("/api/edge/live", { cache: "no-store" });
-        if (!response.ok) return;
-        const body = await response.json();
-        if (body.data?.telemetry) setTelemetry(body.data.telemetry);
-        if (body.data?.state) setState(body.data.state);
-        setSyncPending(body.data?.pending_sync ?? 0);
-        setHardwareOnline(Boolean(body.data?.serial_connected));
-        if (body.data?.booking) {
-          setActiveBooking({ plate: body.data.booking.plate, reference: body.data.booking.reference, rfid: body.data.booking.driver_rfid });
-        }
-      } catch { /* Socket remains the primary transport. */ }
-    }, 3_000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     fetchQueue();
-    const timer = setInterval(fetchQueue, 4_000);
+    fetchActiveWeighments();
+    const timer = setInterval(() => {
+      fetchQueue();
+      fetchActiveWeighments();
+    }, 5_000);
     return () => clearInterval(timer);
   }, [siteCode]);
 
-  async function command(action: string, target?: string, value?: string) {
-    const key = `${action}-${target ?? value}`; setBusy(key);
-    try {
-      const response = await fetch("/api/edge/command", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, target, value }) });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Command failed");
-      toast({ title: "Hardware command sent", body: body.data.command });
-    } catch (error) { toast({ title: "Command failed", body: String(error), severity: "HIGH" }); }
-    finally { setBusy(null); }
+  // Open modal prefilled for 1st weighment
+  function handleOpenFirstWeigh(booking?: QueueItem) {
+    setCompletedResult(null);
+    setModalMode("FIRST");
+    if (booking) {
+      setSelectedBookingId(booking.id);
+    } else if (queue.length > 0 && queue[0]) {
+      setSelectedBookingId(queue[0].id);
+    }
+    setFirstWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "");
+    setSecondWeightInput("");
+    setModalOpen(true);
   }
 
-  const stable = telemetry.scale_status === "STABLE" && telemetry.position_sensor_1 && telemetry.position_sensor_2;
-  const stateVariant = state === "FAULT" || state === "MANUAL_MODE" ? "destructive" : state === "COMPLETE" ? "default" : "warning";
-  return <div className="space-y-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-semibold text-foreground">Live Weighbridge</h1><div className="mt-1 flex items-center gap-2"><select className="h-7 cursor-pointer rounded-sm border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" value={siteCode} onChange={(e) => router.push(`/operator?site=${e.target.value}`)}>{availableSites.map(s => <option key={s.code} value={s.code}>{s.name} ({s.code})</option>)}</select><p className="text-xs text-muted-foreground">· 100 ms hardware telemetry</p></div></div><div className="flex items-center gap-2"><Badge variant={connected ? "default" : "destructive"}>{connected ? "Live stream" : "Polling fallback"}</Badge><Badge variant={stateVariant}>{state}</Badge></div></div>
-  <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{[{label:"Trucks today",value:stats.trucks.toLocaleString(),unit:"vehicles"},{label:"Net tonnage",value:(stats.tonnage/1000).toFixed(1),unit:"t"},{label:"Avg turnaround",value:String(Math.round(stats.turnaround/60)),unit:"min"},{label:"Pending queue",value:String(stats.pending),unit:"items"}].map((item)=><Card key={item.label}><CardContent className="p-3"><p className="text-xs uppercase tracking-wider text-muted-foreground">{item.label}</p><p className="mt-1 font-mono text-2xl font-semibold text-foreground">{item.value}<span className="ml-1 text-xs font-normal text-muted-foreground">{item.unit}</span></p></CardContent></Card>)}</div>
-  <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]"><Card><CardHeader className="flex-row items-center justify-between"><div><CardTitle>Scale reading</CardTitle><p className="mt-1 text-xs text-muted-foreground">Maximum certified capacity 80 000 kg</p></div><Badge variant={stable ? "default" : "muted"}>{stable ? "Capture ready" : "Waiting"}</Badge></CardHeader><CardContent><WeightGauge weight={telemetry.weight_kg} stable={stable}/><div className="grid grid-cols-2 gap-3 border-t border-border pt-3"><StatusDot active={telemetry.position_sensor_1} label="Position beam 1"/><StatusDot active={telemetry.position_sensor_2} label="Position beam 2"/><StatusDot active={hardwareOnline} label="Hardware daemon"/><StatusDot active={syncPending === 0} label={syncPending ? `${syncPending} pending sync` : "Cloud reconciled"}/></div></CardContent></Card>
-  <Card><CardHeader><CardTitle>Lane camera</CardTitle></CardHeader><CardContent><div className="relative aspect-video overflow-hidden rounded-sm border border-border bg-[#0a0d13]"><div className="absolute inset-0 bg-[repeating-linear-gradient(180deg,rgba(255,255,255,0.03)_0px,rgba(255,255,255,0.03)_1px,transparent_1px,transparent_26px)]" /><div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black/70 to-transparent" />{activeBooking ? <div key={activeBooking.reference} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 anpr-detect"><div className="relative border-2 border-success px-6 py-3"><span className="absolute -left-[2px] -top-[2px] h-3 w-3 border-l-2 border-t-2 border-success" /><span className="absolute -right-[2px] -top-[2px] h-3 w-3 border-r-2 border-t-2 border-success" /><span className="absolute -left-[2px] -bottom-[2px] h-3 w-3 border-l-2 border-b-2 border-success" /><span className="absolute -right-[2px] -bottom-[2px] h-3 w-3 border-r-2 border-b-2 border-success" /><div className="text-center"><div className="font-mono text-2xl font-bold tracking-[0.15em] text-white">{activeBooking.plate}</div><div className="mt-1.5 flex items-center justify-center gap-2 text-2xs text-success"><span>{activeBooking.reference}</span><span className="text-white/25">·</span><span>RFID {activeBooking.rfid}</span></div></div></div></div> : <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 text-white/25"><Truck size={26} /><p className="text-xs">No vehicle at gate</p></div>}<div className="absolute bottom-2 left-2 flex items-center gap-2 rounded-sm bg-black/80 px-2 py-1 text-2xs font-mono text-white"><Camera size={12}/>{activeBooking ? "ANPR · MATCHED" : "ANPR · IDLE"}</div></div><p className="mt-2 text-2xs text-muted-foreground">Development readout: shows the plate the daemon actually matched for whichever truck is at the gate, not a live camera. Real footage requires an RTSP source wired to the site.</p><div className="mt-3 grid grid-cols-2 gap-2">
-<Button variant="secondary" onClick={()=>command("GATE_OPEN","ENTRY")} disabled={busy!==null}><DoorOpen size={14} className="mr-2"/>Entry open</Button><Button variant="secondary" onClick={()=>command("GATE_OPEN","EXIT")} disabled={busy!==null}><DoorOpen size={14} className="mr-2"/>Exit open</Button><Button variant="outline" onClick={()=>command("LIGHT","ENTRY","GREEN")} disabled={busy!==null}><TrafficCone size={14} className="mr-2"/>Entry green</Button><Button variant="destructive" onClick={()=>command("BUZZER",undefined,"ON")} disabled={busy!==null}><Siren size={14} className="mr-2"/>Alarm</Button></div><p className="mt-3 text-2xs text-muted-foreground">Manual actions are audited and should only be used after identity and deck safety checks.</p></CardContent></Card></div>
-  <Card><CardHeader className="flex-row items-center justify-between"><CardTitle>Arrival queue</CardTitle><Badge variant="muted">{queue.length} vehicles</Badge></CardHeader><CardContent className="p-0"><div className="divide-y divide-border">{queue.length ? queue.map((item,index)=>{const atGate=activeBooking?.reference===item.reference;return <div key={item.id} className="grid grid-cols-[36px_1fr_auto] items-center gap-3 px-4 py-3"><div className="flex h-7 w-7 items-center justify-center rounded-sm bg-muted font-mono text-xs text-foreground">{index+1}</div><div><p className="text-sm font-medium text-foreground">{item.plate} {item.trailer ? <span className="font-mono text-xs text-muted-foreground ml-1">+{item.trailer}</span> : null} <span className="font-normal text-muted-foreground ml-1">· {item.driver}</span></p><p className="text-xs text-muted-foreground mt-0.5"><span className="font-mono font-medium text-foreground">{item.reference}</span>{item.orderNumber ? <span> · <span className="font-semibold text-primary font-mono">{item.orderNumber}</span></span> : null}{item.customerName ? <span> · To: <span className="font-medium text-foreground">{item.customerName}</span></span> : null}{item.stockpile ? <span> · Pit: <span className="font-mono">{item.stockpile}</span></span> : null}<span> · {item.commodity}</span> · <span className="font-medium">{item.transporter}</span></p></div><Badge variant={atGate?"default":"muted"}>{atGate?"At gate":item.status}</Badge></div>;}):<div className="p-8 text-center text-sm text-muted-foreground"><Truck className="mx-auto mb-2" size={22}/>No approved arrivals in the current window</div>}</div></CardContent></Card></div>;
+  // Open modal prefilled for 2nd weighment
+  function handleOpenSecondWeigh(weighment?: ActiveWeighment) {
+    setCompletedResult(null);
+    setModalMode("SECOND");
+    if (weighment) {
+      setSelectedWeighmentId(weighment.id);
+      setSelectedBookingId(weighment.bookingId);
+      setFirstWeightInput(String(weighment.firstWeightKg));
+      setWeighType(weighment.firstWeightType === "TARE" ? "DISPATCH" : "RECEIPT");
+    } else if (activeWeighments.length > 0 && activeWeighments[0]) {
+      const w = activeWeighments[0];
+      setSelectedWeighmentId(w.id);
+      setSelectedBookingId(w.bookingId);
+      setFirstWeightInput(String(w.firstWeightKg));
+      setWeighType(w.firstWeightType === "TARE" ? "DISPATCH" : "RECEIPT");
+    }
+    setSecondWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "");
+    setModalOpen(true);
+  }
+
+  // Open modal for direct entry (both weights at once)
+  function handleOpenDirectWeigh(booking?: QueueItem) {
+    setCompletedResult(null);
+    setModalMode("DIRECT");
+    if (booking) {
+      setSelectedBookingId(booking.id);
+    } else if (queue.length > 0 && queue[0]) {
+      setSelectedBookingId(queue[0].id);
+    }
+    setFirstWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "14500");
+    setSecondWeightInput("48500");
+    setModalOpen(true);
+  }
+
+  // Submit manual weighment action
+  async function handleSubmitManual() {
+    setSubmitting(true);
+    try {
+      if (modalMode === "FIRST") {
+        const weightKg = Number(firstWeightInput);
+        if (!selectedBookingId) throw new Error("Please select an approved booking/truck");
+        if (!weightKg || weightKg <= 0) throw new Error("Please enter a valid 1st scale reading (kg)");
+
+        const res = await fetch("/api/transactions/manual", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "FIRST_WEIGH",
+            siteCode,
+            bookingId: selectedBookingId,
+            weightKg,
+            weighType,
+            notes: notesInput || undefined,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "Failed to capture 1st weighment");
+
+        toast({ title: "1st Weighment Captured", body: body.data.message });
+        setModalOpen(false);
+        fetchQueue();
+        fetchActiveWeighments();
+      } else if (modalMode === "SECOND") {
+        const weightKg = Number(secondWeightInput);
+        if (!selectedWeighmentId && !selectedBookingId) {
+          throw new Error("Please select the active in-progress vehicle");
+        }
+        if (!weightKg || weightKg <= 0) throw new Error("Please enter a valid 2nd scale reading (kg)");
+
+        const res = await fetch("/api/transactions/manual", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "SECOND_WEIGH",
+            siteCode,
+            transactionId: selectedWeighmentId || undefined,
+            bookingId: selectedBookingId || undefined,
+            weightKg,
+            mineTicketNumber: mineTicketInput || undefined,
+            notes: notesInput || undefined,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "Failed to finalize 2nd weighment");
+
+        setCompletedResult(body.data);
+        toast({ title: "Transaction Completed", body: body.data.message });
+        fetchQueue();
+        fetchActiveWeighments();
+      } else if (modalMode === "DIRECT") {
+        const weight1Kg = Number(firstWeightInput);
+        const weight2Kg = Number(secondWeightInput);
+        if (!selectedBookingId) throw new Error("Please select an approved booking/truck");
+        if (!weight1Kg || weight1Kg <= 0 || !weight2Kg || weight2Kg <= 0) {
+          throw new Error("Both 1st and 2nd weights must be greater than 0 kg");
+        }
+
+        const res = await fetch("/api/transactions/manual", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "DIRECT_WEIGH",
+            siteCode,
+            bookingId: selectedBookingId,
+            weight1Kg,
+            weight2Kg,
+            mineTicketNumber: mineTicketInput || undefined,
+            notes: notesInput || undefined,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "Failed to record direct weighment");
+
+        setCompletedResult(body.data);
+        toast({ title: "Waybill Issued", body: body.data.message });
+        fetchQueue();
+        fetchActiveWeighments();
+      }
+    } catch (err: any) {
+      toast({ title: "Weighment Failed", body: err.message || String(err), severity: "HIGH" });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Live scale calculations for modal preview
+  const w1Num = Math.round(Number(firstWeightInput) || 0);
+  const w2Num = Math.round(Number(secondWeightInput) || 0);
+  const previewGross = modalMode === "FIRST" ? (weighType === "RECEIPT" ? w1Num : 0) : Math.max(w1Num, w2Num);
+  const previewTare = modalMode === "FIRST" ? (weighType === "DISPATCH" ? w1Num : 0) : Math.min(w1Num, w2Num);
+  const previewNet = modalMode === "FIRST" ? 0 : Math.max(0, previewGross - previewTare);
+
+  return (
+    <div className="space-y-4">
+      {/* Top Header & Site Selector */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-foreground">Manual Weighbridge Console</h1>
+            <Badge variant="default" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
+              MANUAL OPERATION MODE
+            </Badge>
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <label htmlFor="site-select" className="text-xs text-muted-foreground">Site:</label>
+            <select
+              id="site-select"
+              aria-label="Select Weighbridge Site"
+              className="h-7 cursor-pointer rounded-sm border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              value={siteCode}
+              onChange={(e) => router.push(`/operator?site=${e.target.value}`)}
+            >
+              {availableSites.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name} ({s.code})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { fetchQueue(); fetchActiveWeighments(); }}
+            className="h-8 text-xs gap-1.5 cursor-pointer"
+          >
+            <RefreshCw size={13} className={loadingManual ? "animate-spin" : ""} />
+            Refresh Data
+          </Button>
+          <Button
+            onClick={() => handleOpenDirectWeigh()}
+            size="sm"
+            className="h-8 text-xs gap-1.5 cursor-pointer"
+          >
+            <PlusCircle size={14} />
+            Direct Waybill Entry
+          </Button>
+        </div>
+      </div>
+
+      {/* Top Stat Cards */}
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {[
+          { label: "Completed Today", value: stats.trucks.toLocaleString(), unit: "vehicles" },
+          { label: "Net Tonnage", value: (stats.tonnage / 1000).toFixed(1), unit: "t" },
+          { label: "In Yard (Awaiting 2nd)", value: String(activeWeighments.length), unit: "trucks" },
+          { label: "Pending Arrivals", value: String(queue.length), unit: "trucks" },
+        ].map((item) => (
+          <Card key={item.label}>
+            <CardContent className="p-3">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">{item.label}</p>
+              <p className="mt-1 font-mono text-2xl font-semibold text-foreground">
+                {item.value}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">{item.unit}</span>
+              </p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Central Manual Weight Entry Console */}
+      <Card className="border-border bg-card/95">
+        <CardHeader className="flex-row items-center justify-between pb-2">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <Scale size={18} className="text-primary" />
+              Scale Indicator Weight Entry
+            </CardTitle>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Read the digital weight shown on the physical weighbridge display and input here
+            </p>
+          </div>
+          <Badge variant="default" className="font-mono text-xs">
+            Platform Ready
+          </Badge>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <WeightGauge weight={manualWeightKg} stable={true} />
+
+          <div className="rounded-sm border border-border bg-muted/20 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold text-foreground uppercase tracking-wider">
+                Operator Scale Input (KG)
+              </Label>
+              <span className="text-2xs text-muted-foreground font-mono">
+                Type weight from physical indicator
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type="number"
+                  aria-label="Scale weight in kilograms"
+                  value={manualWeightKg || ""}
+                  onChange={(e) => setManualWeightKg(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+                  placeholder="e.g. 14250 or 48600"
+                  className="font-mono text-3xl font-bold h-14 text-center tracking-wider bg-background border-primary/40 focus:border-primary text-foreground"
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 font-mono text-sm font-semibold text-muted-foreground">
+                  KG
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => setManualWeightKg(0)}
+                className="h-14 px-4 text-xs font-mono cursor-pointer"
+                title="Zero Scale"
+              >
+                CLEAR
+              </Button>
+            </div>
+
+            {/* Quick Weight Presets */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-2xs text-muted-foreground mr-1">Common Presets:</span>
+              {[
+                { label: "14,500 kg (Tare)", kg: 14500 },
+                { label: "15,200 kg (Tare)", kg: 15200 },
+                { label: "38,000 kg", kg: 38000 },
+                { label: "48,500 kg (Gross)", kg: 48500 },
+                { label: "54,200 kg (Gross)", kg: 54200 },
+              ].map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => setManualWeightKg(p.kg)}
+                  className="rounded-xs border border-border bg-muted/60 px-2.5 py-1 text-xs font-mono hover:bg-muted text-foreground transition-colors cursor-pointer"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Primary Action Buttons */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-border">
+              <Button
+                onClick={() => handleOpenFirstWeigh()}
+                className="w-full text-sm font-medium h-11 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer gap-2"
+              >
+                <ArrowDownCircle size={16} />
+                Record 1st Weight (Weigh-In / Empty)
+              </Button>
+              <Button
+                onClick={() => handleOpenSecondWeigh()}
+                className="w-full text-sm font-medium h-11 bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer gap-2"
+              >
+                <ArrowUpCircle size={16} />
+                Record 2nd Weight (Weigh-Out / Loaded)
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Dual Queue Layout */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* LEFT COLUMN: Arrival Queue (Ready for 1st Weight) */}
+        <Card>
+          <CardHeader className="flex-row items-center justify-between pb-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ArrowDownCircle size={16} className="text-primary" />
+                Arrival Queue · Ready for 1st Weight
+              </CardTitle>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Approved bookings waiting to enter and record empty tare
+              </p>
+            </div>
+            <Badge variant="muted">{queue.length} waiting</Badge>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border max-h-[500px] overflow-y-auto">
+              {queue.length ? (
+                queue.map((item, index) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-xs bg-muted font-mono text-2xs font-semibold text-foreground">
+                          {index + 1}
+                        </span>
+                        <span className="font-mono text-sm font-bold text-foreground">
+                          {item.plate}
+                        </span>
+                        {item.trailer && (
+                          <span className="font-mono text-2xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                            +{item.trailer}
+                          </span>
+                        )}
+                        <span className="text-xs text-muted-foreground">· {item.driver}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono font-medium text-foreground">{item.reference}</span>
+                        {item.orderNumber && (
+                          <span>· Order: <strong className="text-primary font-mono">{item.orderNumber}</strong></span>
+                        )}
+                        <span>· {item.commodity}</span>
+                        <span>· {item.transporter}</span>
+                      </div>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      onClick={() => handleOpenFirstWeigh(item)}
+                      className="h-8 text-xs font-medium cursor-pointer shrink-0"
+                    >
+                      <Scale size={13} className="mr-1.5" />
+                      Weigh In
+                    </Button>
+                  </div>
+                ))
+              ) : (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  <Truck className="mx-auto mb-2 opacity-50" size={24} />
+                  No approved bookings currently waiting in arrival queue.
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* RIGHT COLUMN: Active Vehicles In Yard (Awaiting 2nd Weight) */}
+        <Card className="border-emerald-500/30">
+          <CardHeader className="flex-row items-center justify-between pb-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base text-emerald-600 dark:text-emerald-400">
+                <ArrowUpCircle size={16} />
+                In Yard · Awaiting 2nd Weight
+              </CardTitle>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Vehicles currently loading/unloading; ready to weigh out
+              </p>
+            </div>
+            <Badge variant="default" className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30">
+              {activeWeighments.length} on site
+            </Badge>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border max-h-[500px] overflow-y-auto">
+              {activeWeighments.length ? (
+                activeWeighments.map((w) => (
+                  <div
+                    key={w.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm font-bold text-foreground">
+                          {w.plate}
+                        </span>
+                        {w.trailer && (
+                          <span className="font-mono text-2xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                            +{w.trailer}
+                          </span>
+                        )}
+                        <Badge variant="muted" className="text-2xs font-mono">
+                          1st: {formatKg(w.firstWeightKg)}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono font-medium text-foreground">{w.bookingRef}</span>
+                        {w.orderNumber && (
+                          <span>· Order: <strong className="text-primary font-mono">{w.orderNumber}</strong></span>
+                        )}
+                        <span>· {w.commodity}</span>
+                        <span className="flex items-center gap-1 text-2xs">
+                          <Clock size={11} /> {w.minutesInYard}m in yard
+                        </span>
+                      </div>
+                    </div>
+
+                    <Button
+                      onClick={() => handleOpenSecondWeigh(w)}
+                      className="h-8 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer shrink-0 gap-1"
+                    >
+                      <Scale size={13} />
+                      Weigh Out
+                    </Button>
+                  </div>
+                ))
+              ) : (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  <Truck className="mx-auto mb-2 opacity-50 text-emerald-500" size={24} />
+                  No vehicles currently in the yard awaiting 2nd weighment.
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* MANUAL WEIGHMENT MODAL */}
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Scale size={20} className="text-primary" />
+              {modalMode === "FIRST" && "Capture 1st Weighment (Weigh-In)"}
+              {modalMode === "SECOND" && "Finalize 2nd Weighment (Weigh-Out)"}
+              {modalMode === "DIRECT" && "Direct Manual Waybill Entry"}
+            </DialogTitle>
+            <DialogDescription>
+              {modalMode === "FIRST" &&
+                "Record 1st scale weight to authorize vehicle yard entry."}
+              {modalMode === "SECOND" &&
+                "Record 2nd scale weight to calculate net weight and issue the official waybill."}
+              {modalMode === "DIRECT" &&
+                "Directly enter both weights to produce a completed waybill."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Success / Waybill Summary */}
+          {completedResult ? (
+            <div className="space-y-4 py-2">
+              <div className="rounded-sm border border-emerald-500/30 bg-emerald-500/10 p-4 text-center space-y-2">
+                <CheckCircle2 size={36} className="mx-auto text-emerald-500" />
+                <h3 className="text-lg font-semibold text-foreground">
+                  Weighment Completed & Waybill Issued!
+                </h3>
+                <p className="font-mono text-sm font-bold text-primary">
+                  {completedResult.waybillNumber}
+                </p>
+                <div className="grid grid-cols-3 gap-2 pt-2 text-xs border-t border-emerald-500/20">
+                  <div>
+                    <span className="text-muted-foreground block text-2xs">Gross Weight</span>
+                    <strong className="font-mono">{formatKg(completedResult.grossWeightKg)}</strong>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-2xs">Tare Weight</span>
+                    <strong className="font-mono">{formatKg(completedResult.tareWeightKg)}</strong>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-2xs">Net Cargo Mass</span>
+                    <strong className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                      {formatKg(completedResult.netWeightKg)}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Waybill Action Links */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Print & Verification Documents:
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href={completedResult.waybillUrl}
+                    target="_blank"
+                    className="flex items-center justify-center gap-2 h-9 rounded-sm bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors"
+                  >
+                    <ExternalLink size={14} />
+                    View Waybill Details
+                  </Link>
+
+                  <Link
+                    href={`/api/transactions/${completedResult.transaction?.id ?? ""}/waybill?copy=CLIENT`}
+                    target="_blank"
+                    className="flex items-center justify-center gap-2 h-9 rounded-sm border border-border bg-card text-foreground text-xs font-medium hover:bg-muted transition-colors"
+                  >
+                    <Printer size={14} />
+                    Client Copy (PDF)
+                  </Link>
+
+                  <Link
+                    href={`/api/transactions/${completedResult.transaction?.id ?? ""}/waybill?copy=DRIVER`}
+                    target="_blank"
+                    className="flex items-center justify-center gap-2 h-9 rounded-sm border border-border bg-card text-foreground text-xs font-medium hover:bg-muted transition-colors"
+                  >
+                    <Printer size={14} />
+                    Driver Copy (PDF)
+                  </Link>
+
+                  <Link
+                    href={`/api/transactions/${completedResult.transaction?.id ?? ""}/waybill?format=thermal`}
+                    target="_blank"
+                    className="flex items-center justify-center gap-2 h-9 rounded-sm border border-border bg-card text-foreground text-xs font-medium hover:bg-muted transition-colors"
+                  >
+                    <FileText size={14} />
+                    80mm Thermal Slip
+                  </Link>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <Button onClick={() => setModalOpen(false)} className="w-full sm:w-auto cursor-pointer">
+                  Done / Close
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 py-2">
+              {/* Modal Mode Selector */}
+              <div className="flex rounded-sm border border-border p-0.5 bg-muted/40">
+                <button
+                  type="button"
+                  onClick={() => setModalMode("FIRST")}
+                  className={`flex-1 py-1.5 text-xs font-medium rounded-xs transition-colors cursor-pointer ${
+                    modalMode === "FIRST" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  1st Weigh (Weigh-In)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalMode("SECOND")}
+                  className={`flex-1 py-1.5 text-xs font-medium rounded-xs transition-colors cursor-pointer ${
+                    modalMode === "SECOND" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  2nd Weigh (Weigh-Out)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalMode("DIRECT")}
+                  className={`flex-1 py-1.5 text-xs font-medium rounded-xs transition-colors cursor-pointer ${
+                    modalMode === "DIRECT" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Direct Entry
+                </button>
+              </div>
+
+              {/* Target Vehicle Selection */}
+              {modalMode === "SECOND" ? (
+                <div className="space-y-1.5">
+                  <Label>Select Vehicle In Yard (Awaiting 2nd Weight):</Label>
+                  <select
+                    value={selectedWeighmentId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedWeighmentId(id);
+                      const item = activeWeighments.find((w) => w.id === id);
+                      if (item) {
+                        setFirstWeightInput(String(item.firstWeightKg));
+                        setSelectedBookingId(item.bookingId);
+                        setWeighType(item.firstWeightType === "TARE" ? "DISPATCH" : "RECEIPT");
+                      }
+                    }}
+                    className="w-full h-9 rounded-sm border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+                  >
+                    <option value="">-- Choose active in-yard truck --</option>
+                    {activeWeighments.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.plate} {w.trailer ? `+${w.trailer}` : ""} · 1st: {formatKg(w.firstWeightKg)} ({w.firstWeightType}) · {w.driver}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label>Select Booking / Vehicle from Queue:</Label>
+                  <select
+                    value={selectedBookingId}
+                    onChange={(e) => setSelectedBookingId(e.target.value)}
+                    className="w-full h-9 rounded-sm border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+                  >
+                    <option value="">-- Choose vehicle from queue --</option>
+                    {queue.map((q) => (
+                      <option key={q.id} value={q.id}>
+                        {q.plate} {q.trailer ? `+${q.trailer}` : ""} · {q.reference} · {q.driver} ({q.commodity})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Operational Flow Type */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWeighType("DISPATCH")}
+                  className={`border rounded-sm p-2 text-left transition-colors cursor-pointer ${
+                    weighType === "DISPATCH"
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border bg-card text-muted-foreground hover:bg-muted/30"
+                  }`}
+                >
+                  <div className="text-xs font-semibold">Dispatch (Outbound Cargo)</div>
+                  <div className="text-2xs text-muted-foreground mt-0.5">
+                    1st = Empty Tare · 2nd = Loaded Gross
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWeighType("RECEIPT")}
+                  className={`border rounded-sm p-2 text-left transition-colors cursor-pointer ${
+                    weighType === "RECEIPT"
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border bg-card text-muted-foreground hover:bg-muted/30"
+                  }`}
+                >
+                  <div className="text-xs font-semibold">Receipt (Inbound Delivery)</div>
+                  <div className="text-2xs text-muted-foreground mt-0.5">
+                    1st = Loaded Gross · 2nd = Empty Tare
+                  </div>
+                </button>
+              </div>
+
+              {/* Weight Inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>
+                    1st Weight (kg) {modalMode === "FIRST" ? "· Scale Reading" : "(Captured)"}:
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      value={firstWeightInput}
+                      onChange={(e) => setFirstWeightInput(e.target.value)}
+                      disabled={modalMode === "SECOND"}
+                      placeholder="e.g. 14200"
+                      className="font-mono text-base font-semibold bg-background pr-10"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-2xs font-mono text-muted-foreground">
+                      KG
+                    </span>
+                  </div>
+                </div>
+
+                {(modalMode === "SECOND" || modalMode === "DIRECT") && (
+                  <div className="space-y-1.5">
+                    <Label className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                      2nd Weight (kg) · Scale Reading:
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        value={secondWeightInput}
+                        onChange={(e) => setSecondWeightInput(e.target.value)}
+                        placeholder="e.g. 48600"
+                        className="font-mono text-base font-semibold bg-background pr-10 border-emerald-500/40 focus:border-emerald-500"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-2xs font-mono text-muted-foreground">
+                        KG
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Calculated Weight Summary (No Overload Logic) */}
+              {(modalMode === "SECOND" || modalMode === "DIRECT") && (
+                <div className="rounded-sm border border-border bg-muted/40 p-3 space-y-2">
+                  <div className="text-xs font-semibold text-foreground">
+                    Calculated Mass Summary
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <span className="text-2xs text-muted-foreground block">Gross Weight</span>
+                      <strong className="font-mono">{formatKg(previewGross)}</strong>
+                    </div>
+                    <div>
+                      <span className="text-2xs text-muted-foreground block">Tare Weight</span>
+                      <strong className="font-mono">{formatKg(previewTare)}</strong>
+                    </div>
+                    <div>
+                      <span className="text-2xs text-muted-foreground block">Net Cargo Mass</span>
+                      <strong className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                        {formatKg(previewNet)}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Additional Details */}
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="space-y-1">
+                  <Label>Mine / Pit Ticket # (Optional):</Label>
+                  <Input
+                    value={mineTicketInput}
+                    onChange={(e) => setMineTicketInput(e.target.value)}
+                    placeholder="e.g. TK-49201"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Operator Notes (Optional):</Label>
+                  <Input
+                    value={notesInput}
+                    onChange={(e) => setNotesInput(e.target.value)}
+                    placeholder="e.g. Manual scale reading"
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Modal Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => setModalOpen(false)}
+                  disabled={submitting}
+                  className="cursor-pointer"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSubmitManual}
+                  disabled={submitting}
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+                >
+                  {submitting
+                    ? "Processing..."
+                    : modalMode === "FIRST"
+                    ? "Record 1st Weight & Authorize Entry"
+                    : "Finalize Weighment & Issue Waybill"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 }

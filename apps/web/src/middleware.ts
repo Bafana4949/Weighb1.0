@@ -14,6 +14,7 @@ export default auth((request) => {
     path === "/api/bookings/queue" ||
     path === "/api/transactions/reconcile" ||
     path === "/api/transactions/chain-head" ||
+    path === "/api/transactions/manual" ||
     path.startsWith("/api/debug") ||
     (path === "/api/incidents" && request.method === "POST");
 
@@ -54,7 +55,6 @@ export default auth((request) => {
 
   if (path.startsWith("/admin") && role !== "ADMIN") response = NextResponse.redirect(new URL("/", request.url));
   else if (path.startsWith("/operator") && !["ADMIN", "OPERATOR", "SECURITY"].includes(role)) response = NextResponse.redirect(new URL("/", request.url));
-  else if (path.startsWith("/kiosk") && !["ADMIN", "OPERATOR", "SECURITY"].includes(role)) response = NextResponse.redirect(new URL("/", request.url));
   else if (path.startsWith("/transporter") && !["ADMIN", "TRANSPORTER"].includes(role)) response = NextResponse.redirect(new URL("/", request.url));
   
   // Set headers to prevent caching of dynamic app shell HTML and RSC payloads

@@ -13,7 +13,15 @@ export async function GET(request: NextRequest) {
   if (!resolvedSite) return fail("Site not found", 404);
 
   const queue = await prisma.booking.findMany({
-    where: { siteId: resolvedSite.id, ...activeWindowWhere() },
+    where: {
+      siteId: resolvedSite.id,
+      status: { in: ["APPROVED", "ACTIVE"] },
+      transactions: {
+        none: {
+          status: { in: ["IN_PROGRESS", "COMPLETED"] },
+        },
+      },
+    },
     include: {
       vehicle: true,
       driver: true,

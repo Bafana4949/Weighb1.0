@@ -100,7 +100,7 @@ export default async function Verify({ params }: { params: Promise<{ hash: strin
           <Item label="Tare Weight" value={formatKg(t.tareWeightKg)} />
           <Item label="Gross Weight" value={formatKg(t.grossWeightKg)} />
           <Item label="Net Delivered Payload" value={formatKg(t.netWeightKg)} strong />
-          <Item label="Axle Compliance" value={t.overload ? `FAIL (Overload +${formatKg(t.overloadVarianceKg)})` : "PASS (LEGAL)"} />
+          <Item label="Weighing Method" value="Certified Manual Scale Reading" />
         </dl>
 
         <div className="mt-5 border-t border-border pt-3">
