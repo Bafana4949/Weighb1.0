@@ -75,7 +75,7 @@ export const orderBaseSchema = z.object({
   supplierName: z.string().min(2).max(120).optional().nullable(),
   product: z.string().min(2).max(80).optional().nullable(),
   productId: z.string().uuid().optional().nullable(),
-  estimatedMassKg: z.number().int().min(1_000).max(200_000),
+  estimatedMassKg: z.number().int().min(1_000).max(2_147_483_000),
   stockpile: z.string().max(80).optional().nullable(),
   varianceThresholdPercent: z.number().min(0).max(25).optional(),
   varianceThresholdKg: z.number().int().min(0).max(50_000).optional().nullable(),
