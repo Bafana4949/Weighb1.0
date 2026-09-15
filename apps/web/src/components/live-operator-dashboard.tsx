@@ -118,17 +118,31 @@ export function LiveOperatorDashboard({
     if (!raw) return null;
     const cleaned = raw.replace(/[^\x20-\x7E]/g, " ").trim();
     if (!cleaned) return null;
-    const match = cleaned.match(/([-+]?\s*\d+(?:\.\d+)?)\s*(?:kg|t)?/i);
-    if (match && match[1]) {
-      const val = parseFloat(match[1].replace(/\s+/g, ""));
-      if (!isNaN(val) && val >= 0) {
-        if (/t\b/i.test(cleaned) && !/kg\b/i.test(cleaned) && val < 500) {
-          return Math.round(val * 1000);
-        }
-        return Math.round(val);
+
+    // 1. Toledo Continuous Mode (e.g. "18 2200 00 18" -> status, weight, tare, checksum)
+    const tokens = cleaned.split(/\s+/);
+    if (tokens.length >= 3 && tokens[1]) {
+      const candidate = parseFloat(tokens[1]);
+      if (!isNaN(candidate) && candidate >= 0) {
+        return Math.round(candidate);
       }
     }
-    return null;
+
+    // 2. MT-SICS command format (e.g. "S S 2200 kg" or "ST,GS,+ 2200 kg")
+    const sicsMatch = cleaned.match(/(?:S\s+S|ST\s*,\s*GS\s*,?\s*[+-]?)\s*(\d+(?:\.\d+)?)/i);
+    if (sicsMatch && sicsMatch[1]) {
+      return Math.round(parseFloat(sicsMatch[1]));
+    }
+
+    // 3. String with explicit 'kg' unit
+    const kgMatch = cleaned.match(/(\d+(?:\.\d+)?)\s*kg/i);
+    if (kgMatch && kgMatch[1]) {
+      return Math.round(parseFloat(kgMatch[1]));
+    }
+
+    // 4. Default numeric match
+    const numMatch = cleaned.match(/(\d+(?:\.\d+)?)/);
+    return numMatch && numMatch[1] ? Math.round(parseFloat(numMatch[1])) : null;
   }
 
   async function connectSerial() {
