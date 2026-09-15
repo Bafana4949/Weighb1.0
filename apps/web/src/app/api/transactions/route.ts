@@ -2,6 +2,7 @@ import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ok, requireRole } from "@/lib/api";
 import { parsePagination, siteIdentifierWhere } from "@/lib/utils";
+import { mineScope } from "@/lib/access";
 
 function isoDate(d: Date | null) { return d ? d.toISOString().slice(0, 10) : null; }
 function isoTime(d: Date | null) { return d ? d.toISOString().slice(11, 19) : null; }
@@ -43,6 +44,8 @@ export async function GET(request: Request) {
 
   if (a.session!.user.role === "TRANSPORTER") {
     andConditions.push({ booking: { transporterOrganisationId: a.session!.user.organisationId! } });
+  } else if (a.session!.user.organisationId) {
+    andConditions.push({ site: mineScope(a.session!.user.organisationId) });
   }
   if (site) {
     andConditions.push({ site: siteIdentifierWhere(site) });

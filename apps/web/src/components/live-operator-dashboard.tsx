@@ -112,35 +112,74 @@ export function LiveOperatorDashboard({
   const [serialPort, setSerialPort] = useState<any>(null);
   const [serialReader, setSerialReader] = useState<any>(null);
   const [serialBaud, setSerialBaud] = useState<number>(9600);
+  const [serialFraming, setSerialFraming] = useState<"8-none" | "7-even" | "7-odd">("8-none");
   const [indicatorRawText, setIndicatorRawText] = useState<string>("");
+  const [indicatorPacketCount, setIndicatorPacketCount] = useState<number>(0);
 
   function parseMettlerWeight(raw: string): number | null {
     if (!raw) return null;
-    const cleaned = raw.replace(/[^\x20-\x7E]/g, " ").trim();
-    if (!cleaned) return null;
 
-    // 1. Toledo Continuous Mode (e.g. "18 2200 00 18" -> status, weight, tare, checksum)
-    const tokens = cleaned.split(/\s+/);
-    if (tokens.length >= 3 && tokens[1]) {
-      const candidate = parseFloat(tokens[1]);
+    // 1. Toledo Continuous Protocol: STX <SWA><SWB><SWC><6 chars indicated weight><6 chars tare><CR>
+    const toledoMatch = raw.match(/\x02.{3}([\s\d]{6})/s);
+    if (toledoMatch && toledoMatch[1]) {
+      const candidate = parseFloat(toledoMatch[1].trim());
       if (!isNaN(candidate) && candidate >= 0) {
         return Math.round(candidate);
       }
     }
 
-    // 2. MT-SICS command format (e.g. "S S 2200 kg" or "ST,GS,+ 2200 kg")
-    const sicsMatch = cleaned.match(/(?:S\s+S|ST\s*,\s*GS\s*,?\s*[+-]?)\s*(\d+(?:\.\d+)?)/i);
+    // 2. Toledo Continuous ending with CR (6 chars weight followed by 6 chars tare then CR)
+    const toledoCrMatch = raw.match(/([\s\d]{6})([\s\d]{6})\r/);
+    if (toledoCrMatch && toledoCrMatch[1]) {
+      const candidate = parseFloat(toledoCrMatch[1].trim());
+      if (!isNaN(candidate) && candidate >= 0) {
+        return Math.round(candidate);
+      }
+    }
+
+    const cleaned = raw.replace(/[^\x20-\x7E]/g, " ").trim();
+    if (!cleaned) return null;
+
+    // 3. MT-SICS command format (e.g. "S S 2200 kg", "ST,GS,+ 2200 kg", "Net 2200 kg")
+    const sicsMatch = cleaned.match(/(?:S\s+[SDI]|ST\s*,\s*GS\s*,?\s*[+-]?|Net|Gross|WT:?)\s*([+-]?\s*\d+(?:\.\d+)?)/i);
     if (sicsMatch && sicsMatch[1]) {
-      return Math.round(parseFloat(sicsMatch[1]));
+      const candidate = parseFloat(sicsMatch[1].replace(/\s+/g, ""));
+      if (!isNaN(candidate) && candidate >= 0) {
+        return Math.round(candidate);
+      }
     }
 
-    // 3. String with explicit 'kg' unit
-    const kgMatch = cleaned.match(/(\d+(?:\.\d+)?)\s*kg/i);
+    // 4. String with explicit 'kg' or 't' unit (e.g. "2200 kg")
+    const kgMatch = cleaned.match(/(\d+(?:\.\d+)?)\s*(?:kg|t\b)/i);
     if (kgMatch && kgMatch[1]) {
-      return Math.round(parseFloat(kgMatch[1]));
+      const candidate = parseFloat(kgMatch[1]);
+      if (!isNaN(candidate) && candidate >= 0) {
+        return Math.round(candidate);
+      }
     }
 
-    // 4. Default numeric match
+    // 5. Toledo Continuous spaced tokens (e.g. "18 2200 00 18")
+    const tokens = cleaned.split(/\s+/).filter(Boolean);
+    if (tokens.length >= 2) {
+      for (const token of tokens) {
+        if (!token) continue;
+        const candidate = parseFloat(token);
+        if (!isNaN(candidate) && candidate >= 100) {
+          return Math.round(candidate);
+        }
+      }
+    }
+
+    // 6. Generic numeric match: look for 3 to 6 consecutive digits
+    const numCandidates = cleaned.match(/\b\d{3,6}\b/g);
+    if (numCandidates && numCandidates[0]) {
+      const candidate = parseFloat(numCandidates[0]);
+      if (!isNaN(candidate) && candidate >= 0) {
+        return Math.round(candidate);
+      }
+    }
+
+    // 7. Last fallback single number
     const numMatch = cleaned.match(/(\d+(?:\.\d+)?)/);
     return numMatch && numMatch[1] ? Math.round(parseFloat(numMatch[1])) : null;
   }
@@ -156,17 +195,22 @@ export function LiveOperatorDashboard({
     }
     try {
       const port = await (navigator as any).serial.requestPort();
-      await port.open({ baudRate: serialBaud, dataBits: 8, stopBits: 1, parity: "none" });
+      const dataBits = serialFraming.startsWith("7") ? 7 : 8;
+      const parity = serialFraming.endsWith("even") ? "even" : serialFraming.endsWith("odd") ? "odd" : "none";
+      await port.open({
+        baudRate: serialBaud,
+        dataBits,
+        stopBits: 1,
+        parity,
+      });
       setSerialPort(port);
       setIsSerialConnected(true);
       toast({
         title: "Scale Indicator Connected",
-        body: `Listening for live weight from indicator at ${serialBaud} baud.`,
+        body: `Listening for live weight from indicator at ${serialBaud} baud (${dataBits}-${parity.toUpperCase()}-1).`,
       });
 
-      const textDecoder = new TextDecoderStream();
-      port.readable.pipeTo(textDecoder.writable).catch(() => null);
-      const reader = textDecoder.readable.getReader();
+      const reader = port.readable.getReader();
       setSerialReader(reader);
 
       let buffer = "";
@@ -175,17 +219,38 @@ export function LiveOperatorDashboard({
           while (true) {
             const { value, done } = await reader.read();
             if (done) break;
-            if (value) {
-              buffer += value;
-              const lines = buffer.split(/[\r\n]+/);
-              buffer = lines.pop() ?? "";
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed) continue;
-                setIndicatorRawText(trimmed);
-                const w = parseMettlerWeight(trimmed);
-                if (w !== null && w >= 0) {
-                  setManualWeightKg(w);
+            if (value && value.length > 0) {
+              const mask = dataBits === 7 || parity !== "none" ? 0x7F : 0xFF;
+              let chunk = "";
+              for (let i = 0; i < value.length; i++) {
+                chunk += String.fromCharCode(value[i] & mask);
+              }
+              buffer += chunk;
+              setIndicatorPacketCount((prev) => (prev + 1) % 100000);
+
+              if (buffer.includes("\r") || buffer.includes("\n") || buffer.length > 64) {
+                const stxIndex = buffer.lastIndexOf("\x02");
+                const crIndex = buffer.lastIndexOf("\r");
+                if (stxIndex !== -1 && crIndex > stxIndex) {
+                  const frame = buffer.substring(stxIndex, crIndex + 1);
+                  setIndicatorRawText(frame.replace(/[^\x20-\x7E]/g, " ").trim());
+                  const w = parseMettlerWeight(frame);
+                  if (w !== null && w >= 0) {
+                    setManualWeightKg(w);
+                  }
+                  buffer = buffer.substring(crIndex + 1);
+                } else {
+                  const lines = buffer.split(/[\r\n]+/);
+                  buffer = lines.pop() ?? "";
+                  for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+                    setIndicatorRawText(trimmed);
+                    const w = parseMettlerWeight(trimmed);
+                    if (w !== null && w >= 0) {
+                      setManualWeightKg(w);
+                    }
+                  }
                 }
               }
             }
@@ -544,6 +609,17 @@ export function LiveOperatorDashboard({
                 <option value="2400">2400 baud</option>
                 <option value="19200">19200 baud</option>
               </select>
+              <select
+                value={serialFraming}
+                onChange={(e) => setSerialFraming(e.target.value as any)}
+                disabled={isSerialConnected}
+                className="h-8 rounded-sm border border-border bg-background px-2 text-2xs font-mono"
+                title="Framing / Parity (Mettler Toledo default is 7-Even-1 or 8-None-1)"
+              >
+                <option value="8-none">8-N-1 (None)</option>
+                <option value="7-even">7-E-1 (Mettler Default)</option>
+                <option value="7-odd">7-O-1 (Odd)</option>
+              </select>
               <Button
                 variant={isSerialConnected ? "outline" : "default"}
                 size="sm"
@@ -558,6 +634,17 @@ export function LiveOperatorDashboard({
         </CardHeader>
         <CardContent className="space-y-4">
           <WeightGauge weight={manualWeightKg} stable={true} />
+
+          {/* Live Indicator Stream Diagnostic Telemetry */}
+          {isSerialConnected && (
+            <div className="flex items-center justify-between rounded-sm border border-emerald-500/30 bg-emerald-950/20 px-3 py-1.5 text-2xs font-mono text-emerald-400">
+              <span className="flex items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                STREAM: [{indicatorRawText || "Receiving continuous frames..."}] &rarr; PARSED: {manualWeightKg} KG
+              </span>
+              <span className="text-muted-foreground shrink-0 ml-2">Packets: {indicatorPacketCount}</span>
+            </div>
+          )}
 
           <div className="rounded-sm border border-border bg-muted/20 p-4 space-y-3">
             <div className="flex items-center justify-between">

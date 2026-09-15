@@ -11,18 +11,15 @@ This document contains the complete directory of default login credentials, role
 
 ---
 
-## 👥 Primary Actor Logins
+## 🚀 Live Production & Verified Administrative Logins
 
-| Role / Persona | Email Address | Password | Organisation | Scope & Responsibilities |
+| Persona / Name | Email Address | Password | Role & Organisation | Scope & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
-| **👑 Platform Super Admin** | `admin@weighbridge.local` | `Password123!` | Platform-wide | Full cross-tenant control, client onboarding, global hardware provisioning, system audit logs, and consolidated reports. |
-| **🏢 Mining Company Admin** | `mine-admin@weighbridge.local` | `Password123!` | Seriti Resources | Manages mine sites, bulk tonnage contracts, orders, haulier assignments, pit sources, and custom user role permissions. |
-| **🖥️ Weighbridge Operator** | `operator@weighbridge.local` | `Password123!` | Seriti Resources | Operates live scale deck, monitors weight gauge, infrared beams (P1/P2), gate controls, zero scale, and reprints waybills. |
-| **👮 Security Officer** | `security@weighbridge.local` | `Password123!` | Seriti Resources | Gate barrier monitoring, physical truck inspections, manual ANPR camera override, and security copy waybills. |
-| **🚛 Transporter Admin** | `transporter@weighbridge.local` | `Password123!` | SG Coal | Manages fleet roster (trucks, trailers, drivers, RFID badges), slot bookings, trip waybill slips, and CSV reports. |
-| **👔 Yard Supervisor** | `supervisor@weighbridge.local` | `Password123!` | Seriti Resources | Approves/rejects slot bookings, authorizes overload violation exceptions, and monitors shift operations. |
-| **🏢 Tenant B Admin** | `clientb-admin@weighbridge.local` | `Password123!` | Glencore SA | Multi-tenant isolation testing for an independent mining house. |
-| **👁️ Read-Only Viewer** | `viewer@weighbridge.local` | `Password123!` | Seriti Resources | Auditor account with read-only visibility into waybill history, reports, and orders without editing rights. |
+| **👑 Platform Super Admin (Bafana Bhuda)** | `superadmin@weighbridge.co.za` | `SuperAdmin2026!` | Platform-wide (No Org Restriction) | Full cross-tenant control, client onboarding, global hardware provisioning, audit logs, consolidated reports. |
+| **🏢 Client / Company Admin (Grant Howell)** | `grant@treadstone.co.za` | `Grant@2026!` | Mining Company Admin (**Coal In Motion**) | Scoped strictly to Coal In Motion sites, contracts, orders, haulier assignments, and user permissions. |
+| **🏢 Mining Admin (Sipho Dlamini)** | `admin@seriti.co.za` | `Admin2026!` | Mining Company Admin (**Seriti Coal Operations**) | Manages Seriti Coal sites, orders, hauliers, and site configs. |
+| **🖥️ Weighbridge Operator (John Moyo)** | `operator@seriti.co.za` | `Operator2026!` | Weighbridge Operator (**Seriti Coal Operations**) | Live scale deck operation, physical indicator weighing, waybill generation. |
+| **🚛 Transporter Admin (Irfan Zad)** | `irfan@treadstone.co.za` | `Transporter2026!` | Transporter Admin (**Thaba Logistics Test**) | Haulier fleet management, driver badges, truck bookings. |
 
 ---
 

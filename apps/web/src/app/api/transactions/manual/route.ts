@@ -187,6 +187,15 @@ export async function GET(request: NextRequest) {
   const resolvedSite = await prisma.site.findFirst({ where: siteIdentifierWhere(site) });
   if (!resolvedSite) return fail("Site not found", 404);
 
+  if (authCheck.actor?.type === "user") {
+    const callerUser = await prisma.user.findUnique({ where: { id: authCheck.actor.id } });
+    if (callerUser && callerUser.platformRole !== "PLATFORM_SUPER_ADMIN" && callerUser.organisationId) {
+      if (resolvedSite.organisationId !== callerUser.organisationId) {
+        return fail("Forbidden: You do not have access to this site's weighments", 403);
+      }
+    }
+  }
+
   // 1. Fetch transactions currently in progress (captured 1st weight, awaiting 2nd weight)
   const inProgress = await prisma.weighbridgeTransaction.findMany({
     where: {
@@ -259,6 +268,15 @@ export async function POST(request: NextRequest) {
 
     const resolvedSite = await prisma.site.findFirst({ where: siteIdentifierWhere(siteCode) });
     if (!resolvedSite) return fail("Site not found", 404);
+
+    if (authCheck.actor?.type === "user") {
+      const callerUser = await prisma.user.findUnique({ where: { id: authCheck.actor.id } });
+      if (callerUser && callerUser.platformRole !== "PLATFORM_SUPER_ADMIN" && callerUser.organisationId) {
+        if (resolvedSite.organisationId !== callerUser.organisationId) {
+          return fail("Forbidden: You do not have operator permissions for this site's organisation", 403);
+        }
+      }
+    }
 
     const now = new Date();
     const operatorId = authCheck.actor?.type === "user" ? authCheck.actor.id : null;

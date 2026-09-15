@@ -1,8 +1,69 @@
-import { UserRole,VehicleStatus } from "@prisma/client";
+import { UserRole, VehicleStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { fail,ok,requireRole } from "@/lib/api";
-import { assertOrganisationActive } from "@/lib/permissions";
+import { fail, ok, requireRole } from "@/lib/api";
+import { assertOrganisationActive, isPlatformSuperAdmin } from "@/lib/permissions";
 import { normalisePlate } from "@/lib/utils";
 import { vehicleSchema } from "@/lib/validation";
-export async function GET(request:Request){const access=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(access.error)return access.error;const url=new URL(request.url);const requestedOrg=url.searchParams.get("org");const status=url.searchParams.get("status") as VehicleStatus|null;const isTransporter=access.session!.user.role==="TRANSPORTER";const org=isTransporter?access.session!.user.organisationId:requestedOrg;const vehicles=await prisma.vehicle.findMany({where:{deletedAt:null,...(status?{status}:{}),...(isTransporter&&org?{OR:[{organisationId:org},{transporterAssignments:{some:{transporterOrganisationId:org,status:"ACTIVE"}}}]}:org?{organisationId:org}:{})},include:{organisation:true,transporterAssignments:{where:{status:"ACTIVE"},include:{transporterOrganisation:true}}},orderBy:{plateNormalized:"asc"}});return ok(vehicles)}
-export async function POST(request:Request){const access=await requireRole([UserRole.ADMIN]);if(access.error)return access.error;const parsed=vehicleSchema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return fail(parsed.error.issues[0]?.message??"Invalid vehicle",422);const organisationId=parsed.data.organisationId;if(!organisationId)return fail("Organisation is required",422);const ownerOrg=await prisma.organisation.findUnique({where:{id:organisationId}});if(!ownerOrg)return fail("Organisation not found",404);const orgStatusError=assertOrganisationActive(ownerOrg);if(orgStatusError)return fail(orgStatusError,403);const tareWeightKg=parsed.data.tareWeightKg??0;if(tareWeightKg>0&&tareWeightKg>=parsed.data.legalMaxGvwKg)return fail("Tare weight must be below legal maximum GVW",422);try{const vehicle=await prisma.vehicle.create({data:{...parsed.data,tareWeightKg,organisationId,plate:parsed.data.plate.toUpperCase(),plateNormalized:normalisePlate(parsed.data.plate)}});return ok(vehicle,201)}catch(error){return fail("Vehicle plate or VIN is already registered",409)}}
+
+export async function GET(request: Request) {
+  const access = await requireRole([UserRole.TRANSPORTER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SECURITY]);
+  if (access.error) return access.error;
+  const url = new URL(request.url);
+  const requestedOrg = url.searchParams.get("org");
+  const status = url.searchParams.get("status") as VehicleStatus | null;
+  const isSuperAdmin = isPlatformSuperAdmin(access.session!.user);
+  const isTransporter = access.session!.user.role === "TRANSPORTER";
+  const org = isSuperAdmin ? requestedOrg : access.session!.user.organisationId;
+  const vehicles = await prisma.vehicle.findMany({
+    where: {
+      deletedAt: null,
+      ...(status ? { status } : {}),
+      ...(isTransporter && org
+        ? { OR: [{ organisationId: org }, { transporterAssignments: { some: { transporterOrganisationId: org, status: "ACTIVE" } } }] }
+        : org
+        ? { organisationId: org }
+        : {}),
+    },
+    include: {
+      organisation: true,
+      transporterAssignments: { where: { status: "ACTIVE" }, include: { transporterOrganisation: true } },
+    },
+    orderBy: { plateNormalized: "asc" },
+  });
+  return ok(vehicles);
+}
+
+export async function POST(request: Request) {
+  const access = await requireRole([UserRole.ADMIN]);
+  if (access.error) return access.error;
+  const parsed = vehicleSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid vehicle", 422);
+
+  const organisationId = parsed.data.organisationId;
+  if (!organisationId) return fail("Organisation is required", 422);
+
+  if (!isPlatformSuperAdmin(access.session!.user) && access.session!.user.organisationId && organisationId !== access.session!.user.organisationId) {
+    return fail("Forbidden: You can only register vehicles for your own organisation", 403);
+  }
+
+  const ownerOrg = await prisma.organisation.findUnique({ where: { id: organisationId } });
+  if (!ownerOrg) return fail("Organisation not found", 404);
+  const orgStatusError = assertOrganisationActive(ownerOrg);
+  if (orgStatusError) return fail(orgStatusError, 403);
+  const tareWeightKg = parsed.data.tareWeightKg ?? 0;
+  if (tareWeightKg > 0 && tareWeightKg >= parsed.data.legalMaxGvwKg) return fail("Tare weight must be below legal maximum GVW", 422);
+  try {
+    const vehicle = await prisma.vehicle.create({
+      data: {
+        ...parsed.data,
+        tareWeightKg,
+        organisationId,
+        plate: parsed.data.plate.toUpperCase(),
+        plateNormalized: normalisePlate(parsed.data.plate),
+      },
+    });
+    return ok(vehicle, 201);
+  } catch (error) {
+    return fail("Vehicle plate or VIN is already registered", 409);
+  }
+}
