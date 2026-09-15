@@ -29,7 +29,9 @@ const targetKeys = [
   'SUPABASE_SERVICE_ROLE_KEY',
   'AUTH_SECRET',
   'AUTH_TRUST_HOST',
-  'PASSWORD_PEPPER'
+  'PASSWORD_PEPPER',
+  'NEXT_PUBLIC_APP_URL',
+  'SITE_DAEMON_API_KEY'
 ];
 
 for (const key of targetKeys) {

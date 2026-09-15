@@ -44,31 +44,72 @@ export async function GET(request: Request) {
   const status = url.searchParams.get("status");
   const mineTicketNo = url.searchParams.get("mineTicketNo");
 
-  const where: any = {
-    capturedAt: dateRange(url.searchParams),
-    ...(a.session!.user.role === "TRANSPORTER" ? { booking: { transporterOrganisationId: a.session!.user.organisationId! } } : {
-      site: mineScope(a.session!.user.organisationId),
-      ...(orgFilter ? { booking: { transporterOrganisationId: orgFilter } } : {})
-    }),
-    ...(transactionNo ? { OR: [{ edgeTransactionId: transactionNo }, { waybillNumber: transactionNo }] } : {}),
-    ...(orderNo ? { booking: { order: { orderNumber: orderNo } } } : {}),
-    ...(supplier ? { booking: { order: { supplierName: supplier } } } : {}),
-    ...(customer ? { booking: { order: { customerName: customer } } } : {}),
-    ...(type ? { transactionType: type } : {}),
-    ...(material ? { commodity: material } : {}),
-    ...(source ? { OR: [{ booking: { order: { source: { name: source } } } }, { booking: { order: { originSite: { name: source } } } }] } : {}),
-    ...(destination ? { OR: [{ booking: { order: { destination: { name: destination } } } }, { booking: { order: { destinationSite: { name: destination } } } }] } : {}),
-    ...(transporter ? { booking: { transporterOrganisation: { name: transporter } } } : {}),
-    ...(driver ? { driver: { OR: [{ firstName: driver }, { lastName: driver }] } } : {}),
-    ...(overload === "true" ? { overload: true } : overload === "false" ? { overload: false } : {}),
-    ...(status ? { status } : {}),
-    ...(mineTicketNo ? { mineTicketNumber: mineTicketNo } : {})
-  };
+  const andConditions: any[] = [
+    { capturedAt: dateRange(url.searchParams) }
+  ];
+
+  if (a.session!.user.role === "TRANSPORTER") {
+    andConditions.push({ booking: { transporterOrganisationId: a.session!.user.organisationId! } });
+  } else {
+    andConditions.push({ site: mineScope(a.session!.user.organisationId) });
+    if (orgFilter) {
+      andConditions.push({ booking: { transporterOrganisationId: orgFilter } });
+    }
+  }
+
+  if (transactionNo) {
+    andConditions.push({ OR: [{ edgeTransactionId: transactionNo }, { waybillNumber: transactionNo }] });
+  }
+  if (orderNo) {
+    andConditions.push({ booking: { order: { orderNumber: orderNo } } });
+  }
+  if (supplier) {
+    andConditions.push({
+      OR: [
+        { booking: { order: { supplierName: supplier } } },
+        { site: { organisation: { name: supplier } } }
+      ]
+    });
+  }
+  if (customer) {
+    andConditions.push({ booking: { order: { customerName: customer } } });
+  }
+  if (type) {
+    andConditions.push({ transactionType: type });
+  }
+  if (material) {
+    andConditions.push({ commodity: material });
+  }
+  if (source) {
+    andConditions.push({ OR: [{ booking: { order: { source: { name: source } } } }, { booking: { order: { originSite: { name: source } } } }] });
+  }
+  if (destination) {
+    andConditions.push({ OR: [{ booking: { order: { destination: { name: destination } } } }, { booking: { order: { destinationSite: { name: destination } } } }] });
+  }
+  if (transporter) {
+    andConditions.push({ booking: { transporterOrganisation: { name: transporter } } });
+  }
+  if (driver) {
+    andConditions.push({ driver: { OR: [{ firstName: driver }, { lastName: driver }] } });
+  }
+  if (overload === "true") {
+    andConditions.push({ overload: true });
+  } else if (overload === "false") {
+    andConditions.push({ overload: false });
+  }
+  if (status) {
+    andConditions.push({ status });
+  }
+  if (mineTicketNo) {
+    andConditions.push({ mineTicketNumber: mineTicketNo });
+  }
+
+  const where = { AND: andConditions };
 
   const rows = await prisma.weighbridgeTransaction.findMany({
     where,
     include: {
-      site: true,
+      site: { include: { organisation: true } },
       vehicle: true,
       driver: true,
       trailer: true,
@@ -118,7 +159,7 @@ export async function GET(request: Request) {
       const tranDate = isoDate(row.capturedAt);
       const tranTime = isoTime(row.capturedAt);
       const orderNo = row.booking?.order?.orderNumber ?? row.booking?.reference ?? "—";
-      const supplier = row.booking?.order?.supplierName ?? "—";
+      const supplier = row.booking?.order?.supplierName || row.site?.organisation?.name || row.booking?.order?.originSite?.name || "—";
       const customer = row.booking?.order?.customerName ?? "—";
       const tranType = row.transactionType ?? "—";
       const material = row.commodity ?? "—";

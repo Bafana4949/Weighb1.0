@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requirePlatformSuperAdmin } from "@/lib/api";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const adminCheck = await requirePlatformSuperAdmin();
+  if (adminCheck.error) return adminCheck.error;
   const url = new URL(request.url);
   const email = url.searchParams.get("email") || "superadmin@weighbridge.co.za";
   const password = url.searchParams.get("password") || "SuperAdmin2026!";

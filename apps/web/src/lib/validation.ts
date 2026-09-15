@@ -8,7 +8,7 @@ export const transporterSchema = z.object({
   firstName: z.string().min(2).max(80),
   lastName: z.string().min(2).max(80),
   email: z.string().email(),
-  password: z.string().min(12),
+  password: z.string().min(8),
   phone: z.string().max(30).optional().nullable(),
 });
 

@@ -8,10 +8,15 @@ import { logger } from "@/lib/logger";
 
 const credentialsSchema = z.object({ email: z.string().email(), password: z.string().min(8) });
 
+const authSecret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+if (!authSecret && process.env.NODE_ENV === "production") {
+  throw new Error("Missing AUTH_SECRET environment variable. Set AUTH_SECRET in your environment or Vercel settings.");
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   trustHost: true,
-  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? "389a5165ecc5ef7bc47ebe02e382bdfe34e0d1ecd096f22626156282ad3ca136741ae1b2bdbb352efd0b00131cb2c8a0",
+  secret: authSecret,
   providers: [Credentials({
 
     credentials: { email: {}, password: {} },
@@ -37,20 +42,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
         
         const inputPassword = parsed.data.password.trim();
-        let match = await bcrypt.compare(inputPassword, user.passwordHash);
-        if (!match) {
-          const lower = inputPassword.toLowerCase();
-          const defaults: Record<string, string[]> = {
-            'superadmin@weighbridge.co.za': ['superadmin2026!', 'superadmin2026', 'superadmin', 'superadmin!'],
-            'admin@seriti.co.za': ['admin2026!', 'admin2026', 'admin', 'admin!'],
-            'operator@seriti.co.za': ['operator2026!', 'operator2026', 'operator', 'operator!'],
-            'irfan@treadstone.co.za': ['transporter2026!', 'transporter2026', 'transporter', 'transporter!'],
-            'grant@treadstone.co.za': ['transporter2026!', 'transporter2026', 'transporter', 'transporter!']
-          };
-          if (defaults[email]?.includes(lower)) {
-            match = true;
-          }
-        }
+        const match = await bcrypt.compare(inputPassword, user.passwordHash);
         if (!match) {
           console.error("AUTH_FAILED: bad password for", email);
           logger.warn("auth_login_failed", { email, reason: "bad_password" }); 

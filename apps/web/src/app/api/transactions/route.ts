@@ -39,25 +39,73 @@ export async function GET(request: Request) {
   const status = url.searchParams.get("status");
   const mineTicketNo = url.searchParams.get("mineTicketNo");
 
-  const where: any = {
-    ...(a.session!.user.role === "TRANSPORTER" ? { booking: { transporterOrganisationId: a.session!.user.organisationId! } } : {}),
-    ...(site ? { site: siteIdentifierWhere(site) } : {}),
-    ...(vehicle ? { vehicleId: vehicle } : {}),
-    ...((from || to) ? { capturedAt: { ...(from ? { gte: new Date(from) } : {}), ...(to ? { lte: new Date(to.includes('T') ? to : `${to}T23:59:59.999Z`) } : {}) } } : {}),
-    ...(transactionNo ? { OR: [{ edgeTransactionId: transactionNo }, { waybillNumber: transactionNo }] } : {}),
-    ...(orderNo ? { booking: { order: { orderNumber: orderNo } } } : {}),
-    ...(supplier ? { booking: { order: { supplierName: supplier } } } : {}),
-    ...(customer ? { booking: { order: { customerName: customer } } } : {}),
-    ...(type ? { transactionType: type } : {}),
-    ...(material ? { commodity: material } : {}),
-    ...(source ? { OR: [{ booking: { order: { source: { name: source } } } }, { booking: { order: { originSite: { name: source } } } }] } : {}),
-    ...(destination ? { OR: [{ booking: { order: { destination: { name: destination } } } }, { booking: { order: { destinationSite: { name: destination } } } }] } : {}),
-    ...(transporter ? { booking: { transporterOrganisation: { name: transporter } } } : {}),
-    ...(driver ? { driver: { OR: [{ firstName: driver }, { lastName: driver }] } } : {}),
-    ...(overload === "true" ? { overload: true } : overload === "false" ? { overload: false } : {}),
-    ...(status ? { status } : {}),
-    ...(mineTicketNo ? { mineTicketNumber: mineTicketNo } : {})
-  };
+  const andConditions: any[] = [];
+
+  if (a.session!.user.role === "TRANSPORTER") {
+    andConditions.push({ booking: { transporterOrganisationId: a.session!.user.organisationId! } });
+  }
+  if (site) {
+    andConditions.push({ site: siteIdentifierWhere(site) });
+  }
+  if (vehicle) {
+    andConditions.push({ vehicleId: vehicle });
+  }
+  if (from || to) {
+    andConditions.push({
+      capturedAt: {
+        ...(from ? { gte: new Date(from) } : {}),
+        ...(to ? { lte: new Date(to.includes('T') ? to : `${to}T23:59:59.999Z`) } : {})
+      }
+    });
+  }
+  if (transactionNo) {
+    andConditions.push({ OR: [{ edgeTransactionId: transactionNo }, { waybillNumber: transactionNo }] });
+  }
+  if (orderNo) {
+    andConditions.push({ booking: { order: { orderNumber: orderNo } } });
+  }
+  if (supplier) {
+    andConditions.push({
+      OR: [
+        { booking: { order: { supplierName: supplier } } },
+        { site: { organisation: { name: supplier } } }
+      ]
+    });
+  }
+  if (customer) {
+    andConditions.push({ booking: { order: { customerName: customer } } });
+  }
+  if (type) {
+    andConditions.push({ transactionType: type });
+  }
+  if (material) {
+    andConditions.push({ commodity: material });
+  }
+  if (source) {
+    andConditions.push({ OR: [{ booking: { order: { source: { name: source } } } }, { booking: { order: { originSite: { name: source } } } }] });
+  }
+  if (destination) {
+    andConditions.push({ OR: [{ booking: { order: { destination: { name: destination } } } }, { booking: { order: { destinationSite: { name: destination } } } }] });
+  }
+  if (transporter) {
+    andConditions.push({ booking: { transporterOrganisation: { name: transporter } } });
+  }
+  if (driver) {
+    andConditions.push({ driver: { OR: [{ firstName: driver }, { lastName: driver }] } });
+  }
+  if (overload === "true") {
+    andConditions.push({ overload: true });
+  } else if (overload === "false") {
+    andConditions.push({ overload: false });
+  }
+  if (status) {
+    andConditions.push({ status });
+  }
+  if (mineTicketNo) {
+    andConditions.push({ mineTicketNumber: mineTicketNo });
+  }
+
+  const where = andConditions.length > 0 ? { AND: andConditions } : {};
 
   const [rows, total] = await Promise.all([
     prisma.weighbridgeTransaction.findMany({
@@ -65,7 +113,7 @@ export async function GET(request: Request) {
       include: {
         vehicle: true,
         driver: true,
-        site: true,
+        site: { include: { organisation: true } },
         booking: {
           include: {
             transporterOrganisation: true,
@@ -87,7 +135,7 @@ export async function GET(request: Request) {
     transactionDate: isoDate(r.capturedAt),
     transactionTime: isoTime(r.capturedAt),
     orderNo: r.booking?.order?.orderNumber ?? null,
-    supplier: r.booking?.order?.supplierName ?? null,
+    supplier: r.booking?.order?.supplierName || r.site?.organisation?.name || r.booking?.order?.originSite?.name || null,
     customer: r.booking?.order?.customerName ?? null,
     transactionType: r.transactionType ?? null,
     material: r.commodity ?? null,

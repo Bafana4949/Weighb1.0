@@ -219,6 +219,30 @@ export function CompanyManagement({ initialCompanies }: { initialCompanies: Comp
     }
   }
 
+  async function resetUserPassword(user: LoginUser) {
+    const password = window.prompt(`New password for ${user.firstName} ${user.lastName} (at least 8 characters):`);
+    if (!password) return;
+    if (password.length < 8) {
+      toast({ title: "Password not changed", body: "Password must be at least 8 characters", severity: "MEDIUM" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/password`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not reset password");
+      toast({ title: "Password reset", body: `Password updated for ${user.firstName} ${user.lastName} (${user.email})` });
+    } catch (error) {
+      toast({ title: "Could not reset password", body: String(error), severity: "HIGH" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const formattedShareMessage = provisioned
     ? `---------------------------------------------
 WEIGHBRIDGE PLATFORM - CLIENT ACCESS CREDENTIALS
@@ -288,11 +312,24 @@ Instructions:
                   </TableCell>
                   <TableCell className="text-xs">
                     {c.users.map((u) => (
-                      <p key={u.id}>
-                        {u.firstName} {u.lastName} ·{" "}
-                        <span className="text-muted-foreground">{u.email}</span>{" "}
-                        {u.status !== "ACTIVE" && <Badge variant="destructive">{u.status}</Badge>}
-                      </p>
+                      <div key={u.id} className="flex items-center gap-1.5 my-0.5">
+                        <span>
+                          {u.firstName} {u.lastName} ·{" "}
+                          <span className="text-muted-foreground">{u.email}</span>{" "}
+                          {u.status !== "ACTIVE" && <Badge variant="destructive">{u.status}</Badge>}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-5 px-1.5 text-2xs text-muted-foreground hover:text-foreground"
+                          onClick={() => resetUserPassword(u)}
+                          title="Reset Password"
+                          disabled={busy}
+                        >
+                          <KeyRound size={11} className="mr-0.5 text-amber-500" />
+                          Reset PW
+                        </Button>
+                      </div>
                     ))}
                   </TableCell>
                   <TableCell className="text-xs">{c._count.sites}</TableCell>
@@ -423,10 +460,10 @@ Instructions:
                   name="password"
                   type={showPassword ? "text" : "password"}
                   required
-                  minLength={12}
+                  minLength={8}
                   value={passwordValue}
                   onChange={(e) => setPasswordValue(e.target.value)}
-                  placeholder="At least 12 characters"
+                  placeholder="At least 8 characters"
                   className="pr-10 font-mono text-sm"
                 />
                 <button

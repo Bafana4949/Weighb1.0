@@ -15,7 +15,6 @@ export default auth((request) => {
     path === "/api/transactions/reconcile" ||
     path === "/api/transactions/chain-head" ||
     path === "/api/transactions/manual" ||
-    path.startsWith("/api/debug") ||
     (path === "/api/incidents" && request.method === "POST");
 
 
@@ -28,7 +27,6 @@ export default auth((request) => {
     path === "/api/auth/forgot-password" ||
     path === "/api/auth/reset-password" ||
     path.startsWith("/api/auth") ||
-    path.startsWith("/api/seed-rbac") ||
     path.startsWith("/_next") ||
     path.startsWith("/verify/") ||
     siteCallable;

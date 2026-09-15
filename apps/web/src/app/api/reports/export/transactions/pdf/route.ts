@@ -30,29 +30,44 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const range = dateRange(url.searchParams);
   const orgFilter = url.searchParams.get("org");
-  const scope = access.session!.user.role === "TRANSPORTER" 
-    ? { booking: { transporterOrganisationId: access.session!.user.organisationId! } }
-    : { site: mineScope(access.session!.user.organisationId), ...(orgFilter ? { booking: { transporterOrganisationId: orgFilter } } : {}) };
-
-  // Note: Only capturing the base date filter here for the PDF. 
-  // If full advanced filters are needed on PDF export, we would parse them all here like the CSV route does.
-  // For brevity and to ensure PDF generation works for the primary use case, we support the standard date/scope filtering.
-  // If the user selects advanced filters, they will be passed in the URL.
   const transactionNo = url.searchParams.get("transactionNo");
   const orderNo = url.searchParams.get("orderNo");
   const type = url.searchParams.get("type");
   const status = url.searchParams.get("status");
   const overload = url.searchParams.get("overload");
 
-  const where: any = {
-    capturedAt: range,
-    ...scope,
-    ...(transactionNo ? { OR: [{ edgeTransactionId: transactionNo }, { waybillNumber: transactionNo }] } : {}),
-    ...(orderNo ? { booking: { order: { orderNumber: orderNo } } } : {}),
-    ...(type ? { transactionType: type } : {}),
-    ...(status ? { status } : {}),
-    ...(overload === "true" ? { overload: true } : overload === "false" ? { overload: false } : {}),
-  };
+  const andConditions: any[] = [
+    { capturedAt: range }
+  ];
+
+  if (access.session!.user.role === "TRANSPORTER") {
+    andConditions.push({ booking: { transporterOrganisationId: access.session!.user.organisationId! } });
+  } else {
+    andConditions.push({ site: mineScope(access.session!.user.organisationId) });
+    if (orgFilter) {
+      andConditions.push({ booking: { transporterOrganisationId: orgFilter } });
+    }
+  }
+
+  if (transactionNo) {
+    andConditions.push({ OR: [{ edgeTransactionId: transactionNo }, { waybillNumber: transactionNo }] });
+  }
+  if (orderNo) {
+    andConditions.push({ booking: { order: { orderNumber: orderNo } } });
+  }
+  if (type) {
+    andConditions.push({ transactionType: type });
+  }
+  if (status) {
+    andConditions.push({ status });
+  }
+  if (overload === "true") {
+    andConditions.push({ overload: true });
+  } else if (overload === "false") {
+    andConditions.push({ overload: false });
+  }
+
+  const where = { AND: andConditions };
 
   const [dbRows, organisation] = await Promise.all([
     prisma.weighbridgeTransaction.findMany({
@@ -60,7 +75,7 @@ export async function GET(request: Request) {
       include: {
         vehicle: true,
         driver: true,
-        site: true,
+        site: { include: { organisation: true } },
         booking: { include: { transporterOrganisation: true, order: { include: { originSite: true, destinationSite: true, source: true, destination: true } } } }
       },
       orderBy: { capturedAt: "asc" },
@@ -74,7 +89,7 @@ export async function GET(request: Request) {
     transactionDate: isoDate(row.capturedAt),
     transactionTime: isoTime(row.capturedAt),
     orderNo: row.booking?.order?.orderNumber ?? row.booking?.reference ?? "—",
-    supplier: row.booking?.order?.supplierName ?? "—",
+    supplier: row.booking?.order?.supplierName || row.site?.organisation?.name || row.booking?.order?.originSite?.name || "—",
     customer: row.booking?.order?.customerName ?? "—",
     transactionType: row.transactionType ?? "—",
     material: row.commodity ?? "—",

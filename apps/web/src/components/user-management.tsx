@@ -98,9 +98,9 @@ export function UserManagement({ initialUsers, organisations, roles, currentUser
   }
 
   async function resetPassword(user: UserRow) {
-    const password = window.prompt(`New password for ${user.firstName} ${user.lastName} (at least 12 characters):`);
+    const password = window.prompt(`New password for ${user.firstName} ${user.lastName} (at least 8 characters):`);
     if (!password) return;
-    if (password.length < 12) { toast({ title: "Password not changed", body: "Password must be at least 12 characters", severity: "MEDIUM" }); return; }
+    if (password.length < 8) { toast({ title: "Password not changed", body: "Password must be at least 8 characters", severity: "MEDIUM" }); return; }
     setBusy(true);
     try {
       const response = await fetch(`/api/admin/users/${user.id}/password`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ password }) });

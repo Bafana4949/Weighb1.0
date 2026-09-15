@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requirePlatformSuperAdmin } from "@/lib/api";
 import { PERMISSION_CATALOGUE, BUILT_IN_ROLE_PERMISSIONS } from "@weighbridge/database/src/rbac-catalogue";
 
 export async function GET() {
+  const adminCheck = await requirePlatformSuperAdmin();
+  if (adminCheck.error) return adminCheck.error;
   try {
     const existingPerms = await prisma.permission.count();
     let seeded = false;

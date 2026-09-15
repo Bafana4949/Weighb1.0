@@ -8,7 +8,7 @@ import { audit } from "@/lib/audit";
 import { rateLimitOrFail } from "@/lib/rate-limit";
 export async function GET(request:Request){const access=await requireRole([UserRole.ADMIN]);if(access.error)return access.error;const url=new URL(request.url);const role=url.searchParams.get("role") as UserRole|null;const status=url.searchParams.get("status") as UserStatus|null;const users=await prisma.user.findMany({where:{...(role?{role}:{}),...(status?{status}:{}),...mineScope(access.session!.user.organisationId)},include:{organisation:true,roleAssignments:{include:{role:true}}},orderBy:{createdAt:"desc"}});return ok(users.map(({passwordHash,...user})=>user))}
 
-const createSchema=z.object({email:z.string().email(),password:z.string().min(12),firstName:z.string().min(2),lastName:z.string().min(2),phone:z.string().optional().nullable(),role:z.nativeEnum(UserRole).default("OPERATOR"),organisationId:z.string().uuid().optional().nullable(),roleIds:z.array(z.string().uuid()).optional()});
+const createSchema=z.object({email:z.string().email(),password:z.string().min(8),firstName:z.string().min(2),lastName:z.string().min(2),phone:z.string().optional().nullable(),role:z.nativeEnum(UserRole).default("OPERATOR"),organisationId:z.string().uuid().optional().nullable(),roleIds:z.array(z.string().uuid()).optional()});
 export async function POST(request:Request){
   const limited=rateLimitOrFail(request,"admin-users-create",20,10*60*1000);if(limited)return limited;
   const access=await requireRole([UserRole.ADMIN]);if(access.error)return access.error;
