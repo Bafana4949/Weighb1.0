@@ -14,6 +14,9 @@ import {
   PlusCircle,
   ArrowDownCircle,
   ArrowUpCircle,
+  Plug,
+  Unplug,
+  Radio,
 } from "lucide-react";
 import { WeightGauge } from "@/components/weight-gauge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -103,6 +106,106 @@ export function LiveOperatorDashboard({
 
   const toast = useToast();
   const router = useRouter();
+
+  // Physical Mettler Toledo Indicator (Web Serial API) States
+  const [isSerialConnected, setIsSerialConnected] = useState(false);
+  const [serialPort, setSerialPort] = useState<any>(null);
+  const [serialReader, setSerialReader] = useState<any>(null);
+  const [serialBaud, setSerialBaud] = useState<number>(9600);
+  const [indicatorRawText, setIndicatorRawText] = useState<string>("");
+
+  function parseMettlerWeight(raw: string): number | null {
+    if (!raw) return null;
+    const cleaned = raw.replace(/[^\x20-\x7E]/g, " ").trim();
+    if (!cleaned) return null;
+    const match = cleaned.match(/([-+]?\s*\d+(?:\.\d+)?)\s*(?:kg|t)?/i);
+    if (match && match[1]) {
+      const val = parseFloat(match[1].replace(/\s+/g, ""));
+      if (!isNaN(val) && val >= 0) {
+        if (/t\b/i.test(cleaned) && !/kg\b/i.test(cleaned) && val < 500) {
+          return Math.round(val * 1000);
+        }
+        return Math.round(val);
+      }
+    }
+    return null;
+  }
+
+  async function connectSerial() {
+    if (typeof navigator === "undefined" || !("serial" in navigator)) {
+      toast({
+        title: "Web Serial Unsupported",
+        body: "Please open this page in Google Chrome, Microsoft Edge, or Opera to connect directly to the USB scale indicator.",
+        severity: "HIGH",
+      });
+      return;
+    }
+    try {
+      const port = await (navigator as any).serial.requestPort();
+      await port.open({ baudRate: serialBaud, dataBits: 8, stopBits: 1, parity: "none" });
+      setSerialPort(port);
+      setIsSerialConnected(true);
+      toast({
+        title: "Scale Indicator Connected",
+        body: `Listening for live weight from indicator at ${serialBaud} baud.`,
+      });
+
+      const textDecoder = new TextDecoderStream();
+      port.readable.pipeTo(textDecoder.writable).catch(() => null);
+      const reader = textDecoder.readable.getReader();
+      setSerialReader(reader);
+
+      let buffer = "";
+      (async () => {
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) {
+              buffer += value;
+              const lines = buffer.split(/[\r\n]+/);
+              buffer = lines.pop() ?? "";
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                setIndicatorRawText(trimmed);
+                const w = parseMettlerWeight(trimmed);
+                if (w !== null && w >= 0) {
+                  setManualWeightKg(w);
+                }
+              }
+            }
+          }
+        } catch (err: any) {
+          console.warn("Serial connection ended:", err);
+        } finally {
+          setIsSerialConnected(false);
+        }
+      })();
+    } catch (err: any) {
+      if (err.name !== "NotFoundError") {
+        toast({ title: "Serial Connection Failed", body: err.message || String(err), severity: "HIGH" });
+      }
+    }
+  }
+
+  async function disconnectSerial() {
+    try {
+      if (serialReader) {
+        await serialReader.cancel();
+        setSerialReader(null);
+      }
+      if (serialPort) {
+        await serialPort.close();
+        setSerialPort(null);
+      }
+    } catch (e) {
+      console.warn("Error disconnecting serial:", e);
+    } finally {
+      setIsSerialConnected(false);
+      toast({ title: "Scale Indicator Disconnected" });
+    }
+  }
 
   // Fetch Queue from server
   const fetchQueue = async () => {
@@ -391,19 +494,53 @@ export function LiveOperatorDashboard({
 
       {/* Central Manual Weight Entry Console */}
       <Card className="border-border bg-card/95">
-        <CardHeader className="flex-row items-center justify-between pb-2">
+        <CardHeader className="flex-row items-center justify-between pb-2 flex-wrap gap-2">
           <div>
             <CardTitle className="flex items-center gap-2 text-foreground">
               <Scale size={18} className="text-primary" />
               Scale Indicator Weight Entry
             </CardTitle>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Read the digital weight shown on the physical weighbridge display and input here
+              {isSerialConnected 
+                ? "Streaming live weight directly from connected Mettler Toledo indicator"
+                : "Connect your physical USB/Serial indicator or type weight manually"}
             </p>
           </div>
-          <Badge variant="default" className="font-mono text-xs">
-            Platform Ready
-          </Badge>
+          <div className="flex items-center gap-2">
+            {isSerialConnected ? (
+              <Badge variant="default" className="font-mono text-xs flex items-center gap-1.5 animate-pulse bg-emerald-500/20 text-emerald-500 border-emerald-500/40">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                INDICATOR ONLINE: {manualWeightKg} KG
+              </Badge>
+            ) : (
+              <Badge variant="warning" className="font-mono text-xs">
+                Indicator Offline
+              </Badge>
+            )}
+            <div className="flex items-center gap-1.5">
+              <select
+                value={serialBaud}
+                onChange={(e) => setSerialBaud(Number(e.target.value))}
+                disabled={isSerialConnected}
+                className="h-8 rounded-sm border border-border bg-background px-2 text-2xs font-mono"
+                title="Baud Rate (Standard Mettler Toledo is 9600 or 4800)"
+              >
+                <option value="9600">9600 baud</option>
+                <option value="4800">4800 baud</option>
+                <option value="2400">2400 baud</option>
+                <option value="19200">19200 baud</option>
+              </select>
+              <Button
+                variant={isSerialConnected ? "outline" : "default"}
+                size="sm"
+                onClick={isSerialConnected ? disconnectSerial : connectSerial}
+                className="text-xs h-8 gap-1.5 cursor-pointer"
+              >
+                {isSerialConnected ? <Unplug size={13} /> : <Plug size={13} />}
+                {isSerialConnected ? "Disconnect" : "Connect USB Indicator"}
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <WeightGauge weight={manualWeightKg} stable={true} />
@@ -927,9 +1064,20 @@ export function LiveOperatorDashboard({
               {/* Weight Inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label>
-                    1st Weight (kg) {modalMode === "FIRST" ? "· Scale Reading" : "(Captured)"}:
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">
+                      1st Weight (kg) {modalMode === "FIRST" ? "· Scale Reading" : "(Captured)"}:
+                    </Label>
+                    {manualWeightKg > 0 && modalMode !== "SECOND" && (
+                      <button
+                        type="button"
+                        onClick={() => setFirstWeightInput(String(manualWeightKg))}
+                        className="text-2xs text-primary font-mono font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <RefreshCw size={10} /> Insert Scale ({formatKg(manualWeightKg)})
+                      </button>
+                    )}
+                  </div>
                   <div className="relative">
                     <Input
                       type="number"
@@ -947,9 +1095,20 @@ export function LiveOperatorDashboard({
 
                 {(modalMode === "SECOND" || modalMode === "DIRECT") && (
                   <div className="space-y-1.5">
-                    <Label className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                      2nd Weight (kg) · Scale Reading:
-                    </Label>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
+                        2nd Weight (kg) · Scale Reading:
+                      </Label>
+                      {manualWeightKg > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setSecondWeightInput(String(manualWeightKg))}
+                          className="text-2xs text-emerald-600 dark:text-emerald-400 font-mono font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw size={10} /> Insert Scale ({formatKg(manualWeightKg)})
+                        </button>
+                      )}
+                    </div>
                     <div className="relative">
                       <Input
                         type="number"
