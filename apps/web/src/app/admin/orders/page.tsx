@@ -25,5 +25,12 @@ export default async function Orders({ searchParams }: { searchParams: Promise<{
     prisma.product.findMany({ where: { isActive: true, ...mineScope(s.user.organisationId) }, orderBy: { name: "asc" } }),
     prisma.organisation.findMany({ where: { deletedAt: null, isActive: true, type: "HAULIER" }, orderBy: { name: "asc" } })
   ]);
+  for (const o of orders) {
+    const fKg = o.bookings.reduce((sum, b) => sum + b.transactions.filter(t => t.status === "COMPLETED").reduce((s, t) => s + t.netWeightKg, 0), 0);
+    if (fKg >= o.estimatedMassKg && o.status === "ACTIVE") {
+      o.status = "FULFILLED";
+      prisma.weighbridgeOrder.update({ where: { id: o.id }, data: { status: "FULFILLED" } }).catch(() => null);
+    }
+  }
   return <AppShell role={s.user.role} userName={s.user.name??"Admin"} orgName={s.user.organisationName} isSuperAdmin={isPlatformSuperAdmin(s.user)}><div className="space-y-4"><div><h1 className="text-2xl font-semibold text-foreground">Weighbridge orders</h1><p className="text-xs text-muted-foreground">Create dispatch and receipt orders for transporters to book trucks against.</p></div><form className="flex items-end gap-2" method="get"><Input name="q" defaultValue={params.q ?? ""} placeholder="Search order no., product, customer…" className="max-w-xs" /><Button type="submit" variant="secondary">Search</Button></form><OrderManagement initialOrders={JSON.parse(JSON.stringify(orders))} sites={sites.map(s=>({id:s.id,name:s.name}))} sources={JSON.parse(JSON.stringify(sources))} destinations={JSON.parse(JSON.stringify(destinations))} products={JSON.parse(JSON.stringify(products))} organisations={organisations.map(o=>({id:o.id,name:o.name}))} /><PaginationControls page={page} limit={limit} total={total} basePath="/admin/orders" params={{ q: params.q }} /></div></AppShell>;
 }

@@ -269,13 +269,13 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
           <TableCell className="text-xs">{o.customerName ?? o.supplierName ?? "—"}</TableCell>
           <TableCell>{o.productRef?.name ?? o.product}{o.stockpile ? <p className="text-2xs text-muted-foreground">Stockpile {o.stockpile}</p> : null}</TableCell>
           <TableCell className="font-mono text-xs">{(fulfilledKg(o) / 1000).toFixed(1)} / {(o.estimatedMassKg / 1000).toFixed(1)} t</TableCell>
-          <TableCell><Badge variant={o.status === "ACTIVE" ? "default" : o.status === "FULFILLED" ? "default" : "destructive"}>{o.status}</Badge></TableCell>
+          <TableCell><Badge variant={o.status === "ACTIVE" ? "default" : o.status === "FULFILLED" ? "info" : "destructive"}>{o.status}</Badge></TableCell>
           <TableCell><div className="flex gap-1.5">
             <Button variant="outline" size="sm" onClick={() => setViewingBookings(o)}>
               {o.bookings.filter(b => b.status === "PENDING").length > 0 && <span className="mr-1.5 flex h-2 w-2 rounded-full bg-yellow-500"></span>}
               Bookings ({o.bookings.length})
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => openAssignModal(o)} disabled={!!busy || o.status === "CANCELLED"}>
+            <Button variant="ghost" size="sm" onClick={() => openAssignModal(o)} disabled={!!busy || o.status === "CANCELLED" || o.status === "FULFILLED" || fulfilledKg(o) >= o.estimatedMassKg} title={fulfilledKg(o) >= o.estimatedMassKg ? "Order fulfilled. Edit mass to assign more trucks." : undefined}>
               <TruckX size={13} className="mr-1" /> Assign
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setEditing(o)} disabled={!!busy}><Pencil size={13} className="mr-1" />Edit</Button>
@@ -314,6 +314,12 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
       <DialogContent>
         <DialogHeader><DialogTitle>Edit {editing?.orderNumber}</DialogTitle></DialogHeader>
         {editing && <form onSubmit={saveEdit} className="grid gap-3 md:grid-cols-2">
+          {fulfilledKg(editing) >= editing.estimatedMassKg && (
+            <div className="space-y-1 md:col-span-2 rounded-sm border border-primary/30 bg-primary/10 p-2.5 text-xs text-primary">
+              <p className="font-semibold">Order Quota Reached ({(fulfilledKg(editing) / 1000).toFixed(1)} / {(editing.estimatedMassKg / 1000).toFixed(1)} t)</p>
+              <p>Increase the <strong>Estimated Order Mass (t)</strong> below to reopen this order and allow more trucks to be assigned.</p>
+            </div>
+          )}
           <div className="space-y-1.5 md:col-span-2">
             <Label htmlFor="eo-number">Order Number / PO Number</Label>
             <Input id="eo-number" name="orderNumber" defaultValue={editing.orderNumber} required minLength={2} />

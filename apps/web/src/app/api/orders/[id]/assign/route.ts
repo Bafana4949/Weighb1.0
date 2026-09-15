@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { fail, ok, requireRole } from "@/lib/api";
 import { createBooking } from "@/lib/booking-service";
+import { getOrderFulfilledKg } from "@/lib/order-fulfillment";
 
 const assignSchema = z.object({
   organisationId: z.string().uuid(),
@@ -31,6 +32,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   });
 
   if (!order) return fail("Order not found", 404);
+
+  if (order.status !== "ACTIVE") {
+    return fail(`Cannot assign trucks to order with status '${order.status}'. Please edit the order to increase the estimated mass if you wish to assign more trucks.`, 422);
+  }
+
+  const fulfilledKg = await getOrderFulfilledKg(order.id);
+  if (fulfilledKg >= order.estimatedMassKg) {
+    await prisma.weighbridgeOrder.update({
+      where: { id: order.id },
+      data: { status: "FULFILLED" },
+    });
+    return fail(`Order ${order.orderNumber} is already fulfilled (${(fulfilledKg / 1000).toFixed(1)} / ${(order.estimatedMassKg / 1000).toFixed(1)} t). Please edit the order to increase the estimated mass before assigning more trucks.`, 422);
+  }
 
   const vehicles = await prisma.vehicle.findMany({
     where: { id: { in: parsed.data.bookings.map(b => b.vehicleId) } }

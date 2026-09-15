@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { fail, ok, requireSiteOrRole } from "@/lib/api";
 import { audit } from "@/lib/audit";
 import { siteIdentifierWhere } from "@/lib/utils";
+import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
 
 async function generateNextWaybillNumber(siteCode: string, siteId: string): Promise<string> {
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -451,7 +452,13 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const hasActiveOrder = Boolean(transaction.booking.orderId);
+    let orderFulfilled = false;
+    if (transaction.booking.orderId) {
+      const synced = await syncOrderFulfillmentStatus(transaction.booking.orderId);
+      orderFulfilled = synced?.status === "FULFILLED";
+    }
+
+    const hasActiveOrder = Boolean(transaction.booking.orderId) && !orderFulfilled;
     await prisma.booking.update({
       where: { id: transaction.bookingId },
       data: { status: hasActiveOrder ? "APPROVED" : "COMPLETED" },
@@ -586,7 +593,13 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const hasActiveOrder = Boolean(booking.orderId);
+    let orderFulfilled = false;
+    if (booking.orderId) {
+      const synced = await syncOrderFulfillmentStatus(booking.orderId);
+      orderFulfilled = synced?.status === "FULFILLED";
+    }
+
+    const hasActiveOrder = Boolean(booking.orderId) && !orderFulfilled;
     await prisma.booking.update({
       where: { id: booking.id },
       data: { status: hasActiveOrder ? "APPROVED" : "COMPLETED" },

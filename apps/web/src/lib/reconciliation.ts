@@ -6,6 +6,7 @@ import type { z } from "zod";
 import { reconcileSchema } from "@/lib/validation";
 import { runFraudChecks } from "@/lib/fraud";
 import { logger } from "@/lib/logger";
+import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
 
 export type ReconcileInput = z.infer<typeof reconcileSchema>;
 
@@ -131,6 +132,9 @@ export async function reconcileTransaction(input: ReconcileInput) {
       confirmationHash: createHash("sha256").update(`${input.integrity_hash}:${Date.now()}`).digest("hex"),
     } });
     await tx.booking.update({ where: { id: booking.id }, data: { status: held ? "ACTIVE" : "COMPLETED" } });
+    if (!held && booking.orderId) {
+      await syncOrderFulfillmentStatus(booking.orderId, tx);
+    }
     await tx.vehicle.update({ where: { id: booking.vehicleId }, data: { lastTareWeightKg: input.tare_weight_kg } });
     if (overload) await tx.incident.create({ data: {
       siteId: booking.siteId,

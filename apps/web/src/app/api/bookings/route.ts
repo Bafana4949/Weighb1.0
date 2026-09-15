@@ -7,6 +7,7 @@ import { mineScope } from "@/lib/access";
 import { assertOrganisationActive } from "@/lib/permissions";
 import { parsePagination,siteIdentifierWhere } from "@/lib/utils";
 import { routeNotification } from "@/lib/notifications";
+import { getOrderFulfilledKg } from "@/lib/order-fulfillment";
 export async function GET(request:Request){const a=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const url=new URL(request.url);const {page,limit,skip}=parsePagination(url);const status=url.searchParams.get("status") as BookingStatus|null;const site=url.searchParams.get("site");const from=url.searchParams.get("from");const to=url.searchParams.get("to");const where={...(a.session!.user.role==="TRANSPORTER"?{transporterOrganisationId:a.session!.user.organisationId!}:{site:mineScope(a.session!.user.organisationId)}),...(status?{status}:{}),...(site?{site:siteIdentifierWhere(site)}:{}),...((from||to)?{windowStart:{...(from?{gte:new Date(from)}:{}),...(to?{lte:new Date(to.includes('T')?to:`${to}T23:59:59.999Z`)}:{})}}:{})};const [rows,total]=await Promise.all([prisma.booking.findMany({where,include:{vehicle:true,driver:true,site:true,trailer:true},orderBy:{createdAt:"desc"},skip,take:limit}),prisma.booking.count({where})]);return ok(rows,200,{page,total,limit})}
 export async function POST(request: Request) {
   const a = await requireRole([UserRole.TRANSPORTER, UserRole.ADMIN, UserRole.OPERATOR]);
@@ -74,8 +75,15 @@ export async function POST(request: Request) {
     return fail("All trailers must be linked to the selected vehicle", 422);
   }
   if (!site || !site.isActive) return fail("Destination site is unavailable", 422);
-  if (parsed.data.orderId && (!order || order.status !== "ACTIVE" || order.siteId !== site.id)) {
-    return fail("Selected order is not active for this site", 422);
+  if (parsed.data.orderId) {
+    if (!order || order.status !== "ACTIVE" || order.siteId !== site.id) {
+      return fail("Selected order is not active for this site", 422);
+    }
+    const fulfilledKg = await getOrderFulfilledKg(order.id);
+    if (fulfilledKg >= order.estimatedMassKg) {
+      await prisma.weighbridgeOrder.update({ where: { id: order.id }, data: { status: "FULFILLED" } });
+      return fail(`Cannot book truck: Order ${order.orderNumber} is already fulfilled (${(fulfilledKg / 1000).toFixed(1)} / ${(order.estimatedMassKg / 1000).toFixed(1)} t). Please edit the order to increase the mass quota.`, 422);
+    }
   }
 
   const bookingTransporterOrgId =

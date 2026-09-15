@@ -5,6 +5,7 @@ import { fail,ok,requireRole } from "@/lib/api";
 import { audit } from "@/lib/audit";
 import { safeUserSelect } from "@/lib/utils";
 import { orderBaseSchema } from "@/lib/validation";
+import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
 const includeAll={site:true,originSite:true,destinationSite:true,source:true,destination:true,productRef:true,createdBy:{select:safeUserSelect},bookings:{include:{transactions:true}}} as const;
 async function scoped(id:string,callerOrg:string|null){const row=await prisma.weighbridgeOrder.findUnique({where:{id},include:{site:true}});if(!row)return null;if(callerOrg&&row.site.organisationId!==callerOrg)return null;return row}
 export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){const a=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const {id}=await params;const order=await prisma.weighbridgeOrder.findUnique({where:{id},include:includeAll});return order?ok(order):fail("Order not found",404)}
@@ -40,6 +41,10 @@ export async function PUT(request:Request,{params}:{params:Promise<{id:string}>}
     data: parsed.data as Prisma.WeighbridgeOrderUncheckedUpdateInput,
     include: includeAll,
   });
+  const synced = await syncOrderFulfillmentStatus(id);
+  const finalOrder = (synced && synced.status !== updated.status)
+    ? (await prisma.weighbridgeOrder.findUnique({ where: { id }, include: includeAll })) ?? updated
+    : updated;
   await audit({
     userId: a.session!.user.id,
     siteId: before.siteId,
@@ -47,8 +52,8 @@ export async function PUT(request:Request,{params}:{params:Promise<{id:string}>}
     entityType: "weighbridge_order",
     entityId: id,
     beforeData: before,
-    afterData: updated,
+    afterData: finalOrder,
   });
-  return ok(updated);
+  return ok(finalOrder);
 }
 export async function DELETE(_:Request,{params}:{params:Promise<{id:string}>}){const a=await requireRole([UserRole.ADMIN]);if(a.error)return a.error;const {id}=await params;const before=await scoped(id,a.session!.user.organisationId);if(!before)return fail("Order not found",404);const updated=await prisma.weighbridgeOrder.update({where:{id},data:{status:"CANCELLED"}});await audit({userId:a.session!.user.id,siteId:before.siteId,action:"ORDER_CANCELLED",entityType:"weighbridge_order",entityId:id,beforeData:{status:before.status},afterData:{status:updated.status}});return ok(updated)}
