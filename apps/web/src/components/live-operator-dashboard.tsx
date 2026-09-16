@@ -21,6 +21,7 @@ import {
   ShieldAlert,
   TrafficCone,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import { WeightGauge } from "@/components/weight-gauge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -236,6 +237,66 @@ export function LiveOperatorDashboard({
     return null;
   }
 
+  function startReaderLoop(reader: any, framing: "8-none" | "7-even" | "7-odd") {
+    const dataBits = framing.startsWith("7") ? 7 : 8;
+    const parity = framing.endsWith("even") ? "even" : framing.endsWith("odd") ? "odd" : "none";
+    let buffer = "";
+
+    (async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value && value.length > 0) {
+            const mask = dataBits === 7 || parity !== "none" ? 0x7f : 0xff;
+            let chunk = "";
+            for (let i = 0; i < value.length; i++) {
+              chunk += String.fromCharCode(value[i] & mask);
+            }
+            buffer += chunk;
+            setIndicatorPacketCount((prev) => (prev + 1) % 100000);
+
+            if (buffer.includes("\r") || buffer.includes("\n") || buffer.length > 64) {
+              const stxIndex = buffer.lastIndexOf("\x02");
+              const crIndex = buffer.lastIndexOf("\r");
+              if (stxIndex !== -1 && crIndex > stxIndex) {
+                const frame = buffer.substring(stxIndex, crIndex + 1);
+                setIndicatorRawText(frame.replace(/[^\x20-\x7E]/g, " ").trim());
+                const parsed = parseMettlerWeight(frame);
+                if (parsed !== null) {
+                  setManualWeightKg(parsed.weightKg);
+                  setIsIndicatorStable(parsed.isStable);
+                  setLastPacketTime(Date.now());
+                  setSignalLost(false);
+                }
+                buffer = buffer.substring(crIndex + 1);
+              } else {
+                const lines = buffer.split(/[\r\n]+/);
+                buffer = lines.pop() ?? "";
+                for (const line of lines) {
+                  const trimmed = line.trim();
+                  if (!trimmed) continue;
+                  setIndicatorRawText(trimmed);
+                  const parsed = parseMettlerWeight(trimmed);
+                  if (parsed !== null) {
+                    setManualWeightKg(parsed.weightKg);
+                    setIsIndicatorStable(parsed.isStable);
+                    setLastPacketTime(Date.now());
+                    setSignalLost(false);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn("Serial connection ended:", err);
+      } finally {
+        setIsSerialConnected(false);
+      }
+    })();
+  }
+
   async function connectSerial() {
     if (typeof navigator === "undefined" || !("serial" in navigator)) {
       toast({
@@ -264,64 +325,139 @@ export function LiveOperatorDashboard({
 
       const reader = port.readable.getReader();
       setSerialReader(reader);
-
-      let buffer = "";
-      (async () => {
-        try {
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            if (value && value.length > 0) {
-              const mask = dataBits === 7 || parity !== "none" ? 0x7F : 0xFF;
-              let chunk = "";
-              for (let i = 0; i < value.length; i++) {
-                chunk += String.fromCharCode(value[i] & mask);
-              }
-              buffer += chunk;
-              setIndicatorPacketCount((prev) => (prev + 1) % 100000);
-
-              if (buffer.includes("\r") || buffer.includes("\n") || buffer.length > 64) {
-                const stxIndex = buffer.lastIndexOf("\x02");
-                const crIndex = buffer.lastIndexOf("\r");
-                if (stxIndex !== -1 && crIndex > stxIndex) {
-                  const frame = buffer.substring(stxIndex, crIndex + 1);
-                  setIndicatorRawText(frame.replace(/[^\x20-\x7E]/g, " ").trim());
-                  const parsed = parseMettlerWeight(frame);
-                  if (parsed !== null) {
-                    setManualWeightKg(parsed.weightKg);
-                    setIsIndicatorStable(parsed.isStable);
-                    setLastPacketTime(Date.now());
-                    setSignalLost(false);
-                  }
-                  buffer = buffer.substring(crIndex + 1);
-                } else {
-                  const lines = buffer.split(/[\r\n]+/);
-                  buffer = lines.pop() ?? "";
-                  for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed) continue;
-                    setIndicatorRawText(trimmed);
-                    const parsed = parseMettlerWeight(trimmed);
-                    if (parsed !== null) {
-                      setManualWeightKg(parsed.weightKg);
-                      setIsIndicatorStable(parsed.isStable);
-                      setLastPacketTime(Date.now());
-                      setSignalLost(false);
-                    }
-                  }
-                }
-              }
-            }
-          }
-        } catch (err: any) {
-          console.warn("Serial connection ended:", err);
-        } finally {
-          setIsSerialConnected(false);
-        }
-      })();
+      startReaderLoop(reader, serialFraming);
     } catch (err: any) {
       if (err.name !== "NotFoundError") {
         toast({ title: "Serial Connection Failed", body: err.message || String(err), severity: "HIGH" });
+      }
+    }
+  }
+
+  const [isDetecting, setIsDetecting] = useState(false);
+
+  async function autoDetectScale() {
+    if (typeof navigator === "undefined" || !("serial" in navigator)) {
+      toast({
+        title: "Web Serial Unsupported",
+        body: "Please open this page in Google Chrome, Microsoft Edge, or Opera to connect directly to the USB scale indicator.",
+        severity: "HIGH",
+      });
+      return;
+    }
+
+    try {
+      const port = await (navigator as any).serial.requestPort();
+      setIsDetecting(true);
+      toast({
+        title: "Sniffing Connected Scale...",
+        body: "Probing serial baud rates and framing protocols...",
+      });
+
+      const PROFILES = [
+        { baud: 9600, framing: "7-even" as const, label: "9600 baud, 7-E-1 (Mettler Toledo Continuous)" },
+        { baud: 9600, framing: "8-none" as const, label: "9600 baud, 8-N-1 (Standard Continuous)" },
+        { baud: 4800, framing: "7-even" as const, label: "4800 baud, 7-E-1 (Mettler Toledo 4800)" },
+        { baud: 4800, framing: "8-none" as const, label: "4800 baud, 8-N-1 (Avery / Rice Lake)" },
+        { baud: 2400, framing: "7-even" as const, label: "2400 baud, 7-E-1" },
+        { baud: 19200, framing: "8-none" as const, label: "19200 baud, 8-N-1" },
+      ];
+
+      let detectedProfile: (typeof PROFILES)[0] | null = null;
+      let activeReader: any = null;
+
+      for (const profile of PROFILES) {
+        const dataBits = profile.framing.startsWith("7") ? 7 : 8;
+        const parity = profile.framing.endsWith("even") ? "even" : profile.framing.endsWith("odd") ? "odd" : "none";
+
+        try {
+          await port.open({
+            baudRate: profile.baud,
+            dataBits,
+            stopBits: 1,
+            parity,
+          });
+
+          const reader = port.readable.getReader();
+          let candidateBuffer = "";
+          const startTime = Date.now();
+
+          // Probe for up to 600ms
+          while (Date.now() - startTime < 600) {
+            const readPromise = reader.read();
+            const timeoutPromise = new Promise<{ value: undefined; done: boolean }>((res) =>
+              setTimeout(() => res({ value: undefined, done: false }), 200)
+            );
+
+            const { value, done } = await Promise.race([readPromise, timeoutPromise]);
+            if (done) break;
+            if (value && value.length > 0) {
+              const mask = dataBits === 7 || parity !== "none" ? 0x7f : 0xff;
+              for (let i = 0; i < value.length; i++) {
+                candidateBuffer += String.fromCharCode(value[i] & mask);
+              }
+
+              const parsed = parseMettlerWeight(candidateBuffer);
+              if (parsed !== null && parsed.weightKg >= 0) {
+                detectedProfile = profile;
+                activeReader = reader;
+                break;
+              }
+            }
+          }
+
+          if (detectedProfile) {
+            break;
+          } else {
+            await reader.cancel();
+            await port.close();
+          }
+        } catch {
+          try {
+            await port.close();
+          } catch {}
+        }
+      }
+
+      if (detectedProfile && activeReader) {
+        setSerialBaud(detectedProfile.baud);
+        setSerialFraming(detectedProfile.framing);
+        setSerialPort(port);
+        setSerialReader(activeReader);
+        setIsSerialConnected(true);
+        setIsDetecting(false);
+
+        toast({
+          title: "Scale Auto-Detected!",
+          body: `Locked onto ${detectedProfile.label}. Streaming live weight.`,
+        });
+
+        startReaderLoop(activeReader, detectedProfile.framing);
+      } else {
+        setIsDetecting(false);
+        // Fallback open with standard 9600 8-none
+        await port.open({ baudRate: 9600, dataBits: 8, stopBits: 1, parity: "none" });
+        const reader = port.readable.getReader();
+        setSerialBaud(9600);
+        setSerialFraming("8-none");
+        setSerialPort(port);
+        setSerialReader(reader);
+        setIsSerialConnected(true);
+        startReaderLoop(reader, "8-none");
+
+        toast({
+          title: "Scale Connected",
+          body: "Using default 9600 8-N-1. If weights do not stream, ensure the scale is in continuous output mode.",
+          severity: "WARNING",
+        });
+      }
+    } catch (err: any) {
+      setIsDetecting(false);
+      if (err.name !== "NotFoundError") {
+        toast({
+          title: "Auto-Detection Failed",
+          body: err.message || String(err),
+          severity: "HIGH",
+        });
       }
     }
   }
@@ -678,14 +814,31 @@ export function LiveOperatorDashboard({
                 <option value="7-even">7-E-1 (Mettler Default)</option>
                 <option value="7-odd">7-O-1 (Odd)</option>
               </select>
+              {!isSerialConnected && (
+                <Button
+                  size="sm"
+                  onClick={autoDetectScale}
+                  disabled={isDetecting}
+                  className="text-xs h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm font-semibold cursor-pointer"
+                  title="Automatically probe baud rate and serial framing to connect instantly"
+                >
+                  {isDetecting ? (
+                    <RefreshCw size={13} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={13} className="text-amber-300" />
+                  )}
+                  {isDetecting ? "Sniffing Scale…" : "Auto-Detect Scale"}
+                </Button>
+              )}
               <Button
-                variant={isSerialConnected ? "outline" : "default"}
+                variant={isSerialConnected ? "outline" : "secondary"}
                 size="sm"
                 onClick={isSerialConnected ? disconnectSerial : connectSerial}
+                disabled={isDetecting}
                 className="text-xs h-8 gap-1.5 cursor-pointer"
               >
                 {isSerialConnected ? <Unplug size={13} /> : <Plug size={13} />}
-                {isSerialConnected ? "Disconnect" : "Connect USB Indicator"}
+                {isSerialConnected ? "Disconnect" : "Manual Connect"}
               </Button>
             </div>
           </div>
