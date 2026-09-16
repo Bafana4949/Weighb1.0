@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { UserRole } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { roleAllowed } from "@/lib/access";
+import { roleAllowed, TenantScopeError } from "@/lib/access";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 
 export function ok<T>(data: T, status = 200, meta?: { page: number; total: number; limit: number }) {
@@ -13,7 +13,7 @@ export function fail(error: string, status = 400) {
   return NextResponse.json({ success: false, data: null, error }, { status });
 }
 
-export { roleAllowed } from "@/lib/access";
+export { roleAllowed, withScopeErrors } from "@/lib/access";
 
 export async function requireRole(roles: UserRole[]) {
   const session = await auth();
@@ -35,13 +35,6 @@ export async function requirePlatformSuperAdmin() {
  * Additive, finer-grained check layered alongside (not replacing) requireRole.
  * Resolves via UserRoleAssignment -> Role -> RolePermission -> Permission.
  * A platform super-admin is never restricted by client-level role permissions.
- *
- * Users who have never been assigned a custom/built-in role (the common case
- * immediately after this feature ships — assignment is opt-in) fall back to
- * whatever their coarse UserRole already granted via requireRole, so adding
- * a permission check to an existing route never regresses access for the
- * whole existing user base on day one. Once a user has at least one role
- * assignment, that becomes the authoritative, granular answer.
  */
 export async function requirePermission(permissionKey: string) {
   const session = await auth();

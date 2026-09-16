@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { mineScope } from "@/lib/access";
+import { userScope, userSiteScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { OrderManagement } from "@/components/order-management";
@@ -14,15 +14,15 @@ export default async function Orders({ searchParams }: { searchParams: Promise<{
   const params = await searchParams;
   const page = Math.max(1, Number(params.page ?? 1));
   const limit = 25;
-  const scope = { site: mineScope(s.user.organisationId) };
+  const scope = userSiteScope(s.user);
   const where = { ...scope, ...(params.q ? { OR: [{ orderNumber: { contains: params.q, mode: "insensitive" as const } }, { product: { contains: params.q, mode: "insensitive" as const } }, { customerName: { contains: params.q, mode: "insensitive" as const } }, { supplierName: { contains: params.q, mode: "insensitive" as const } }] } : {}) };
   const [orders, total, sites, sources, destinations, products, organisations] = await Promise.all([
     prisma.weighbridgeOrder.findMany({ where, include: { site: true, source: true, destination: true, productRef: true, originSite: true, destinationSite: true, createdBy: { select: safeUserSelect }, bookings: { include: { transactions: true, vehicle: true, driver: true, transporterOrganisation: true } } }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
     prisma.weighbridgeOrder.count({ where }),
-    prisma.site.findMany({ where: { isActive: true, ...mineScope(s.user.organisationId) }, orderBy: { name: "asc" } }),
-    prisma.source.findMany({ where: { isActive: true, ...mineScope(s.user.organisationId) }, orderBy: { name: "asc" } }),
-    prisma.destination.findMany({ where: { isActive: true, ...mineScope(s.user.organisationId) }, orderBy: { name: "asc" } }),
-    prisma.product.findMany({ where: { isActive: true, ...mineScope(s.user.organisationId) }, orderBy: { name: "asc" } }),
+    prisma.site.findMany({ where: { isActive: true, ...userScope(s.user) }, orderBy: { name: "asc" } }),
+    prisma.source.findMany({ where: { isActive: true, ...userScope(s.user) }, orderBy: { name: "asc" } }),
+    prisma.destination.findMany({ where: { isActive: true, ...userScope(s.user) }, orderBy: { name: "asc" } }),
+    prisma.product.findMany({ where: { isActive: true, ...userScope(s.user) }, orderBy: { name: "asc" } }),
     prisma.organisation.findMany({ where: { deletedAt: null, isActive: true, type: "HAULIER" }, orderBy: { name: "asc" } })
   ]);
   for (const o of orders) {

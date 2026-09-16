@@ -18,6 +18,7 @@ coverage/
 .env.development.local
 .env.test.local
 .env.production.local
+CREDENTIALS.md
 
 # Logs and debug files
 *.log

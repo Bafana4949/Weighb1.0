@@ -1,23 +1,23 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { fail, ok, requireRole } from "@/lib/api";
-import { mineScope } from "@/lib/access";
+import { fail, ok, requireRole, withScopeErrors } from "@/lib/api";
+import { userScope } from "@/lib/access";
 import { audit } from "@/lib/audit";
 import { rateLimitOrFail } from "@/lib/rate-limit";
 import { UserRole } from "@prisma/client";
 
-export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+export const GET = withScopeErrors(async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const access = await requireRole([UserRole.ADMIN]);
   if (access.error) return access.error;
 
   const destination = await prisma.destination.findFirst({
-    where: { id: params.id, ...mineScope(access.session!.user.organisationId) }
+    where: { id: params.id, ...userScope(access.session!.user) }
   });
   if (!destination) return fail("Not found", 404);
 
   return ok(destination);
-}
+});
 
 const updateSchema = z.object({
   name: z.string().min(2),
@@ -31,7 +31,7 @@ const updateSchema = z.object({
   isActive: z.boolean()
 });
 
-export async function PUT(request: Request, props: { params: Promise<{ id: string }> }) {
+export const PUT = withScopeErrors(async function PUT(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const limited = rateLimitOrFail(request, "admin-destinations-update", 20, 10 * 60 * 1000);
   if (limited) return limited;
@@ -40,7 +40,7 @@ export async function PUT(request: Request, props: { params: Promise<{ id: strin
   if (access.error) return access.error;
 
   const destination = await prisma.destination.findFirst({
-    where: { id: params.id, ...mineScope(access.session!.user.organisationId) }
+    where: { id: params.id, ...userScope(access.session!.user) }
   });
   if (!destination) return fail("Not found", 404);
 
@@ -77,15 +77,15 @@ export async function PUT(request: Request, props: { params: Promise<{ id: strin
   });
 
   return ok(updated);
-}
+});
 
-export async function DELETE(request: Request, props: { params: Promise<{ id: string }> }) {
+export const DELETE = withScopeErrors(async function DELETE(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const access = await requireRole([UserRole.ADMIN]);
   if (access.error) return access.error;
 
   const destination = await prisma.destination.findFirst({
-    where: { id: params.id, ...mineScope(access.session!.user.organisationId) },
+    where: { id: params.id, ...userScope(access.session!.user) },
     include: { _count: { select: { orders: true } } }
   });
   if (!destination) return fail("Not found", 404);
@@ -105,4 +105,4 @@ export async function DELETE(request: Request, props: { params: Promise<{ id: st
   });
 
   return ok({ success: true });
-}
+});

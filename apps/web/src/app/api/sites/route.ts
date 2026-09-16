@@ -1,23 +1,32 @@
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { fail, ok, requireRole } from "@/lib/api";
+import { fail, ok, requireRole, withScopeErrors } from "@/lib/api";
 import { audit } from "@/lib/audit";
-import { mineScope } from "@/lib/access";
+import { userScope } from "@/lib/access";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { siteSchema } from "@/lib/validation";
 
-export async function GET() {
+export const GET = withScopeErrors(async function GET() {
   const a = await requireRole([UserRole.TRANSPORTER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SECURITY]);
   if (a.error) return a.error;
-  const scope = a.session!.user.role === "TRANSPORTER" ? {} : mineScope(a.session!.user.organisationId);
+
+  const isSuperAdmin = isPlatformSuperAdmin(a.session!.user);
+  const isTransporter = a.session!.user.role === "TRANSPORTER";
+
+  const where = isSuperAdmin
+    ? { isActive: true }
+    : isTransporter
+      ? { isActive: true, bookings: { some: { transporterOrganisationId: a.session!.user.organisationId! } } }
+      : { isActive: true, ...userScope(a.session!.user) };
+
   return ok(await prisma.site.findMany({
-    where: { isActive: true, ...scope },
+    where,
     include: { organisation: true, config: true },
     orderBy: { code: "asc" },
   }));
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withScopeErrors(async function POST(request: Request) {
   const a = await requireRole([UserRole.ADMIN]);
   if (a.error) return a.error;
 
@@ -55,5 +64,4 @@ export async function POST(request: Request) {
   } catch (error) {
     return fail("Site code is already registered", 409);
   }
-}
-
+});

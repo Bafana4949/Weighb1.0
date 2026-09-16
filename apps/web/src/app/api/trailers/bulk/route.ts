@@ -18,7 +18,10 @@ const trailerRowSchema = z.object({
   tareWeightKg: z.number().int().min(500).max(30_000).optional().nullable(),
 });
 
-export async function POST(request: Request) {
+import { isPlatformSuperAdmin } from "@/lib/permissions";
+import { withScopeErrors } from "@/lib/api";
+
+export const POST = withScopeErrors(async function POST(request: Request) {
   const auth = await requireRole([UserRole.ADMIN]);
   if (auth.error) return auth.error;
 
@@ -54,8 +57,8 @@ export async function POST(request: Request) {
       // Fetch from DB
       const queryParams: any = { plateNormalized: normalisedPlate, deletedAt: null };
       
-      // If transporter, they can only add trailers to their own vehicles
-      if (auth.session!.user.role === "TRANSPORTER") {
+      // Tenant isolation: non-superadmin can only add trailers to their own vehicles
+      if (!isPlatformSuperAdmin(auth.session!.user)) {
         queryParams.organisationId = auth.session!.user.organisationId;
       }
       
@@ -100,4 +103,4 @@ export async function POST(request: Request) {
   }
 
   return ok({ created, errors });
-}
+});

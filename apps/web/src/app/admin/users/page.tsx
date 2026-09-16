@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { mineScope } from "@/lib/access";
+import { userScope } from "@/lib/access";
 import { PERMISSION_CATALOGUE, BUILT_IN_ROLE_PERMISSIONS } from "@weighbridge/database/src/rbac-catalogue";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
@@ -15,7 +15,7 @@ export default async function Users({ searchParams }: { searchParams: Promise<{ 
   const params = await searchParams;
   const page = Math.max(1, Number(params.page ?? 1));
   const limit = 30;
-  const scope = mineScope(s.user.organisationId);
+  const scope = userScope(s.user);
   const where = { ...scope, ...(params.q ? { OR: [{ firstName: { contains: params.q, mode: "insensitive" as const } }, { lastName: { contains: params.q, mode: "insensitive" as const } }, { email: { contains: params.q, mode: "insensitive" as const } }] } : {}) };
 
   // Auto-seed RBAC if missing

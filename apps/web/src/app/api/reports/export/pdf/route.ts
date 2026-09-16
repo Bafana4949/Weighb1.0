@@ -2,15 +2,15 @@ import React from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/api";
-import { mineScope } from "@/lib/access";
+import { requireRole, withScopeErrors } from "@/lib/api";
+import { userScope } from "@/lib/access";
 import { dateRange,tonnageByGroup,turnaroundBySite } from "@/lib/reports";
 import { rateLimitOrFail } from "@/lib/rate-limit";
 import { ReportDocument } from "./report-document";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+export const GET = withScopeErrors(async function GET(request: Request) {
   const limited = rateLimitOrFail(request, "reports-export-pdf", 20, 5 * 60 * 1000);
   if (limited) return limited;
   const access = await requireRole([UserRole.ADMIN, UserRole.OPERATOR]);
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const range = dateRange(url.searchParams);
   const group = url.searchParams.get("group") ?? "commodity";
-  const scope = mineScope(access.session!.user.organisationId);
+  const scope = userScope(access.session!.user);
 
   const [{ rows: tonnageRows, rawCount, totalTonnageKg }, { sites: turnaroundRows }, organisation] = await Promise.all([
     tonnageByGroup(range, group, scope),
@@ -51,4 +51,4 @@ export async function GET(request: Request) {
   return new Response(new Uint8Array(buffer), {
     headers: { "content-type": "application/pdf", "content-disposition": `${disposition}; filename="report-${range.gte.toISOString().slice(0, 10)}-to-${range.lte.toISOString().slice(0, 10)}.pdf"` },
   });
-}
+});

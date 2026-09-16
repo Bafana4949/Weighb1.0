@@ -1,7 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/api";
-import { mineScope } from "@/lib/access";
+import { requireRole, withScopeErrors } from "@/lib/api";
+import { userScope } from "@/lib/access";
 import { dateRange } from "@/lib/reports";
 import { rateLimitOrFail } from "@/lib/rate-limit";
 
@@ -21,7 +21,7 @@ function formatTurnaroundTime(seconds: number | null): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-export async function GET(request: Request) {
+export const GET = withScopeErrors(async function GET(request: Request) {
   const limited = rateLimitOrFail(request, "reports-export-csv", 20, 5 * 60 * 1000);
   if (limited) return limited;
 
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
   if (a.session!.user.role === "TRANSPORTER") {
     andConditions.push({ booking: { transporterOrganisationId: a.session!.user.organisationId! } });
   } else {
-    andConditions.push({ site: mineScope(a.session!.user.organisationId) });
+    andConditions.push({ site: userScope(a.session!.user) });
     if (orgFilter) {
       andConditions.push({ booking: { transporterOrganisationId: orgFilter } });
     }
@@ -213,4 +213,4 @@ export async function GET(request: Request) {
       "content-disposition": `attachment; filename="weighbridge-transactions-${new Date().toISOString().slice(0, 10)}.csv"`
     }
   });
-}
+});

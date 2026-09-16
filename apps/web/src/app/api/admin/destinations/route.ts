@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { fail, ok, requireRole } from "@/lib/api";
-import { mineScope } from "@/lib/access";
+import { fail, ok, requireRole, withScopeErrors } from "@/lib/api";
+import { userScope } from "@/lib/access";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
 import { rateLimitOrFail } from "@/lib/rate-limit";
 import { UserRole } from "@prisma/client";
 
-export async function GET(request: Request) {
+export const GET = withScopeErrors(async function GET(request: Request) {
   const access = await requireRole([UserRole.ADMIN]);
   if (access.error) return access.error;
 
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
   const q = url.searchParams.get("q");
 
   const where = {
-    ...mineScope(access.session!.user.organisationId),
+    ...userScope(access.session!.user),
     ...(q ? {
       OR: [
         { name: { contains: q, mode: "insensitive" as const } },
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
   });
 
   return ok(destinations);
-}
+});
 
 const createSchema = z.object({
   name: z.string().min(2),
@@ -40,21 +41,25 @@ const createSchema = z.object({
   contactPhone: z.string().optional().nullable(),
   latitude: z.number().optional().nullable(),
   longitude: z.number().optional().nullable(),
+  organisationId: z.string().optional().nullable(),
   isActive: z.boolean().default(true)
 });
 
-export async function POST(request: Request) {
+export const POST = withScopeErrors(async function POST(request: Request) {
   const limited = rateLimitOrFail(request, "admin-destinations-create", 20, 10 * 60 * 1000);
   if (limited) return limited;
 
   const access = await requireRole([UserRole.ADMIN]);
   if (access.error) return access.error;
 
-  const orgId = access.session!.user.organisationId;
-  if (!orgId) return fail("Must belong to a client organisation to create destinations", 403);
-
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid data", 422);
+
+  const orgId = isPlatformSuperAdmin(access.session!.user)
+    ? (parsed.data.organisationId ?? access.session!.user.organisationId)
+    : access.session!.user.organisationId;
+
+  if (!orgId) return fail("Must specify a client organisation to create destinations", 403);
 
   if (parsed.data.code) {
     const existing = await prisma.destination.findFirst({ where: { organisationId: orgId, code: parsed.data.code } });
@@ -86,4 +91,4 @@ export async function POST(request: Request) {
   });
 
   return ok(destination, 201);
-}
+});

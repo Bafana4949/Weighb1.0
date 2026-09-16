@@ -9,9 +9,8 @@ const NBSP = "\u00A0";
  * Formats according to South African locale conventions (e.g., "14 532 kg").
  */
 export function formatKg(value: number): string {
-  if (!Number.isFinite(value)) return `0${NBSP}kg`;
-  const roundedInt = Math.round(value); // Safe integer representation if clean float was passed
-  return `${roundedInt.toLocaleString("en-ZA").replace(/,/g, NBSP)}${NBSP}kg`;
+  if (!Number.isInteger(value)) throw new Error(`Non-integer kg: ${value}`);
+  return `${value.toLocaleString("en-ZA").replace(/,/g, NBSP)}${NBSP}kg`;
 }
 
 /**

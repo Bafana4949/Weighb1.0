@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { formatKg, safeUserSelect } from "@/lib/utils";
-import { mineScope } from "@/lib/access";
+import { userScope } from "@/lib/access";
 import { PlatformDashboard } from "@/components/platform-dashboard";
 
 async function safeQuery<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -74,7 +74,7 @@ export default async function AdminPage(){
   }
 
   const since=subDays(new Date(),7);
-  const scope=mineScope(s.user.organisationId);
+  const scope=userScope(s.user);
   const [sites,tx,openIncidents,hardware]=await Promise.all([
     safeQuery(prisma.site.findMany({where:{isActive:true,...scope},include:{_count:{select:{transactions:true,incidents:true}}}}), []),
     safeQuery(prisma.weighbridgeTransaction.aggregate({where:{capturedAt:{gte:since},site:scope},_count:true,_sum:{netWeightKg:true},_avg:{turnaroundSeconds:true}}), { _count: 0, _sum: { netWeightKg: null }, _avg: { turnaroundSeconds: null } }),

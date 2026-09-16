@@ -14,10 +14,11 @@ export function roleAllowed(role: UserRole, roles: readonly UserRole[]): boolean
 }
 
 /**
- * Tenant filter. Fails closed: throws rather than degrading to {} — a missing org is a bug, not a wildcard.
+ * Tenant filter. Strictly single-argument. Fails closed: throws rather than degrading to {} —
+ * a missing org is a bug, not a wildcard. Never accepts a user object, never returns {}.
  */
 export function mineScope(organisationId: string | null | undefined): { organisationId: string } {
-  if (!organisationId) {
+  if (!organisationId || typeof organisationId !== "string") {
     throw new TenantScopeError("Tenant scope required but organisation is null");
   }
   return { organisationId };
@@ -34,18 +35,67 @@ export type AccessScope =
   | { kind: "platform" }
   | { kind: "tenant"; organisationId: string };
 
-export function resolveScope(user: { role?: UserRole | null; organisationId?: string | null; platformRole?: PlatformRole | null } | null | undefined): AccessScope {
+export type UserContext = {
+  role?: UserRole | null;
+  organisationId?: string | null;
+  platformRole?: PlatformRole | null;
+} | null | undefined;
+
+export function resolveScope(user: UserContext): AccessScope {
   if (isPlatformSuperAdmin(user)) return { kind: "platform" };
   if (!user?.organisationId) throw new TenantScopeError("Tenant organisation required for non-superadmin access");
   return { kind: "tenant", organisationId: user.organisationId };
 }
 
 /**
- * Helper to get Prisma where clause for a user:
- * If platform super-admin -> {} (unscoped)
- * Otherwise -> { organisationId: user.organisationId } (strictly scoped)
+ * Returns Prisma where clause for an entity directly owned by an organisation.
+ * If user is Platform Super Admin -> {} (sees all tenants).
+ * If user is Tenant Admin / Operator -> { organisationId: user.organisationId }.
+ * If non-super-admin with missing org -> throws TenantScopeError (fail-closed).
  */
-export function userScope(user: { role?: UserRole | null; organisationId?: string | null; platformRole?: PlatformRole | null } | null | undefined): { organisationId: string } | Record<string, never> {
+export function userScope(user: UserContext): { organisationId: string } | Record<string, never> {
   if (isPlatformSuperAdmin(user)) return platformWideScope();
-  return mineScope(user?.organisationId);
+  if (!user?.organisationId) throw new TenantScopeError("Tenant organisation required for non-superadmin access");
+  return { organisationId: user.organisationId };
+}
+
+/**
+ * Returns Prisma where clause for an entity scoped via a `site` relation.
+ * If user is Platform Super Admin -> {} (sees all sites).
+ * If user is Tenant Admin / Operator -> { site: { organisationId: user.organisationId } }.
+ * If non-super-admin with missing org -> throws TenantScopeError (fail-closed).
+ */
+export function userSiteScope(user: UserContext): { site: { organisationId: string } } | Record<string, never> {
+  if (isPlatformSuperAdmin(user)) return platformWideScope();
+  if (!user?.organisationId) throw new TenantScopeError("Tenant organisation required for non-superadmin access");
+  return { site: { organisationId: user.organisationId } };
+}
+
+/**
+ * Returns Prisma where clause for transactions/bookings scoped to a transporter organisation.
+ * Throws TenantScopeError if organisationId is missing.
+ */
+export function transporterScope(user: UserContext): { booking: { transporterOrganisationId: string } } {
+  if (!user?.organisationId) throw new TenantScopeError("Transporter organisation required for transporter access");
+  return { booking: { transporterOrganisationId: user.organisationId } };
+}
+
+/**
+ * Handler wrapper that catches TenantScopeError thrown inside route queries
+ * and returns a clean 403 response instead of an unhandled 500 error.
+ */
+export function withScopeErrors<T extends (...args: any[]) => Promise<Response>>(handler: T): T {
+  return (async (...args: Parameters<T>): Promise<Response> => {
+    try {
+      return await handler(...args);
+    } catch (e) {
+      if (e instanceof TenantScopeError) {
+        return new Response(JSON.stringify({ success: false, data: null, error: "Tenant organisation scope required" }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw e;
+    }
+  }) as T;
 }

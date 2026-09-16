@@ -1,7 +1,61 @@
 import { UserRole } from "@prisma/client";
 import { NextRequest } from "next/server";
+import { auth } from "@/auth";
 import { activeWindowWhere } from "@/lib/booking-service";
 import { prisma } from "@/lib/prisma";
-import { fail,ok,requireSiteOrRole } from "@/lib/api";
-import { normalisePlate,siteIdentifierWhere } from "@/lib/utils";
-export async function GET(request:NextRequest){const a=await requireSiteOrRole(request,[UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const plate=request.nextUrl.searchParams.get("plate");const site=request.nextUrl.searchParams.get("site");if(!plate||!site)return fail("plate and site are required",422);const resolvedSite=await prisma.site.findFirst({where:siteIdentifierWhere(site),include:{config:true}});if(!resolvedSite)return fail("Site not found",404);const booking=await prisma.booking.findFirst({where:{...activeWindowWhere(new Date(),resolvedSite.config?.journeyWindowGraceMinutes??120),vehicle:{plateNormalized:normalisePlate(plate)},siteId:resolvedSite.id},include:{vehicle:true,driver:true,site:true},orderBy:{windowStart:"asc"}});if(!booking)return ok(null);return ok({id:booking.id,reference:booking.reference,journey_token:booking.journeyToken,vehicle_id:booking.vehicleId,trailer_id:booking.trailerId,driver_id:booking.driverId,driver_rfid:booking.driver.rfidTag,site_id:booking.site.code,plate:booking.vehicle.plate,plate_normalized:booking.vehicle.plateNormalized,tare_weight_kg:booking.vehicle.tareWeightKg,legal_max_gvw_kg:booking.vehicle.legalMaxGvwKg,commodity:booking.commodity,target_tonnage_kg:booking.targetTonnageKg,window_start:booking.windowStart,window_end:booking.windowEnd})}
+import { fail, ok, requireSiteOrRole, withScopeErrors } from "@/lib/api";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
+import { normalisePlate, siteIdentifierWhere } from "@/lib/utils";
+
+export const GET = withScopeErrors(async function GET(request: NextRequest) {
+  const a = await requireSiteOrRole(request, [UserRole.OPERATOR, UserRole.ADMIN, UserRole.SECURITY]);
+  if (a.error) return a.error;
+
+  const plate = request.nextUrl.searchParams.get("plate");
+  const site = request.nextUrl.searchParams.get("site");
+  if (!plate || !site) return fail("plate and site are required", 422);
+
+  const resolvedSite = await prisma.site.findFirst({
+    where: siteIdentifierWhere(site),
+    include: { config: true },
+  });
+  if (!resolvedSite) return fail("Site not found", 404);
+
+  if (a.actor?.type === "user") {
+    const session = await auth();
+    if (session?.user && !isPlatformSuperAdmin(session.user) && resolvedSite.organisationId !== session.user.organisationId) {
+      return fail("Site not found", 404);
+    }
+  }
+
+  const booking = await prisma.booking.findFirst({
+    where: {
+      ...activeWindowWhere(new Date(), resolvedSite.config?.journeyWindowGraceMinutes ?? 120),
+      vehicle: { plateNormalized: normalisePlate(plate) },
+      siteId: resolvedSite.id,
+    },
+    include: { vehicle: true, driver: true, site: true },
+    orderBy: { windowStart: "asc" },
+  });
+
+  if (!booking) return ok(null);
+
+  return ok({
+    id: booking.id,
+    reference: booking.reference,
+    journey_token: booking.journeyToken,
+    vehicle_id: booking.vehicleId,
+    trailer_id: booking.trailerId,
+    driver_id: booking.driverId,
+    driver_rfid: booking.driver.rfidTag,
+    site_id: booking.site.code,
+    plate: booking.vehicle.plate,
+    plate_normalized: booking.vehicle.plateNormalized,
+    tare_weight_kg: booking.vehicle.tareWeightKg,
+    legal_max_gvw_kg: booking.vehicle.legalMaxGvwKg,
+    commodity: booking.commodity,
+    target_tonnage_kg: booking.targetTonnageKg,
+    window_start: booking.windowStart,
+    window_end: booking.windowEnd,
+  });
+});

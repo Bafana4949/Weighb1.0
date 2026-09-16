@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { mineScope } from "@/lib/access";
+import { userSiteScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,7 +19,7 @@ export default async function Billing({ searchParams }: { searchParams: Promise<
   const from = params.from ? new Date(params.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   const transactions = await prisma.weighbridgeTransaction.findMany({
-    where: { status: "COMPLETED", capturedAt: { gte: from, lte: to }, site: mineScope(s.user.organisationId) },
+    where: { status: "COMPLETED", capturedAt: { gte: from, lte: to }, ...userSiteScope(s.user) },
     include: { booking: { include: { transporterOrganisation: true } } },
   });
 

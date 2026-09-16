@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { mineScope } from "@/lib/access";
+import { userScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { DestinationManagement } from "@/components/destination-management";
@@ -10,7 +10,7 @@ export default async function DestinationsPage() {
   const s = await auth();
   if (!s?.user) redirect("/login");
 
-  const scope = mineScope(s.user.organisationId);
+  const scope = userScope(s.user);
   const destinations = await prisma.destination.findMany({
     where: scope,
     orderBy: { name: "asc" }

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { mineScope } from "@/lib/access";
+import { userSiteScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { IncidentManagement } from "@/components/incident-management";
@@ -19,7 +19,7 @@ export default async function AdminIncidents({ searchParams }: { searchParams: P
   const page = Math.max(1, Number(params.page ?? 1));
   const limit = 25;
   const where = {
-    site: mineScope(s.user.organisationId),
+    ...userSiteScope(s.user),
     ...(params.type ? { type: params.type as never } : {}),
     ...(params.severity ? { severity: params.severity as never } : {}),
     ...(params.resolved === "true" ? { status: "RESOLVED" as const } : params.resolved === "false" ? { status: { not: "RESOLVED" as const } } : {}),

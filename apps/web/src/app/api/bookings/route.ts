@@ -2,14 +2,53 @@ import { BookingStatus,UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createBooking } from "@/lib/booking-service";
 import { bookingSchema } from "@/lib/validation";
-import { fail,ok,requireRole } from "@/lib/api";
+import { fail, ok, requireRole, withScopeErrors } from "@/lib/api";
 import { mineScope } from "@/lib/access";
 import { assertOrganisationActive } from "@/lib/permissions";
 import { parsePagination,siteIdentifierWhere } from "@/lib/utils";
 import { routeNotification } from "@/lib/notifications";
 import { getOrderFulfilledKg } from "@/lib/order-fulfillment";
-export async function GET(request:Request){const a=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const url=new URL(request.url);const {page,limit,skip}=parsePagination(url);const status=url.searchParams.get("status") as BookingStatus|null;const site=url.searchParams.get("site");const from=url.searchParams.get("from");const to=url.searchParams.get("to");const where={...(a.session!.user.role==="TRANSPORTER"?{transporterOrganisationId:a.session!.user.organisationId!}:{site:mineScope(a.session!.user.organisationId)}),...(status?{status}:{}),...(site?{site:siteIdentifierWhere(site)}:{}),...((from||to)?{windowStart:{...(from?{gte:new Date(from)}:{}),...(to?{lte:new Date(to.includes('T')?to:`${to}T23:59:59.999Z`)}:{})}}:{})};const [rows,total]=await Promise.all([prisma.booking.findMany({where,include:{vehicle:true,driver:true,site:true,trailer:true},orderBy:{createdAt:"desc"},skip,take:limit}),prisma.booking.count({where})]);return ok(rows,200,{page,total,limit})}
-export async function POST(request: Request) {
+import { isPlatformSuperAdmin } from "@/lib/permissions";
+import { userScope } from "@/lib/access";
+
+export const GET = withScopeErrors(async function GET(request: Request) {
+  const a = await requireRole([UserRole.TRANSPORTER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SECURITY]);
+  if (a.error) return a.error;
+  const url = new URL(request.url);
+  const { page, limit, skip } = parsePagination(url);
+  const status = url.searchParams.get("status") as BookingStatus | null;
+  const site = url.searchParams.get("site");
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+
+  const isSuperAdmin = isPlatformSuperAdmin(a.session!.user);
+  const isTransporter = a.session!.user.role === "TRANSPORTER";
+  const tenantFilter = isSuperAdmin
+    ? {}
+    : isTransporter
+      ? { transporterOrganisationId: a.session!.user.organisationId! }
+      : { site: userScope(a.session!.user) };
+
+  const where = {
+    ...tenantFilter,
+    ...(status ? { status } : {}),
+    ...(site ? { site: siteIdentifierWhere(site) } : {}),
+    ...((from || to)
+      ? {
+          windowStart: {
+            ...(from ? { gte: new Date(from) } : {}),
+            ...(to ? { lte: new Date(to.includes("T") ? to : `${to}T23:59:59.999Z`) } : {}),
+          },
+        }
+      : {}),
+  };
+  const [rows, total] = await Promise.all([
+    prisma.booking.findMany({ where, include: { vehicle: true, driver: true, site: true, trailer: true }, orderBy: { createdAt: "desc" }, skip, take: limit }),
+    prisma.booking.count({ where }),
+  ]);
+  return ok(rows, 200, { page, total, limit });
+});
+export const POST = withScopeErrors(async function POST(request: Request) {
   const a = await requireRole([UserRole.TRANSPORTER, UserRole.ADMIN, UserRole.OPERATOR]);
   if (a.error) return a.error;
 
@@ -119,5 +158,5 @@ export async function POST(request: Request) {
   }
 
   return ok({ ...booking, warnings: vehicleWarning ? [vehicleWarning] : [] }, 201);
-}
+});
 

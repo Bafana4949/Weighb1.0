@@ -1,8 +1,9 @@
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { ok, requireRole } from "@/lib/api";
+import { ok, requireRole, withScopeErrors } from "@/lib/api";
 import { parsePagination, siteIdentifierWhere } from "@/lib/utils";
-import { mineScope } from "@/lib/access";
+import { userScope } from "@/lib/access";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 
 function isoDate(d: Date | null) { return d ? d.toISOString().slice(0, 10) : null; }
 function isoTime(d: Date | null) { return d ? d.toISOString().slice(11, 19) : null; }
@@ -15,7 +16,7 @@ function formatTurnaroundTime(seconds: number | null): string | null {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-export async function GET(request: Request) {
+export const GET = withScopeErrors(async function GET(request: Request) {
   const a = await requireRole([UserRole.TRANSPORTER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SECURITY]);
   if (a.error) return a.error;
 
@@ -42,10 +43,12 @@ export async function GET(request: Request) {
 
   const andConditions: any[] = [];
 
-  if (a.session!.user.role === "TRANSPORTER") {
+  if (isPlatformSuperAdmin(a.session!.user)) {
+    // Platform super admin has platform-wide access
+  } else if (a.session!.user.role === "TRANSPORTER") {
     andConditions.push({ booking: { transporterOrganisationId: a.session!.user.organisationId! } });
-  } else if (a.session!.user.organisationId) {
-    andConditions.push({ site: mineScope(a.session!.user.organisationId) });
+  } else {
+    andConditions.push({ site: userScope(a.session!.user) });
   }
   if (site) {
     andConditions.push({ site: siteIdentifierWhere(site) });
@@ -160,4 +163,4 @@ export async function GET(request: Request) {
   }));
 
   return ok(mappedRows, 200, { page, total, limit });
-}
+});

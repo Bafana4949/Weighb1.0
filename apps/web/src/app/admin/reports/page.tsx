@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { mineScope } from "@/lib/access";
+import { userScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { dateRange, incidentsReport, tonnageByGroup, turnaroundBySite } from "@/lib/reports";
@@ -20,7 +20,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
   const urlParams = new URLSearchParams(params as Record<string, string>);
   const range = dateRange(urlParams);
   const group = params.group ?? "commodity";
-  const scope = mineScope(s.user.organisationId);
+  const scope = userScope(s.user);
   const exportQuery = `from=${isoDate(range.gte)}&to=${isoDate(range.lte)}&group=${group}`;
 
   const [{ rows: tonnageRows, rawCount: trucks, totalTonnageKg }, { sites: turnaroundBySiteRows, bottlenecks }, incidents] = await Promise.all([

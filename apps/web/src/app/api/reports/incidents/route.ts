@@ -1,5 +1,12 @@
 import { UserRole } from "@prisma/client";
-import { ok,requireRole } from "@/lib/api";
-import { mineScope } from "@/lib/access";
-import { dateRange,incidentsReport } from "@/lib/reports";
-export async function GET(request:Request){const a=await requireRole([UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const url=new URL(request.url);const report=await incidentsReport(dateRange(url.searchParams),mineScope(a.session!.user.organisationId));return ok(report)}
+import { ok, requireRole, withScopeErrors } from "@/lib/api";
+import { userScope } from "@/lib/access";
+import { dateRange, incidentsReport } from "@/lib/reports";
+
+export const GET = withScopeErrors(async function GET(request: Request) {
+  const a = await requireRole([UserRole.OPERATOR, UserRole.ADMIN, UserRole.SECURITY]);
+  if (a.error) return a.error;
+  const url = new URL(request.url);
+  const report = await incidentsReport(dateRange(url.searchParams), userScope(a.session!.user));
+  return ok(report);
+});

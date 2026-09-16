@@ -22,9 +22,19 @@ export function dateRange(searchParams: URLSearchParams): { gte: Date; lte: Date
   return { gte, lte };
 }
 
-export async function transactionStats(range: { gte: Date; lte: Date }, siteIdentifier?: string | null, scope: Prisma.SiteWhereInput = {}) {
+export async function transactionStats(
+  range: { gte: Date; lte: Date },
+  siteIdentifier?: string | null,
+  scope: Prisma.SiteWhereInput = {},
+  extraWhere: Prisma.WeighbridgeTransactionWhereInput = {}
+) {
   const resolvedSite = siteIdentifier ? await prisma.site.findFirst({ where: siteIdentifierWhere(siteIdentifier), select: { id: true } }) : null;
-  const where = { capturedAt: range, site: scope, ...(resolvedSite ? { siteId: resolvedSite.id } : {}) };
+  const where: Prisma.WeighbridgeTransactionWhereInput = {
+    capturedAt: range,
+    site: scope,
+    ...extraWhere,
+    ...(resolvedSite ? { siteId: resolvedSite.id } : {}),
+  };
   const [aggregate, turnaround] = await Promise.all([
     prisma.weighbridgeTransaction.aggregate({ where, _sum: { netWeightKg: true }, _count: true, _avg: { netWeightKg: true } }),
     prisma.weighbridgeTransaction.aggregate({ where: { ...where, turnaroundSeconds: { not: null } }, _avg: { turnaroundSeconds: true } }),

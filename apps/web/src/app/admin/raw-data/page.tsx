@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { mineScope } from "@/lib/access";
+import { userSiteScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { PaginationControls } from "@/components/pagination-controls";
@@ -49,7 +49,7 @@ export default async function RawData({ searchParams }: { searchParams: Promise<
 
   const where: any = {
     capturedAt: { gte: from, lte: new Date(to.getTime() + 24 * 60 * 60 * 1000 - 1) },
-    site: mineScope(s.user.organisationId),
+    ...userSiteScope(s.user),
     ...(transactionNo ? { OR: [{ edgeTransactionId: transactionNo }, { waybillNumber: transactionNo }] } : {}),
     ...(orderNo ? { booking: { order: { orderNumber: orderNo } } } : {}),
     ...(supplier ? { booking: { order: { supplierName: supplier } } } : {}),

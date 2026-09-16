@@ -4,7 +4,8 @@ import QRCode from "qrcode";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
-import { formatKg } from "@/lib/utils";
+import { formatKg } from "@/lib/weights";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 
 export default async function Waybill({ params }: { params: Promise<{ id: string }> }) {
   const s = await auth();
@@ -30,6 +31,18 @@ export default async function Waybill({ params }: { params: Promise<{ id: string
   });
 
   if (!t) notFound();
+
+  // Multi-tenant isolation check
+  const isSuper = isPlatformSuperAdmin(s.user);
+  if (!isSuper) {
+    const userOrgId = s.user.organisationId;
+    if (!userOrgId) notFound();
+    const isSiteOrg = t.site.organisationId === userOrgId;
+    const isTransporterOrg = t.booking.transporterOrganisationId === userOrgId;
+    if (!isSiteOrg && !isTransporterOrg) {
+      notFound();
+    }
+  }
 
   const url = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/verify/${t.integrityHash}`;
   const qr = await QRCode.toDataURL(url, { width: 220, margin: 1 });

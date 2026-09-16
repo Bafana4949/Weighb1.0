@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { mineScope } from "@/lib/access";
+import { userSiteScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { BookingApprovals } from "@/components/booking-approvals";
@@ -22,7 +22,7 @@ export default async function AdminBookingsPage({
   const params = await searchParams;
   const page = Math.max(1, Number(params.page ?? 1));
   const limit = 25;
-  const scope = { site: mineScope(s.user.organisationId) };
+  const scope = userSiteScope(s.user);
 
   const where = {
     ...scope,

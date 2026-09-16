@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Building2, ShieldCheck } from "lucide-react";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { mineScope } from "@/lib/access";
+import { userScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { SiteManagement } from "@/components/site-management";
@@ -20,7 +20,7 @@ export default async function Sites({ searchParams }: { searchParams: Promise<{ 
   const params = await searchParams;
   const page = Math.max(1, Number(params.page ?? 1));
   const limit = 25;
-  const scope = mineScope(s.user.organisationId);
+  const scope = userScope(s.user);
   const where = {
     ...scope,
     ...(params.q

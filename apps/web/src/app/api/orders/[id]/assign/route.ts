@@ -1,7 +1,8 @@
 import { UserRole } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { fail, ok, requireRole } from "@/lib/api";
+import { fail, ok, requireRole, withScopeErrors } from "@/lib/api";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { createBooking } from "@/lib/booking-service";
 import { getOrderFulfilledKg } from "@/lib/order-fulfillment";
 
@@ -17,7 +18,7 @@ const assignSchema = z.object({
   windowEnd: z.string(),
 });
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+export const POST = withScopeErrors(async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireRole([UserRole.ADMIN]);
   if (auth.error) return auth.error;
 
@@ -28,10 +29,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const order = await prisma.weighbridgeOrder.findUnique({
     where: { id },
-    include: { productRef: true }
+    include: { site: true, productRef: true }
   });
 
   if (!order) return fail("Order not found", 404);
+
+  // Tenant isolation check
+  if (!isPlatformSuperAdmin(auth.session!.user) && order.site.organisationId !== auth.session!.user.organisationId) {
+    return fail("Order not found", 404);
+  }
 
   if (order.status !== "ACTIVE") {
     return fail(`Cannot assign trucks to order with status '${order.status}'. Please edit the order to increase the estimated mass if you wish to assign more trucks.`, 422);
@@ -58,7 +64,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const vehicle = vehicles.find(v => v.id === bookingDef.vehicleId);
       if (!vehicle) throw new Error("Vehicle not found");
 
-      // Calculate target tonnage. Simplified: Use order's estimated or vehicle's legal max minus tare.
+      // Calculate target tonnage
       const maxPayload = (vehicle.legalMaxGvwKg ?? 50000) - (vehicle.tareWeightKg ?? 15000);
       const targetTonnageKg = Math.min(order.estimatedMassKg, maxPayload > 0 ? maxPayload : 30000);
 
@@ -98,4 +104,4 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   return ok({ created, errors });
-}
+});

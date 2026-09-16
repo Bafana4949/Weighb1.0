@@ -1,13 +1,56 @@
-import { OrderStatus,UserRole } from "@prisma/client";
+import { OrderStatus, UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { fail,ok,requireRole } from "@/lib/api";
+import { fail, ok, requireRole, withScopeErrors } from "@/lib/api";
 import { audit } from "@/lib/audit";
-import { mineScope } from "@/lib/access";
+import { userScope } from "@/lib/access";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { safeUserSelect } from "@/lib/utils";
 import { orderSchema } from "@/lib/validation";
-async function nextOrderNumber(){const count=await prisma.weighbridgeOrder.count();return `ORD-${String(count+1).padStart(6,"0")}`}
-export async function GET(request:Request){const a=await requireRole([UserRole.TRANSPORTER,UserRole.OPERATOR,UserRole.ADMIN,UserRole.SECURITY]);if(a.error)return a.error;const url=new URL(request.url);const status=url.searchParams.get("status") as OrderStatus|null;const site=url.searchParams.get("site");const scope=a.session!.user.role==="TRANSPORTER"?{}:{site:mineScope(a.session!.user.organisationId)};const orders=await prisma.weighbridgeOrder.findMany({where:{...(status?{status}:{}),...(site?{siteId:site}:{}),...scope},include:{site:true,originSite:true,destinationSite:true,source:true,destination:true,productRef:true,createdBy:{select:safeUserSelect},bookings:{include:{transactions:true}}},orderBy:{createdAt:"desc"}});return ok(orders)}
-export async function POST(request: Request) {
+
+async function nextOrderNumber() {
+  const count = await prisma.weighbridgeOrder.count();
+  return `ORD-${String(count + 1).padStart(6, "0")}`;
+}
+
+export const GET = withScopeErrors(async function GET(request: Request) {
+  const a = await requireRole([UserRole.TRANSPORTER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SECURITY]);
+  if (a.error) return a.error;
+  const url = new URL(request.url);
+  const status = url.searchParams.get("status") as OrderStatus | null;
+  const site = url.searchParams.get("site");
+
+  const isSuperAdmin = isPlatformSuperAdmin(a.session!.user);
+  const isTransporter = a.session!.user.role === "TRANSPORTER";
+
+  const scope = isSuperAdmin
+    ? {}
+    : isTransporter
+      ? { bookings: { some: { transporterOrganisationId: a.session!.user.organisationId! } } }
+      : { site: userScope(a.session!.user) };
+
+  const orders = await prisma.weighbridgeOrder.findMany({
+    where: {
+      ...(status ? { status } : {}),
+      ...(site ? { siteId: site } : {}),
+      ...scope,
+    },
+    include: {
+      site: true,
+      originSite: true,
+      destinationSite: true,
+      source: true,
+      destination: true,
+      productRef: true,
+      createdBy: { select: safeUserSelect },
+      bookings: { include: { transactions: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return ok(orders);
+});
+
+export const POST = withScopeErrors(async function POST(request: Request) {
   const a = await requireRole([UserRole.ADMIN]);
   if (a.error) return a.error;
   const parsed = orderSchema.safeParse(await request.json().catch(() => null));
@@ -18,7 +61,9 @@ export async function POST(request: Request) {
   const site = await prisma.site.findUnique({ where: { id: parsed.data.siteId } });
   if (!site || !site.isActive) return fail("Weighbridge site is unavailable", 422);
   const callerOrg = a.session!.user.organisationId;
-  if (callerOrg && site.organisationId !== callerOrg) return fail("Weighbridge site is unavailable", 422);
+  if (!isPlatformSuperAdmin(a.session!.user) && callerOrg && site.organisationId !== callerOrg) {
+    return fail("Weighbridge site is unavailable", 422);
+  }
 
   // Look up product name from Product record if productId is provided
   let productName = parsed.data.product;
@@ -73,5 +118,4 @@ export async function POST(request: Request) {
     }
   }
   return fail("Could not create order", 500);
-}
-
+});
