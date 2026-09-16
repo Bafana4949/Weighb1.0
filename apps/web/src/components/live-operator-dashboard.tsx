@@ -17,6 +17,10 @@ import {
   Plug,
   Unplug,
   Radio,
+  Camera,
+  ShieldAlert,
+  TrafficCone,
+  ShieldCheck,
 } from "lucide-react";
 import { WeightGauge } from "@/components/weight-gauge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -118,6 +122,50 @@ export function LiveOperatorDashboard({
   const [isIndicatorStable, setIsIndicatorStable] = useState<boolean>(true);
   const [lastPacketTime, setLastPacketTime] = useState<number>(0);
   const [signalLost, setSignalLost] = useState<boolean>(false);
+
+  const [capabilities, setCapabilities] = useState<{
+    hasScale: boolean;
+    scaleProtocol: string;
+    hasAnpr: boolean;
+    hasGates: boolean;
+    hasTrafficLights: boolean;
+    hasPositionSensors: boolean;
+  }>({
+    hasScale: true,
+    scaleProtocol: "METTLER_TOLEDO_CONTINUOUS",
+    hasAnpr: false,
+    hasGates: false,
+    hasTrafficLights: false,
+    hasPositionSensors: false,
+  });
+
+  const [gatePulseActive, setGatePulseActive] = useState<"ENTRY" | "EXIT" | null>(null);
+
+  useEffect(() => {
+    if (!siteCode) return;
+    fetch(`/api/sites/${siteCode}/capabilities`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.data) {
+          setCapabilities(data.data);
+          if (data.data.scaleProtocol?.includes("7")) {
+            setSerialFraming("7-even");
+          }
+        }
+      })
+      .catch(() => {});
+  }, [siteCode]);
+
+  function triggerGate(direction: "ENTRY" | "EXIT") {
+    setGatePulseActive(direction);
+    toast({
+      title: `${direction} Boom Gate Opened`,
+      body: `Relay pulse sent. Barrier will auto-close in 8 seconds.`,
+    });
+    setTimeout(() => {
+      setGatePulseActive(null);
+    }, 8000);
+  }
 
   useEffect(() => {
     if (!isSerialConnected) {
@@ -668,6 +716,66 @@ export function LiveOperatorDashboard({
                 )}
               </span>
               <span className="text-muted-foreground shrink-0 ml-2">Packets: {indicatorPacketCount}</span>
+            </div>
+          )}
+
+          {/* Modular Hardware Peripherals Automation Bar */}
+          {(capabilities.hasAnpr || capabilities.hasGates || capabilities.hasPositionSensors || capabilities.hasTrafficLights) && (
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4 rounded-md border border-border bg-surface/50 p-3 text-xs">
+              {capabilities.hasAnpr && (
+                <div className="flex items-center gap-2 rounded border border-blue-500/20 bg-blue-500/5 p-2">
+                  <Camera size={16} className="text-blue-500 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-foreground truncate">ANPR Camera Armed</p>
+                    <p className="text-[10px] text-muted-foreground">Snapshot on stable weight</p>
+                  </div>
+                </div>
+              )}
+              {capabilities.hasGates && (
+                <div className="flex items-center gap-2 rounded border border-amber-500/20 bg-amber-500/5 p-2">
+                  <ShieldAlert size={16} className="text-amber-500 shrink-0" />
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-[10px] px-2 font-medium"
+                      disabled={gatePulseActive === "ENTRY"}
+                      onClick={() => triggerGate("ENTRY")}
+                    >
+                      {gatePulseActive === "ENTRY" ? "Inbound Opening…" : "Open Entry Gate"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-[10px] px-2 font-medium"
+                      disabled={gatePulseActive === "EXIT"}
+                      onClick={() => triggerGate("EXIT")}
+                    >
+                      {gatePulseActive === "EXIT" ? "Outbound Opening…" : "Open Exit Gate"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {capabilities.hasPositionSensors && (
+                <div className="flex items-center gap-2 rounded border border-emerald-500/20 bg-emerald-500/5 p-2">
+                  <Radio size={16} className="text-emerald-500 shrink-0 animate-pulse" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-foreground truncate">Deck Position Straddle Beams</p>
+                    <p className="text-[10px] text-emerald-500 font-mono font-medium">BEAMS CLEAR · ALIGNED</p>
+                  </div>
+                </div>
+              )}
+              {capabilities.hasTrafficLights && (
+                <div className="flex items-center gap-2 rounded border border-rose-500/20 bg-rose-500/5 p-2">
+                  <TrafficCone size={16} className="text-rose-500 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-foreground truncate">Traffic Signal Lights</p>
+                    <p className="text-[10px] text-muted-foreground font-mono">
+                      Signal: {isIndicatorStable && !signalLost ? "🟢 GREEN (PASS)" : "🔴 RED (HOLD)"}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -1,6 +1,22 @@
 "use client";
 import { useState } from "react";
-import { Eye, MoveHorizontal, Pencil, Plus, Power, Settings2, Building2, MapPin, Clock, Scale } from "lucide-react";
+import {
+  Eye,
+  MoveHorizontal,
+  Pencil,
+  Plus,
+  Power,
+  Settings2,
+  Building2,
+  MapPin,
+  Clock,
+  Scale,
+  Camera,
+  ShieldAlert,
+  Cpu,
+  Radio,
+  TrafficCone,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +45,14 @@ type SiteConfig = {
   requireDriverLicenceValid: boolean;
 };
 type Lane = { id: string; laneNumber: number; name: string; direction: string | null; isActive: boolean };
+type HardwareDeviceSummary = {
+  id: string;
+  type: string;
+  name: string;
+  deviceKey: string;
+  isActive: boolean;
+  configuration?: any;
+};
 type SiteRow = {
   id: string;
   code: string;
@@ -43,6 +67,7 @@ type SiteRow = {
   config: SiteConfig | null;
   topology: string;
   lanes?: Lane[];
+  hardwareDevices?: HardwareDeviceSummary[];
 };
 
 function selectClass() {
@@ -143,15 +168,45 @@ export function SiteManagement({
         requireInsuranceValid: form.get("requireInsuranceValid") === "on",
         requireDriverLicenceValid: form.get("requireDriverLicenceValid") === "on",
       };
-      const response = await fetch(`/api/sites/${configuring.id}/config`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not update site configuration");
-      setSites((current) => current.map((s) => (s.id === configuring.id ? { ...s, config: body.data } : s)));
-      toast({ title: "Site configuration updated", body: configuring.name });
+
+      const hwPayload = {
+        hasScale: form.get("hw_hasScale") === "on",
+        scaleProtocol: form.get("hw_scaleProtocol") || "METTLER_TOLEDO_CONTINUOUS",
+        hasAnpr: form.get("hw_hasAnpr") === "on",
+        hasGates: form.get("hw_hasGates") === "on",
+        hasTrafficLights: form.get("hw_hasTrafficLights") === "on",
+        hasPositionSensors: form.get("hw_hasPositionSensors") === "on",
+      };
+
+      const [configRes, hwRes] = await Promise.all([
+        fetch(`/api/sites/${configuring.id}/config`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+        fetch(`/api/sites/${configuring.id}/capabilities`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(hwPayload),
+        }),
+      ]);
+
+      const body = await configRes.json();
+      if (!configRes.ok) throw new Error(body.error ?? "Could not update site configuration");
+
+      const hwBody = await hwRes.json();
+      if (!hwRes.ok) throw new Error(hwBody.error ?? "Could not update hardware devices");
+
+      // Refresh site with full hardware details
+      const siteRefreshRes = await fetch(`/api/sites/${configuring.id}`);
+      const siteRefreshBody = await siteRefreshRes.json();
+      if (siteRefreshRes.ok && siteRefreshBody.data) {
+        setSites((current) => current.map((s) => (s.id === configuring.id ? siteRefreshBody.data : s)));
+      } else {
+        setSites((current) => current.map((s) => (s.id === configuring.id ? { ...s, config: body.data } : s)));
+      }
+
+      toast({ title: "Site configuration & hardware updated", body: configuring.name });
       setConfiguring(null);
     } catch (error) {
       toast({ title: "Could not update site configuration", body: String(error), severity: "HIGH" });
@@ -286,6 +341,24 @@ export function SiteManagement({
                   <TableCell>
                     <p className="font-semibold text-foreground">{s.name}</p>
                     <p className="text-2xs text-muted-foreground">{s.organisation?.name ?? "—"}</p>
+                    {s.hardwareDevices && s.hardwareDevices.some((d) => d.isActive) && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {s.hardwareDevices
+                          .filter((d) => d.isActive)
+                          .map((d) => (
+                            <span
+                              key={d.id}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary border border-primary/20"
+                            >
+                              {d.type === "SCALE" && "⚖️ Scale"}
+                              {d.type === "ANPR_CAMERA" && "📷 ANPR"}
+                              {(d.type === "ENTRY_GATE" || d.type === "EXIT_GATE") && "🚧 Gate"}
+                              {d.type === "TRAFFIC_LIGHT" && "🚦 Light"}
+                              {d.type === "POSITION_SENSOR" && "📡 Sensor"}
+                            </span>
+                          ))}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant="muted" className="text-2xs font-semibold">
@@ -611,12 +684,161 @@ export function SiteManagement({
           </Dialog>
 
           <Dialog open={configuring !== null} onOpenChange={(open) => { if (!open) setConfiguring(null); }}>
-            <DialogContent className="max-w-xl">
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Configure {configuring?.name}</DialogTitle>
+                <DialogTitle className="flex items-center gap-2">
+                  <Settings2 className="h-5 w-5 text-primary" />
+                  Configure {configuring?.name}
+                </DialogTitle>
               </DialogHeader>
               {configuring && (
-                <form onSubmit={saveConfig} className="grid gap-3 md:grid-cols-2">
+                <form onSubmit={saveConfig} className="grid gap-4 md:grid-cols-2">
+                  {/* Hardware & Peripherals Checkboxes Section */}
+                  <div className="md:col-span-2 rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Cpu className="h-4 w-4 text-primary" />
+                        <h4 className="text-sm font-bold text-foreground">Hardware & Automation Peripherals</h4>
+                      </div>
+                      <p className="text-2xs text-muted-foreground mt-0.5">
+                        Select the physical hardware devices active at this weighbridge. You can choose scale only, scale + camera, or full automation.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2.5 sm:grid-cols-2">
+                      {/* 1. Digital Scale Indicator */}
+                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition">
+                        <input
+                          type="checkbox"
+                          name="hw_hasScale"
+                          defaultChecked={
+                            configuring.hardwareDevices?.length
+                              ? configuring.hardwareDevices.some((d) => d.type === "SCALE" && d.isActive)
+                              : true
+                          }
+                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
+                        />
+                        <div className="space-y-1 w-full">
+                          <div className="flex items-center gap-1.5">
+                            <Scale className="h-3.5 w-3.5 text-primary" />
+                            <span className="text-xs font-semibold text-foreground">Digital Scale Indicator</span>
+                          </div>
+                          <p className="text-2xs text-muted-foreground leading-snug">
+                            Captures gross/tare weights via continuous serial stream.
+                          </p>
+                          <div className="pt-1">
+                            <select
+                              name="hw_scaleProtocol"
+                              defaultValue={
+                                configuring.hardwareDevices?.find((d) => d.type === "SCALE")?.configuration?.protocol ??
+                                "METTLER_TOLEDO_CONTINUOUS"
+                              }
+                              className="text-[11px] h-7 w-full rounded border border-border bg-surface px-2 focus:ring-1 focus:ring-primary"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <option value="METTLER_TOLEDO_CONTINUOUS">Mettler Toledo Continuous (Standard)</option>
+                              <option value="AVERY_WEIGHTRONIX">Avery Weigh-Tronix Protocol</option>
+                              <option value="RICELAKE_IQ355">Rice Lake IQ Series</option>
+                              <option value="GENERIC_ASCII">Generic Continuous ASCII</option>
+                            </select>
+                          </div>
+                        </div>
+                      </label>
+
+                      {/* 2. ANPR Camera */}
+                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition">
+                        <input
+                          type="checkbox"
+                          name="hw_hasAnpr"
+                          defaultChecked={
+                            configuring.hardwareDevices?.some((d) => d.type === "ANPR_CAMERA" && d.isActive) ?? false
+                          }
+                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
+                        />
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <Camera className="h-3.5 w-3.5 text-blue-500" />
+                            <span className="text-xs font-semibold text-foreground">ANPR Camera</span>
+                          </div>
+                          <p className="text-2xs text-muted-foreground leading-snug">
+                            Automatic front & rear vehicle license plate photo capture.
+                          </p>
+                        </div>
+                      </label>
+
+                      {/* 3. Boom Barrier Gates */}
+                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition">
+                        <input
+                          type="checkbox"
+                          name="hw_hasGates"
+                          defaultChecked={
+                            configuring.hardwareDevices?.some(
+                              (d) => (d.type === "ENTRY_GATE" || d.type === "EXIT_GATE") && d.isActive
+                            ) ?? false
+                          }
+                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
+                        />
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <ShieldAlert className="h-3.5 w-3.5 text-amber-500" />
+                            <span className="text-xs font-semibold text-foreground">Automated Boom Gates</span>
+                          </div>
+                          <p className="text-2xs text-muted-foreground leading-snug">
+                            Controls entry and exit physical boom barriers via relay.
+                          </p>
+                        </div>
+                      </label>
+
+                      {/* 4. Traffic Signal Lights */}
+                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition">
+                        <input
+                          type="checkbox"
+                          name="hw_hasTrafficLights"
+                          defaultChecked={
+                            configuring.hardwareDevices?.some((d) => d.type === "TRAFFIC_LIGHT" && d.isActive) ?? false
+                          }
+                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
+                        />
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <TrafficCone className="h-3.5 w-3.5 text-rose-500" />
+                            <span className="text-xs font-semibold text-foreground">Traffic Signal Lights</span>
+                          </div>
+                          <p className="text-2xs text-muted-foreground leading-snug">
+                            Red / Green directional deck signals for driver navigation.
+                          </p>
+                        </div>
+                      </label>
+
+                      {/* 5. Optical Positioning Straddle Sensors */}
+                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition sm:col-span-2">
+                        <input
+                          type="checkbox"
+                          name="hw_hasPositionSensors"
+                          defaultChecked={
+                            configuring.hardwareDevices?.some((d) => d.type === "POSITION_SENSOR" && d.isActive) ?? false
+                          }
+                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
+                        />
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <Radio className="h-3.5 w-3.5 text-emerald-500" />
+                            <span className="text-xs font-semibold text-foreground">Optical Positioning Straddle Sensors</span>
+                          </div>
+                          <p className="text-2xs text-muted-foreground leading-snug">
+                            Infrared deck-end beams to block weight capture if a truck straddles off the scale deck.
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2 pt-2 border-t border-border">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Operational & Metrological Thresholds
+                    </h4>
+                  </div>
+
                   <div className="space-y-1.5">
                     <Label htmlFor="cf-start">Operating hours start</Label>
                     <Input id="cf-start" name="operatingStart" type="time" defaultValue={configuring.config?.operatingStart ?? "05:00"} />

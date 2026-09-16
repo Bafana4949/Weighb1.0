@@ -7,7 +7,10 @@ import { siteIdentifierWhere } from "@/lib/utils";
 import { siteSchema } from "@/lib/validation";
 
 async function site(id: string) {
-  return prisma.site.findFirst({ where: siteIdentifierWhere(id), include: { organisation: true, config: true } });
+  return prisma.site.findFirst({
+    where: siteIdentifierWhere(id),
+    include: { organisation: true, config: true, hardwareDevices: { where: { isActive: true } } },
+  });
 }
 
 function userHasSiteAccess(siteRow: { organisationId: string }, user: { role?: UserRole | null; organisationId?: string | null; platformRole?: any }): boolean {
