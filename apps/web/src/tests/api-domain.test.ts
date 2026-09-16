@@ -18,9 +18,9 @@ describe("API domain rules", () => {
     expect(roleAllowed(UserRole.TRANSPORTER, [UserRole.ADMIN, UserRole.OPERATOR])).toBe(false);
   });
 
-  it("scopes mining-company admins to their own org, and leaves super-admins unscoped", () => {
+  it("scopes mining-company admins to their own org, and throws on missing org", () => {
     expect(mineScope("company-a")).toEqual({ organisationId: "company-a" });
-    expect(mineScope(null)).toEqual({});
+    expect(() => mineScope(null)).toThrow("Tenant scope required");
   });
 
   it("validates a transporter onboarding submission", () => {
@@ -71,5 +71,24 @@ describe("API domain rules", () => {
     };
     expect(computeEdgeIntegrityHash(input)).toMatch(/^[a-f0-9]{64}$/);
     expect(computeEdgeIntegrityHash(input)).toBe(computeEdgeIntegrityHash(input));
+  });
+
+  it("formats exact kilograms with zero rounding and enforces invariant", async () => {
+    const { formatKg, parseManualKg, assertWeightInvariant } = await import("@/lib/weights");
+    // Exact formatting - no 20kg rounding
+    expect(formatKg(14532)).toContain("14");
+    expect(formatKg(14532)).toContain("532");
+    expect(formatKg(14532)).toContain("kg");
+
+    // Invariant: gross - tare = net
+    expect(() => assertWeightInvariant(52100, 18100, 34000)).not.toThrow();
+    expect(() => assertWeightInvariant(52100, 18100, 33999)).toThrow("Weight invariant violated");
+
+    // Strict manual parsing
+    expect(parseManualKg("14532")).toBe(14532);
+    expect(parseManualKg(" 14 532 ")).toBe(14532);
+    expect(parseManualKg("14.5")).toBeNull();
+    expect(parseManualKg("-14500")).toBeNull();
+    expect(parseManualKg("noise123")).toBeNull();
   });
 });

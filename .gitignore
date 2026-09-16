@@ -64,6 +64,8 @@ Weighbridge_RBAC_Matrix*.docx
 # Scratch and temporary scripts
 scratch_*.mjs
 inspect-db.mjs
+inspect-users*.mjs
+test-passwords*.mjs
 rename_seed.js
 packages/database/check-db.js
 packages/database/test-auth.ts

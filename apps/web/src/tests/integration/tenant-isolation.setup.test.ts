@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { assertOrganisationActive,isPlatformSuperAdmin } from "@/lib/permissions";
-import { mineScope } from "@/lib/access";
+import { mineScope, platformWideScope } from "@/lib/access";
 
 /**
  * Runs against a real Postgres connection (DATABASE_URL), not a mocked
@@ -50,8 +50,8 @@ describe("tenant isolation (real database)", () => {
     expect(sites.map((s) => s.id)).not.toContain(siteB.id);
   });
 
-  it("a platform super-admin's unscoped mineScope query sees both orgs' sites", async () => {
-    const sites = await prisma.site.findMany({ where: { code: { startsWith: marker }, ...mineScope(null) } });
+  it("a platform super-admin's unscoped query sees both orgs' sites", async () => {
+    const sites = await prisma.site.findMany({ where: { code: { startsWith: marker }, ...platformWideScope() } });
     const ids = sites.map((s) => s.id).sort();
     expect(ids).toEqual([siteA.id, siteB.id].sort());
   });

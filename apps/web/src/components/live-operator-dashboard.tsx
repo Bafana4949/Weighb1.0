@@ -115,73 +115,77 @@ export function LiveOperatorDashboard({
   const [serialFraming, setSerialFraming] = useState<"8-none" | "7-even" | "7-odd">("8-none");
   const [indicatorRawText, setIndicatorRawText] = useState<string>("");
   const [indicatorPacketCount, setIndicatorPacketCount] = useState<number>(0);
+  const [isIndicatorStable, setIsIndicatorStable] = useState<boolean>(true);
+  const [lastPacketTime, setLastPacketTime] = useState<number>(0);
+  const [signalLost, setSignalLost] = useState<boolean>(false);
 
-  function parseMettlerWeight(raw: string): number | null {
+  useEffect(() => {
+    if (!isSerialConnected) {
+      setSignalLost(false);
+      return;
+    }
+    const interval = setInterval(() => {
+      if (Date.now() - lastPacketTime > 2500 && lastPacketTime > 0) {
+        setSignalLost(true);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isSerialConnected, lastPacketTime]);
+
+  function parseMettlerWeight(raw: string): { weightKg: number; isStable: boolean } | null {
     if (!raw) return null;
 
     // 1. Toledo Continuous Protocol: STX <SWA><SWB><SWC><6 chars indicated weight><6 chars tare><CR>
-    const toledoMatch = raw.match(/\x02.{3}([\s\d]{6})/s);
-    if (toledoMatch && toledoMatch[1]) {
-      const candidate = parseFloat(toledoMatch[1].trim());
-      if (!isNaN(candidate) && candidate >= 0) {
-        return Math.round(candidate);
-      }
-    }
+    const stxIndex = raw.indexOf("\x02");
+    if (stxIndex !== -1) {
+      const sub = raw.slice(stxIndex);
+      if (sub.length >= 10) {
+        const swa = sub.charCodeAt(1) & 0x7f;
+        const swb = sub.charCodeAt(2) & 0x7f;
 
-    // 2. Toledo Continuous ending with CR (6 chars weight followed by 6 chars tare then CR)
-    const toledoCrMatch = raw.match(/([\s\d]{6})([\s\d]{6})\r/);
-    if (toledoCrMatch && toledoCrMatch[1]) {
-      const candidate = parseFloat(toledoCrMatch[1].trim());
-      if (!isNaN(candidate) && candidate >= 0) {
-        return Math.round(candidate);
+        // Bit 5 is always 1 on valid Toledo status words (0x20)
+        const isStandardToledo = (swa & 0x20) !== 0 && (swb & 0x20) !== 0;
+        const isStable = isStandardToledo ? (swb & 0x08) === 0 : true;
+        const isKg = isStandardToledo ? (swb & 0x10) !== 0 : true;
+        const outOfRange = isStandardToledo ? (swb & 0x04) !== 0 : false;
+
+        // Reject rather than coerce (Claude/Metrology directive)
+        if (outOfRange || !isKg) return null;
+
+        const digits = sub.slice(4, 10).trim();
+        if (/^\d{1,6}$/.test(digits)) {
+          const val = parseInt(digits, 10);
+          if (Number.isSafeInteger(val) && val >= 0) {
+            return { weightKg: val, isStable };
+          }
+        }
       }
     }
 
     const cleaned = raw.replace(/[^\x20-\x7E]/g, " ").trim();
     if (!cleaned) return null;
 
-    // 3. MT-SICS command format (e.g. "S S 2200 kg", "ST,GS,+ 2200 kg", "Net 2200 kg")
-    const sicsMatch = cleaned.match(/(?:S\s+[SDI]|ST\s*,\s*GS\s*,?\s*[+-]?|Net|Gross|WT:?)\s*([+-]?\s*\d+(?:\.\d+)?)/i);
-    if (sicsMatch && sicsMatch[1]) {
-      const candidate = parseFloat(sicsMatch[1].replace(/\s+/g, ""));
+    // 2. MT-SICS command format (e.g. "S S 2200 kg" = stable, "S D 2200 kg" = dynamic)
+    const sicsMatch = cleaned.match(/(?:S\s+([SDI])|ST\s*,\s*GS\s*,?\s*[+-]?|Net|Gross|WT:?)\s*([+-]?\s*\d+(?:\.\d+)?)/i);
+    if (sicsMatch && sicsMatch[2]) {
+      const statusCode = sicsMatch[1]?.toUpperCase();
+      const isStable = statusCode === "S" || statusCode === undefined;
+      const candidate = parseFloat(sicsMatch[2].replace(/\s+/g, ""));
       if (!isNaN(candidate) && candidate >= 0) {
-        return Math.round(candidate);
+        return { weightKg: Math.round(candidate), isStable };
       }
     }
 
-    // 4. String with explicit 'kg' or 't' unit (e.g. "2200 kg")
+    // 3. Explicit unit match (e.g. "2200 kg")
     const kgMatch = cleaned.match(/(\d+(?:\.\d+)?)\s*(?:kg|t\b)/i);
     if (kgMatch && kgMatch[1]) {
       const candidate = parseFloat(kgMatch[1]);
       if (!isNaN(candidate) && candidate >= 0) {
-        return Math.round(candidate);
+        return { weightKg: Math.round(candidate), isStable: true };
       }
     }
 
-    // 5. Toledo Continuous spaced tokens (e.g. "18 2200 00 18")
-    const tokens = cleaned.split(/\s+/).filter(Boolean);
-    if (tokens.length >= 2) {
-      for (const token of tokens) {
-        if (!token) continue;
-        const candidate = parseFloat(token);
-        if (!isNaN(candidate) && candidate >= 100) {
-          return Math.round(candidate);
-        }
-      }
-    }
-
-    // 6. Generic numeric match: look for 3 to 6 consecutive digits
-    const numCandidates = cleaned.match(/\b\d{3,6}\b/g);
-    if (numCandidates && numCandidates[0]) {
-      const candidate = parseFloat(numCandidates[0]);
-      if (!isNaN(candidate) && candidate >= 0) {
-        return Math.round(candidate);
-      }
-    }
-
-    // 7. Last fallback single number
-    const numMatch = cleaned.match(/(\d+(?:\.\d+)?)/);
-    return numMatch && numMatch[1] ? Math.round(parseFloat(numMatch[1])) : null;
+    return null;
   }
 
   async function connectSerial() {
@@ -234,9 +238,12 @@ export function LiveOperatorDashboard({
                 if (stxIndex !== -1 && crIndex > stxIndex) {
                   const frame = buffer.substring(stxIndex, crIndex + 1);
                   setIndicatorRawText(frame.replace(/[^\x20-\x7E]/g, " ").trim());
-                  const w = parseMettlerWeight(frame);
-                  if (w !== null && w >= 0) {
-                    setManualWeightKg(w);
+                  const parsed = parseMettlerWeight(frame);
+                  if (parsed !== null) {
+                    setManualWeightKg(parsed.weightKg);
+                    setIsIndicatorStable(parsed.isStable);
+                    setLastPacketTime(Date.now());
+                    setSignalLost(false);
                   }
                   buffer = buffer.substring(crIndex + 1);
                 } else {
@@ -246,9 +253,12 @@ export function LiveOperatorDashboard({
                     const trimmed = line.trim();
                     if (!trimmed) continue;
                     setIndicatorRawText(trimmed);
-                    const w = parseMettlerWeight(trimmed);
-                    if (w !== null && w >= 0) {
-                      setManualWeightKg(w);
+                    const parsed = parseMettlerWeight(trimmed);
+                    if (parsed !== null) {
+                      setManualWeightKg(parsed.weightKg);
+                      setIsIndicatorStable(parsed.isStable);
+                      setLastPacketTime(Date.now());
+                      setSignalLost(false);
                     }
                   }
                 }
@@ -378,8 +388,8 @@ export function LiveOperatorDashboard({
       setSelectedBookingId(queue[0].id);
       setIsWalkIn(false);
     }
-    setFirstWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "14500");
-    setSecondWeightInput("48500");
+    setFirstWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "");
+    setSecondWeightInput("");
     setModalOpen(true);
   }
 
@@ -633,14 +643,29 @@ export function LiveOperatorDashboard({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <WeightGauge weight={manualWeightKg} stable={true} />
+          <WeightGauge weight={manualWeightKg} stable={isSerialConnected ? isIndicatorStable && !signalLost : true} />
 
           {/* Live Indicator Stream Diagnostic Telemetry */}
           {isSerialConnected && (
-            <div className="flex items-center justify-between rounded-sm border border-emerald-500/30 bg-emerald-950/20 px-3 py-1.5 text-2xs font-mono text-emerald-400">
+            <div className={`flex items-center justify-between rounded-sm border px-3 py-1.5 text-2xs font-mono ${
+              signalLost
+                ? "border-amber-500/50 bg-amber-950/30 text-amber-300"
+                : isIndicatorStable
+                ? "border-emerald-500/30 bg-emerald-950/20 text-emerald-400"
+                : "border-blue-500/30 bg-blue-950/20 text-blue-300"
+            }`}>
               <span className="flex items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
-                STREAM: [{indicatorRawText || "Receiving continuous frames..."}] &rarr; PARSED: {manualWeightKg} KG
+                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                  signalLost ? "bg-amber-400" : isIndicatorStable ? "bg-emerald-400 animate-ping" : "bg-blue-400 animate-pulse"
+                }`} />
+                {signalLost ? (
+                  <span className="font-bold text-amber-400">SIGNAL LOST (&gt;2.5s) — CHECK INDICATOR CABLE</span>
+                ) : (
+                  <>
+                    <span className="font-bold uppercase">[{isIndicatorStable ? "STABLE" : "MOTION"}]</span>
+                    <span>STREAM: [{indicatorRawText || "Receiving frames..."}] &rarr; PARSED: {manualWeightKg} KG</span>
+                  </>
+                )}
               </span>
               <span className="text-muted-foreground shrink-0 ml-2">Packets: {indicatorPacketCount}</span>
             </div>
@@ -680,25 +705,6 @@ export function LiveOperatorDashboard({
               </Button>
             </div>
 
-            {/* Quick Weight Presets */}
-            <div className="flex flex-wrap items-center gap-1.5 pt-1">
-              <span className="text-2xs text-muted-foreground mr-1">Common Presets:</span>
-              {[
-                { label: "14,500 kg (Tare)", kg: 14500 },
-                { label: "15,200 kg (Tare)", kg: 15200 },
-                { label: "38,000 kg", kg: 38000 },
-                { label: "48,500 kg (Gross)", kg: 48500 },
-                { label: "54,200 kg (Gross)", kg: 54200 },
-              ].map((p) => (
-                <button
-                  key={p.label}
-                  onClick={() => setManualWeightKg(p.kg)}
-                  className="rounded-xs border border-border bg-muted/60 px-2.5 py-1 text-xs font-mono hover:bg-muted text-foreground transition-colors cursor-pointer"
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
 
             {/* Primary Action Buttons */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-border">

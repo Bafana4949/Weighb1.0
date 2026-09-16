@@ -8,9 +8,9 @@ import type { ClientOrganisationStatus,PlatformRole,UserRole } from "@prisma/cli
  * organisation) so this stays correct even for rows that predate the
  * platform_role column or haven't been backfilled.
  */
-export function isPlatformSuperAdmin(user: { role: UserRole; organisationId: string | null; platformRole?: PlatformRole | null }): boolean {
-  if (user.platformRole === "PLATFORM_SUPER_ADMIN") return true;
-  return user.role === "ADMIN" && user.organisationId === null;
+export function isPlatformSuperAdmin(user: { role?: UserRole | null; organisationId?: string | null; platformRole?: PlatformRole | null } | null | undefined): boolean {
+  if (!user) return false;
+  return user.platformRole === "PLATFORM_SUPER_ADMIN";
 }
 
 /**

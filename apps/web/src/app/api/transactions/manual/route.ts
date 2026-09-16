@@ -7,18 +7,30 @@ import { audit } from "@/lib/audit";
 import { siteIdentifierWhere } from "@/lib/utils";
 import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
 
+import { buildWeighmentPayload, computeIntegrityHash } from "@/lib/chain";
+import { assertWeightInvariant } from "@/lib/weights";
+
 async function generateNextWaybillNumber(siteCode: string, siteId: string): Promise<string> {
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const prefix = `WB-${siteCode}-${dateStr}-`;
-  const countToday = await prisma.weighbridgeTransaction.count({
+  const lastToday = await prisma.weighbridgeTransaction.findFirst({
     where: {
       siteId,
       waybillNumber: { startsWith: prefix },
-      status: "COMPLETED",
     },
+    orderBy: { waybillNumber: "desc" },
+    select: { waybillNumber: true },
   });
-  const seq = (countToday + 1).toString().padStart(6, "0");
-  return `${prefix}${seq}`;
+
+  let nextVal = 1;
+  if (lastToday?.waybillNumber) {
+    const parts = lastToday.waybillNumber.split("-");
+    const lastSeq = parseInt(parts[parts.length - 1] ?? "0", 10);
+    if (!isNaN(lastSeq) && lastSeq >= nextVal) {
+      nextVal = lastSeq + 1;
+    }
+  }
+  return `${prefix}${nextVal.toString().padStart(6, "0")}`;
 }
 
 async function resolveOrCreateWalkInBooking({
@@ -410,10 +422,19 @@ export async function POST(request: NextRequest) {
       return fail("Active in-progress weighment not found. Please record 1st weighment first or use Direct Entry.", 404);
     }
 
+    if (transaction.siteId !== resolvedSite.id) {
+      return fail(`Weigh-out site (${resolvedSite.code}) must match the initial weigh-in site (${transaction.siteId})`, 409);
+    }
+
     const firstWeightKg = transaction.tareCapturedAt !== null ? transaction.tareWeightKg : transaction.grossWeightKg;
     const actualGross = Math.max(firstWeightKg, parsedWeight);
     const actualTare = Math.min(firstWeightKg, parsedWeight);
     const netWeightKg = actualGross - actualTare;
+    assertWeightInvariant(actualGross, actualTare, netWeightKg);
+
+    const legalMaxGvw = transaction.vehicle?.legalMaxGvwKg || 56000;
+    const overload = actualGross > legalMaxGvw;
+    const overloadVarianceKg = overload ? actualGross - legalMaxGvw : 0;
 
     const waybillNumber = await generateNextWaybillNumber(resolvedSite.code, resolvedSite.id);
     const edgeTransactionId = `MANUAL-${resolvedSite.code}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -424,21 +445,20 @@ export async function POST(request: NextRequest) {
     });
     const previousHash = prior?.integrityHash ?? "0".repeat(64);
 
-    const hashPayload = {
-      edge_transaction_id: edgeTransactionId,
-      booking_id: transaction.bookingId,
-      vehicle_id: transaction.vehicleId,
-      driver_id: transaction.driverId,
-      site_id: resolvedSite.id,
-      gross_weight_kg: actualGross,
-      tare_weight_kg: actualTare,
-      net_weight_kg: netWeightKg,
+    const integrityHash = computeIntegrityHash({
+      edgeTransactionId,
+      bookingId: transaction.bookingId,
+      vehicleId: transaction.vehicleId,
+      driverId: transaction.driverId,
+      siteId: resolvedSite.id,
+      grossWeightKg: actualGross,
+      tareWeightKg: actualTare,
+      netWeightKg,
       commodity: transaction.commodity,
-      captured_at: now.toISOString(),
-      waybill_number: waybillNumber,
-      previous_hash: previousHash,
-    };
-    const integrityHash = createHash("sha256").update(JSON.stringify(hashPayload)).digest("hex");
+      capturedAt: now,
+      waybillNumber,
+      previousHash,
+    });
     const confirmationHash = createHash("sha256").update(`${integrityHash}:${Date.now()}`).digest("hex");
 
     const entryTime = transaction.entryAt ?? transaction.createdAt;
@@ -463,8 +483,8 @@ export async function POST(request: NextRequest) {
         previousHash,
         status: "COMPLETED",
         transactionType: isDispatch ? "OUTBOUND" : "INBOUND",
-        overload: false,
-        overloadVarianceKg: 0,
+        overload,
+        overloadVarianceKg,
         mineTicketNumber: mineTicketNumber ?? transaction.mineTicketNumber,
         operatorId: operatorId ?? transaction.operatorId,
       },
@@ -550,6 +570,11 @@ export async function POST(request: NextRequest) {
     const actualGross = Math.max(w1, w2);
     const actualTare = Math.min(w1, w2);
     const netWeightKg = actualGross - actualTare;
+    assertWeightInvariant(actualGross, actualTare, netWeightKg);
+
+    const legalMaxGvw = booking.vehicle?.legalMaxGvwKg || 56000;
+    const overload = actualGross > legalMaxGvw;
+    const overloadVarianceKg = overload ? actualGross - legalMaxGvw : 0;
 
     const waybillNumber = await generateNextWaybillNumber(resolvedSite.code, resolvedSite.id);
     const edgeTransactionId = `MANUAL-${resolvedSite.code}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -560,21 +585,20 @@ export async function POST(request: NextRequest) {
     });
     const previousHash = prior?.integrityHash ?? "0".repeat(64);
 
-    const hashPayload = {
-      edge_transaction_id: edgeTransactionId,
-      booking_id: booking.id,
-      vehicle_id: booking.vehicleId,
-      driver_id: booking.driverId,
-      site_id: resolvedSite.id,
-      gross_weight_kg: actualGross,
-      tare_weight_kg: actualTare,
-      net_weight_kg: netWeightKg,
+    const integrityHash = computeIntegrityHash({
+      edgeTransactionId,
+      bookingId: booking.id,
+      vehicleId: booking.vehicleId,
+      driverId: booking.driverId,
+      siteId: resolvedSite.id,
+      grossWeightKg: actualGross,
+      tareWeightKg: actualTare,
+      netWeightKg,
       commodity: booking.commodity,
-      captured_at: now.toISOString(),
-      waybill_number: waybillNumber,
-      previous_hash: previousHash,
-    };
-    const integrityHash = createHash("sha256").update(JSON.stringify(hashPayload)).digest("hex");
+      capturedAt: now,
+      waybillNumber,
+      previousHash,
+    });
     const confirmationHash = createHash("sha256").update(`${integrityHash}:${Date.now()}`).digest("hex");
 
     const isDispatch = booking.order?.type ? booking.order.type === "DISPATCH" : true;
@@ -599,8 +623,8 @@ export async function POST(request: NextRequest) {
         previousHash,
         status: "COMPLETED",
         transactionType: isDispatch ? "OUTBOUND" : "INBOUND",
-        overload: false,
-        overloadVarianceKg: 0,
+        overload,
+        overloadVarianceKg,
         mineTicketNumber: mineTicketNumber ?? null,
         entryAt: entryTime,
         grossCapturedAt: now,

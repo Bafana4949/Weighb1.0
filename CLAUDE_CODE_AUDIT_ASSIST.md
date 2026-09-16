@@ -1,74 +1,76 @@
-# 🤖 Weighbridge Management System: Claude Code AI Peer Audit & Deployment Prompt
+# 🤖 Weighbridge Management System: Architecture & Solution Consultation with Claude Code
 
-> **Instructions for Claude Code AI**:  
-> You are acting as an expert systems architect and cybersecurity code auditor for the **Weighbridge & Access Control Management System**. Review the codebase, audit multi-tenant data boundaries, inspect the hardware scale indicator integration, and verify production deployment readiness.
-
----
-
-## 🏛️ System Architecture Context
-
-- **Framework**: Next.js 15 (App Router), React 19, TypeScript.
-- **Database & ORM**: PostgreSQL (Supabase) via Prisma ORM 6.
-- **Authentication**: NextAuth v5 + JWT tokens with RBAC and multi-tenancy.
-- **Hardware Integration**:
-  - Web Serial API directly connecting the browser to physical weighbridge indicators (Mettler Toledo IND560/IND570/IND780, Toledo 8142, and Avery Weigh-Tronix).
-  - Serial framing: 9600 / 4800 baud, supporting both `8-N-1` (8 data bits, no parity) and `7-E-1` (7 data bits, even parity with parity bit masking).
-- **Cryptographic Waybill Integrity**: Each completed transaction is cryptographically chained via SHA-256 (`previousHash`, `integrityHash`, `confirmationHash`).
+> **Objective for Claude Code AI**:  
+> The team has verified your audit findings against the source code. Every primary finding you highlighted (fail-open multi-tenancy, independent 20 kg rounding, decorative hash chain, concurrent waybill numbering, manual weighment bypass, and committed secrets) is confirmed.  
+> 
+> Before we start modifying production code, we want your input, architectural critique, and recommended implementation patterns for the following core challenges.
 
 ---
 
-## 👥 Verified Actor Hierarchy & Credentials
-
-| Role / Persona | User Identity | Email Address | Assigned Organisation | Access Scope |
-| :--- | :--- | :--- | :--- | :--- |
-| **👑 Platform Super Admin** | **Bafana Bhuda** | `superadmin@weighbridge.co.za` | Platform-wide (`organisationId: null`) | Full cross-tenant control, client onboarding, global site provisioning, audit logs, consolidated reports. |
-| **🏢 Client / Company Admin** | **Grant Howell** | `grant@treadstone.co.za` | **Coal In Motion** (`COALINMOTI`) | Scoped strictly to Coal In Motion sites, contracts, orders, haulier assignments, and user permissions. |
-| **🏢 Mining Company Admin** | **Sipho Dlamini** | `admin@seriti.co.za` | **Seriti Coal Operations** (`SERITICOAL`) | Scoped strictly to Seriti sites, orders, and weighments. |
-| **🖥️ Weighbridge Operator** | **John Moyo** | `operator@seriti.co.za` | **Seriti Coal Operations** (`SERITICOAL`) | Operates live scale deck, captures weighments from indicator, generates waybills. |
-| **🚛 Transporter Admin** | **Irfan Zad** | `irfan@treadstone.co.za` | **Thaba Logistics Test** (`THABALOGIS`) | Manages fleet roster (trucks, trailers, drivers), books slots, views trip waybills. |
-
----
-
-## 🔒 Multi-Tenant Boundary Checklist for Claude Code AI
-
-Please inspect and verify the following security boundaries:
-1. **Transaction Isolation**:
-   - `apps/web/src/app/api/transactions/route.ts`: Non-transporter, non-superadmin users MUST filter by `site: mineScope(user.organisationId)`.
-   - `apps/web/src/app/api/transactions/stats/route.ts`: Aggregated stats must be scoped by the tenant's sites.
-2. **Fleet & Driver Isolation**:
-   - `apps/web/src/app/api/drivers/route.ts`: Only Platform Super Admin can query cross-organisation drivers (`?org=...`). All other users are locked to their own organisation.
-   - `apps/web/src/app/api/vehicles/route.ts` & `apps/web/src/app/api/trailers/route.ts`: Scoped to the caller's organisation.
-3. **Manual Weighment Access**:
-   - `apps/web/src/app/api/transactions/manual/route.ts`: Operators can only record weighments for sites owned by their organisation. Platform Super Admin can operate across all sites.
+### 1. ⚖️ Weight Precision & Total Elimination of Rounding
+* **User Directive**:  
+  *"I don't want the system to have independent 20 kg rounding. I want the system to get the exact weight from the indicator connected to the computer, or written manually. The system must NOT round up anything."*
+* **Current Code Problem**:  
+  `apps/web/src/lib/utils.ts:26`: `formatKg(val)` runs `Math.round(val / 20) * 20` independently on gross, tare, and net, causing legal and commercial contradictions (`Gross - Tare ≠ Net`).
+* **Questions for Claude**:
+  1. What is your recommended pattern for `formatKg(value: number): string` to display exact recorded kilograms (e.g. `14,532 kg` or exact integer/decimal) without any quantization?
+  2. How should we guarantee across all 4 touchpoints (Waybill PDF, Thermal Slip, Kiosk screen, Public `/verify/[hash]` page) that `Net` is strictly computed as `Gross - Tare` with zero rounding drift?
+  3. In the database schema, should weight fields remain `Int` (whole kg) or `Float`/`Decimal` if precision indicators output 0.5 kg or 0.1 kg increments?
 
 ---
 
-## ⚖️ Weighbridge Hardware Indicator Checklist
-
-1. **Protocol Implementation** (`apps/web/src/components/live-operator-dashboard.tsx`):
-   - **Toledo Continuous Protocol**:
-     - Format: `STX <SWA><SWB><SWC><6 chars indicated weight><6 chars tare><CR>`
-     - Extracted digits must correctly handle leading zeros and spaces (e.g. ` 2200` or `002200` &rarr; `2200 kg`).
-   - **Parity Masking**:
-     - When receiving in 7-E-1 (7 data bits, even parity), bytes must be masked with `0x7F` to prevent UTF-8 corruption and ensure reliable ASCII number parsing.
-   - **MT-SICS Compatibility**:
-     - Supports `S S <weight> kg`, `ST,GS,+ <weight> kg`, `Net <weight> kg`.
-2. **Operator Interface**:
-   - Live stream diagnostic feed displays real-time frame packets.
-   - Selectors for Baud (9600, 4800, 2400) and Framing (`8-N-1`, `7-E-1`, `7-O-1`).
+### 2. 🏢 Fail-Closed Multi-Tenancy Architecture
+* **Current Code Problem**:  
+  - `User.organisationId` is nullable.
+  - `permissions.ts:13` treats any admin with `organisationId === null` as a platform super admin.
+  - `access.ts:16` returns `{}` when `organisationId` is null, causing Prisma queries to return cross-tenant data.
+  - `/api/admin/users/[id]/role` allows any tenant admin to elevate users across any tenant.
+* **Target Personas**:
+  - **Bafana Bhuda** (`superadmin@weighbridge.co.za`): **Platform Super Admin** (`platformRole: "PLATFORM_SUPER_ADMIN"`).
+  - **Grant Howell** (`grant@treadstone.co.za`): **Client / Company Admin** (`role: "ADMIN"`, strictly scoped to **Coal In Motion** `COALINMOTI`).
+* **Questions for Claude**:
+  1. What is the safest fail-closed pattern for `mineScope(orgId?: string | null)`? (e.g., throwing an `UnauthorizedError` or returning `{ id: "__DENY_NO_TENANT__" }` unless the session has an explicit verified `isSuperAdmin === true` flag).
+  2. How should we restructure `/api/admin/users/[id]/role` to ensure:
+     - Platform Super Admin can manage all roles globally.
+     - Tenant Admins can ONLY manage roles for users within their own organisation, and CANNOT promote anyone to `ADMIN` or `PLATFORM_SUPER_ADMIN`?
+  3. For the remaining unscoped routes (`vehicles/[id]`, `drivers/[id]/blacklist`, `orders/[id]` GET), what is the cleanest guard pattern to apply consistently across all Next.js App Router API handlers?
 
 ---
 
-## 🚀 Execution & Verification Commands
+### 3. 🔌 Hardware Indicator Continuous Protocol & Stability
+* **Current Code Problem**:  
+  - Indicator parsing had fallback regexes that could grab random noise as weight.
+  - "STABLE" bit was not strictly gated.
+  - Direct entry defaulted to pre-filled weights (`14500` / `48500`) in `live-operator-dashboard.tsx:381`.
+* **Questions for Claude**:
+  1. For Toledo Continuous Protocol (`STX <SWA><SWB><SWC><6 chars weight><6 chars tare><CR>`), how should we parse Status Word B (SWB) to check the motion/stability bit before allowing capture?
+  2. What is your recommended UI safety pattern when direct manual entry is used (e.g. requiring an explicit "Manual Scale Override" checkbox + operator reason log)?
 
-```bash
-# 1. Typecheck and Next.js production build verification
-npm run build
+---
 
-# 2. Test database connectivity & users
-node scripts/apply-users-update.mjs
+### 4. 🔗 Hash Chain Verification & Cryptographic Integrity
+* **Current Code Problem**:  
+  `/verify/[hash]/page.tsx` simply looks up the record by `integrityHash` and declares it authentic without recomputing the SHA-256 hash.
+* **Questions for Claude**:
+  1. What canonical fields should compose the SHA-256 `integrityHash` (e.g., `ticketNumber`, `siteId`, `vehicleReg`, `grossKg`, `tareKg`, `netKg`, `timestamp`, `previousHash`)?
+  2. How should the `/verify/[hash]` page and background verification worker recompute and compare the hash, and what tamper alerting should be triggered if a discrepancy is detected?
 
-# 3. Check Git remote synchronization
-git status
-git remote -v
-```
+---
+
+### 5. 🏷️ Waybill Numbering & Site Binding
+* **Current Code Problem**:  
+  - Waybill numbers are minted with `count() + 1`, which collides on concurrent weigh-outs.
+  - Weigh-out is not bound to the originating `siteId`.
+* **Questions for Claude**:
+  1. What is the most robust way in Prisma / Postgres to generate sequential waybill numbers (e.g. `WB-SITE-YYYY-00001`) without race conditions or deadlocks?
+  2. Should weigh-out be strictly locked to the same `siteId` as weigh-in, or should cross-site weighments (e.g., weigh-in at Mine A, weigh-out at Port B) be explicitly permitted with separate `weighInSiteId` and `weighOutSiteId` audit fields?
+
+---
+
+### 6. 🧹 Secret Hygiene & Cleanup Plan
+* **Proposed Actions**:
+  - Add `.env` and `apps/web/.env` to `.vercelignore`.
+  - In `packages/database/seed.ts`, remove password overwrite for existing super admin.
+  - Delete unauthenticated debug endpoints: `/api/debug`, `/api/debug-roles`, `/api/debug/auth-test`, `/api/seed-rbac`.
+* **Question for Claude**:
+  Are there any other operational vectors or script paths in the repository that should be retired before going live?

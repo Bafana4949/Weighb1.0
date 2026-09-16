@@ -22,9 +22,7 @@ export function normalisePlate(value: string): string {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-export function formatKg(value: number): string {
-  return `${Math.round(value / 20) * 20}`.replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " kg";
-}
+export { formatKg } from "./weights";
 
 export function parsePagination(url: URL): { page: number; limit: number; skip: number } {
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));

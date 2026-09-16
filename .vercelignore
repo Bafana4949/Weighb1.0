@@ -1,7 +1,17 @@
 pnpm-lock.yaml
 *.bak*
+.env
+.env*
 .env.local
 .env*.local
+apps/web/.env
+apps/web/.env*
 node_modules
 apps/web/.next
 .next
+CREDENTIALS.md
+scripts/test-passwords.mjs
+scripts/check-passwords.mjs
+scripts/set-passwords.mjs
+scripts/apply-users-update.mjs
+scripts/system-audit-e2e.mjs

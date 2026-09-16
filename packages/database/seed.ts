@@ -79,7 +79,6 @@ async function main(): Promise<void> {
       role: "ADMIN",
       platformRole: "PLATFORM_SUPER_ADMIN",
       status: "ACTIVE",
-      passwordHash: passwordHash,
       organisationId: null,
     },
     create: {
