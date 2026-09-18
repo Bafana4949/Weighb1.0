@@ -1,7 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
+const VALID_BAUDS = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200] as const;
+const VALID_FRAMINGS = ["8-none", "7-even", "7-odd"] as const;
 import {
   Truck,
   Scale,
@@ -100,6 +103,7 @@ export function LiveOperatorDashboard({
   const [notesInput, setNotesInput] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [completedResult, setCompletedResult] = useState<any>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState<string>("");
 
   // Walk-In / Unscheduled Truck Input States
   const [isWalkIn, setIsWalkIn] = useState(false);
@@ -123,6 +127,9 @@ export function LiveOperatorDashboard({
   const [isIndicatorStable, setIsIndicatorStable] = useState<boolean>(true);
   const [lastPacketTime, setLastPacketTime] = useState<number>(0);
   const [signalLost, setSignalLost] = useState<boolean>(false);
+
+  const keepReadingRef = useRef<boolean>(true);
+  const activePortRef = useRef<any>(null);
 
   const [capabilities, setCapabilities] = useState<{
     hasScale: boolean;
@@ -237,62 +244,87 @@ export function LiveOperatorDashboard({
     return null;
   }
 
-  function startReaderLoop(reader: any, framing: "8-none" | "7-even" | "7-odd") {
+  function startReaderLoop(port: any, framing: "8-none" | "7-even" | "7-odd") {
     const dataBits = framing.startsWith("7") ? 7 : 8;
     const parity = framing.endsWith("even") ? "even" : framing.endsWith("odd") ? "odd" : "none";
     let buffer = "";
+    keepReadingRef.current = true;
+    activePortRef.current = port;
 
     (async () => {
       try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value && value.length > 0) {
-            const mask = dataBits === 7 || parity !== "none" ? 0x7f : 0xff;
-            let chunk = "";
-            for (let i = 0; i < value.length; i++) {
-              chunk += String.fromCharCode(value[i] & mask);
-            }
-            buffer += chunk;
-            setIndicatorPacketCount((prev) => (prev + 1) % 100000);
+        while (port?.readable && keepReadingRef.current) {
+          let reader: any;
+          try {
+            reader = port.readable.getReader();
+            setSerialReader(reader);
 
-            if (buffer.includes("\r") || buffer.includes("\n") || buffer.length > 64) {
-              const stxIndex = buffer.lastIndexOf("\x02");
-              const crIndex = buffer.lastIndexOf("\r");
-              if (stxIndex !== -1 && crIndex > stxIndex) {
-                const frame = buffer.substring(stxIndex, crIndex + 1);
-                setIndicatorRawText(frame.replace(/[^\x20-\x7E]/g, " ").trim());
-                const parsed = parseMettlerWeight(frame);
-                if (parsed !== null) {
-                  setManualWeightKg(parsed.weightKg);
-                  setIsIndicatorStable(parsed.isStable);
-                  setLastPacketTime(Date.now());
-                  setSignalLost(false);
+            for (;;) {
+              if (!keepReadingRef.current) break;
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (value && value.length > 0) {
+                const mask = dataBits === 7 || parity !== "none" ? 0x7f : 0xff;
+                let chunk = "";
+                for (let i = 0; i < value.length; i++) {
+                  chunk += String.fromCharCode(value[i] & mask);
                 }
-                buffer = buffer.substring(crIndex + 1);
-              } else {
-                const lines = buffer.split(/[\r\n]+/);
-                buffer = lines.pop() ?? "";
-                for (const line of lines) {
-                  const trimmed = line.trim();
-                  if (!trimmed) continue;
-                  setIndicatorRawText(trimmed);
-                  const parsed = parseMettlerWeight(trimmed);
-                  if (parsed !== null) {
-                    setManualWeightKg(parsed.weightKg);
-                    setIsIndicatorStable(parsed.isStable);
-                    setLastPacketTime(Date.now());
-                    setSignalLost(false);
+                buffer += chunk;
+                setIndicatorPacketCount((prev) => (prev + 1) % 100000);
+
+                if (buffer.includes("\r") || buffer.includes("\n") || buffer.length > 64) {
+                  const stxIndex = buffer.lastIndexOf("\x02");
+                  const crIndex = buffer.lastIndexOf("\r");
+                  if (stxIndex !== -1 && crIndex > stxIndex) {
+                    const frame = buffer.substring(stxIndex, crIndex + 1);
+                    setIndicatorRawText(frame.replace(/[^\x20-\x7E]/g, " ").trim());
+                    const parsed = parseMettlerWeight(frame);
+                    if (parsed !== null) {
+                      setManualWeightKg(parsed.weightKg);
+                      setIsIndicatorStable(parsed.isStable);
+                      setLastPacketTime(Date.now());
+                      setSignalLost(false);
+                    }
+                    buffer = buffer.substring(crIndex + 1);
+                  } else {
+                    const lines = buffer.split(/[\r\n]+/);
+                    buffer = lines.pop() ?? "";
+                    for (const line of lines) {
+                      const trimmed = line.trim();
+                      if (!trimmed) continue;
+                      setIndicatorRawText(trimmed);
+                      const parsed = parseMettlerWeight(trimmed);
+                      if (parsed !== null) {
+                        setManualWeightKg(parsed.weightKg);
+                        setIsIndicatorStable(parsed.isStable);
+                        setLastPacketTime(Date.now());
+                        setSignalLost(false);
+                      }
+                    }
                   }
                 }
               }
             }
+          } catch (streamErr: any) {
+            // Recoverable framing / parity error on serial line:
+            // Under the Web Serial spec, port.readable is replaced with a new stream.
+            // Outer loop acquires a fresh reader.
+            console.warn("Serial stream framing/parity hiccup, recovering reader:", streamErr?.name || streamErr);
+          } finally {
+            try {
+              reader?.releaseLock();
+            } catch {}
+            setSerialReader(null);
           }
         }
-      } catch (err: any) {
-        console.warn("Serial connection ended:", err);
+      } catch (fatalErr: any) {
+        console.warn("Fatal serial connection ended:", fatalErr);
       } finally {
         setIsSerialConnected(false);
+        // Metrology safety requirement: zero-out weight and flag unstable upon cable drop
+        setManualWeightKg(0);
+        setIsIndicatorStable(false);
+        setSignalLost(true);
       }
     })();
   }
@@ -318,17 +350,33 @@ export function LiveOperatorDashboard({
       });
       setSerialPort(port);
       setIsSerialConnected(true);
+
+      try {
+        const info = port.getInfo?.() || {};
+        localStorage.setItem("weighbridge_scale_auto_connect", "true");
+        localStorage.setItem("weighbridge_scale_baud", String(serialBaud));
+        localStorage.setItem("weighbridge_scale_framing", serialFraming);
+        if (info.usbVendorId) localStorage.setItem("weighbridge_scale_vendor_id", String(info.usbVendorId));
+        if (info.usbProductId) localStorage.setItem("weighbridge_scale_product_id", String(info.usbProductId));
+      } catch {}
+
       toast({
         title: "Scale Indicator Connected",
         body: `Listening for live weight from indicator at ${serialBaud} baud (${dataBits}-${parity.toUpperCase()}-1).`,
       });
 
-      const reader = port.readable.getReader();
-      setSerialReader(reader);
-      startReaderLoop(reader, serialFraming);
+      startReaderLoop(port, serialFraming);
     } catch (err: any) {
       if (err.name !== "NotFoundError") {
-        toast({ title: "Serial Connection Failed", body: err.message || String(err), severity: "HIGH" });
+        const msg = err.message || String(err);
+        const isInUse = msg.includes("in use") || msg.includes("already open") || err.name === "NetworkError";
+        toast({
+          title: isInUse ? "Port Locked By Another App" : "Serial Connection Failed",
+          body: isInUse
+            ? "The scale COM port is held by another program (e.g. site daemon or another browser tab). Please close conflicting software."
+            : msg,
+          severity: "HIGH",
+        });
       }
     }
   }
@@ -422,27 +470,48 @@ export function LiveOperatorDashboard({
         setSerialBaud(detectedProfile.baud);
         setSerialFraming(detectedProfile.framing);
         setSerialPort(port);
-        setSerialReader(activeReader);
         setIsSerialConnected(true);
         setIsDetecting(false);
+
+        try {
+          const info = port.getInfo?.() || {};
+          localStorage.setItem("weighbridge_scale_auto_connect", "true");
+          localStorage.setItem("weighbridge_scale_baud", String(detectedProfile.baud));
+          localStorage.setItem("weighbridge_scale_framing", detectedProfile.framing);
+          if (info.usbVendorId) localStorage.setItem("weighbridge_scale_vendor_id", String(info.usbVendorId));
+          if (info.usbProductId) localStorage.setItem("weighbridge_scale_product_id", String(info.usbProductId));
+        } catch {}
 
         toast({
           title: "Scale Auto-Detected!",
           body: `Locked onto ${detectedProfile.label}. Streaming live weight.`,
         });
 
-        startReaderLoop(activeReader, detectedProfile.framing);
+        try {
+          await activeReader.cancel();
+          activeReader.releaseLock();
+        } catch {}
+
+        startReaderLoop(port, detectedProfile.framing);
       } else {
         setIsDetecting(false);
         // Fallback open with standard 9600 8-none
         await port.open({ baudRate: 9600, dataBits: 8, stopBits: 1, parity: "none" });
-        const reader = port.readable.getReader();
         setSerialBaud(9600);
         setSerialFraming("8-none");
         setSerialPort(port);
-        setSerialReader(reader);
         setIsSerialConnected(true);
-        startReaderLoop(reader, "8-none");
+
+        try {
+          const info = port.getInfo?.() || {};
+          localStorage.setItem("weighbridge_scale_auto_connect", "true");
+          localStorage.setItem("weighbridge_scale_baud", "9600");
+          localStorage.setItem("weighbridge_scale_framing", "8-none");
+          if (info.usbVendorId) localStorage.setItem("weighbridge_scale_vendor_id", String(info.usbVendorId));
+          if (info.usbProductId) localStorage.setItem("weighbridge_scale_product_id", String(info.usbProductId));
+        } catch {}
+
+        startReaderLoop(port, "8-none");
 
         toast({
           title: "Scale Connected",
@@ -464,6 +533,10 @@ export function LiveOperatorDashboard({
 
   async function disconnectSerial() {
     try {
+      localStorage.removeItem("weighbridge_scale_auto_connect");
+    } catch {}
+
+    try {
       if (serialReader) {
         await serialReader.cancel();
         setSerialReader(null);
@@ -480,11 +553,20 @@ export function LiveOperatorDashboard({
     }
   }
 
-  // Fetch Queue from server
+  const lastQueueEtagRef = useRef<string | null>(null);
+
+  // Fetch Queue from server with conditional ETag (HTTP 304 saves LTE data)
   const fetchQueue = async () => {
     try {
-      const response = await fetch(`/api/bookings/queue?site=${siteCode}`, { cache: "no-store" });
+      const headers: Record<string, string> = { cache: "no-store" };
+      if (lastQueueEtagRef.current) {
+        headers["If-None-Match"] = lastQueueEtagRef.current;
+      }
+      const response = await fetch(`/api/bookings/queue?site=${siteCode}`, { headers });
+      if (response.status === 304) return; // 304 Not Modified — queue unchanged
       if (!response.ok) return;
+      const etag = response.headers.get("etag");
+      if (etag) lastQueueEtagRef.current = etag;
       const body = await response.json();
       if (Array.isArray(body.data)) setQueue(body.data);
     } catch {
@@ -509,13 +591,131 @@ export function LiveOperatorDashboard({
     }
   };
 
+  const tryAutoConnectScale = useCallback(async (isMountedCheck: () => boolean) => {
+    if (typeof navigator === "undefined" || !("serial" in navigator)) return;
+    let shouldAutoConnect = false;
+    try {
+      shouldAutoConnect = localStorage.getItem("weighbridge_scale_auto_connect") === "true";
+    } catch {}
+    if (!shouldAutoConnect) return;
+
+    try {
+      const ports = await (navigator as any).serial.getPorts();
+      if (!ports || ports.length === 0 || !isMountedCheck()) return;
+
+      // Validate stored baud against allowed settings to prevent NaN corruption
+      const rawBaud = parseInt(localStorage.getItem("weighbridge_scale_baud") || "9600", 10);
+      const savedBaud = (VALID_BAUDS as readonly number[]).includes(rawBaud) ? rawBaud : 9600;
+
+      const rawFraming = localStorage.getItem("weighbridge_scale_framing") as any;
+      const savedFraming: "8-none" | "7-even" | "7-odd" = (VALID_FRAMINGS as readonly string[]).includes(rawFraming)
+        ? rawFraming
+        : "8-none";
+
+      const dataBits = savedFraming.startsWith("7") ? 7 : 8;
+      const parity = savedFraming.endsWith("even") ? "even" : savedFraming.endsWith("odd") ? "odd" : "none";
+
+      // Match port against stored USB Vendor / Product ID to avoid opening receipt printers
+      const savedVendor = localStorage.getItem("weighbridge_scale_vendor_id");
+      const savedProduct = localStorage.getItem("weighbridge_scale_product_id");
+
+      let selectedPort = ports[0];
+      if (savedVendor) {
+        const matched = ports.find((p: any) => {
+          const info = p.getInfo?.() || {};
+          return String(info.usbVendorId) === savedVendor && (!savedProduct || String(info.usbProductId) === savedProduct);
+        });
+        if (matched) selectedPort = matched;
+      }
+
+      try {
+        await selectedPort.open({
+          baudRate: savedBaud,
+          dataBits,
+          stopBits: 1,
+          parity,
+        });
+      } catch (openErr: any) {
+        const msg = openErr?.message || String(openErr);
+        if (msg.includes("in use") || msg.includes("already open") || openErr?.name === "NetworkError") {
+          toast({
+            title: "Scale Port Unavailable",
+            body: "The scale COM port is in use by another program or browser tab.",
+            severity: "WARNING",
+          });
+        }
+      }
+
+      if (selectedPort.readable && isMountedCheck()) {
+        setSerialBaud(savedBaud);
+        setSerialFraming(savedFraming);
+        setSerialPort(selectedPort);
+        setIsSerialConnected(true);
+        startReaderLoop(selectedPort, savedFraming);
+        toast({
+          title: "Scale Reconnected",
+          body: `Restored live indicator feed at ${savedBaud} baud (${dataBits}-${parity.toUpperCase()}-1).`,
+        });
+      }
+    } catch (err) {
+      console.warn("Auto-reconnect error:", err);
+    }
+  }, [toast]);
+
+  // Web Serial persistent connection, cable replug listeners, and unmount cleanup
+  useEffect(() => {
+    let isMounted = true;
+    tryAutoConnectScale(() => isMounted);
+
+    // Cable replug listeners
+    const handleCableConnect = () => {
+      if (isMounted) {
+        toast({ title: "Scale Cable Plugged In", body: "Re-establishing scale connection..." });
+        tryAutoConnectScale(() => isMounted);
+      }
+    };
+
+    const handleCableDisconnect = () => {
+      if (isMounted) {
+        setIsSerialConnected(false);
+        setManualWeightKg(0);
+        setIsIndicatorStable(false);
+        setSignalLost(true);
+        toast({
+          title: "Scale Cable Unplugged",
+          body: "Scale USB cable was disconnected. Live scale weight halted.",
+          severity: "HIGH",
+        });
+      }
+    };
+
+    if (typeof navigator !== "undefined" && "serial" in navigator) {
+      (navigator as any).serial.addEventListener("connect", handleCableConnect);
+      (navigator as any).serial.addEventListener("disconnect", handleCableDisconnect);
+    }
+
+    return () => {
+      isMounted = false;
+      keepReadingRef.current = false;
+      if (typeof navigator !== "undefined" && "serial" in navigator) {
+        (navigator as any).serial.removeEventListener("connect", handleCableConnect);
+        (navigator as any).serial.removeEventListener("disconnect", handleCableDisconnect);
+      }
+      try {
+        activePortRef.current?.close();
+      } catch {}
+    };
+  }, [tryAutoConnectScale]);
+
+  // Queue and In-Progress polling (12s interval with document.hidden guard)
   useEffect(() => {
     fetchQueue();
     fetchActiveWeighments();
     const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
       fetchQueue();
       fetchActiveWeighments();
-    }, 5_000);
+    }, 12_000);
     return () => clearInterval(timer);
   }, [siteCode]);
 
@@ -523,6 +723,7 @@ export function LiveOperatorDashboard({
   function handleOpenFirstWeigh(booking?: QueueItem, forceWalkIn = false) {
     setCompletedResult(null);
     setModalMode("FIRST");
+    setIdempotencyKey(typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `IDEM-${Date.now()}`);
     if (booking) {
       setSelectedBookingId(booking.id);
       setIsWalkIn(false);
@@ -533,7 +734,8 @@ export function LiveOperatorDashboard({
       setSelectedBookingId(queue[0].id);
       setIsWalkIn(false);
     }
-    setFirstWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "");
+    // Metrology safety: never pre-fill stale weights if cable dropped or signal lost
+    setFirstWeightInput(isSerialConnected && !signalLost && manualWeightKg > 0 ? String(manualWeightKg) : "");
     setSecondWeightInput("");
     setModalOpen(true);
   }
@@ -542,6 +744,7 @@ export function LiveOperatorDashboard({
   function handleOpenSecondWeigh(weighment?: ActiveWeighment) {
     setCompletedResult(null);
     setModalMode("SECOND");
+    setIdempotencyKey(typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `IDEM-${Date.now()}`);
     if (weighment) {
       setSelectedWeighmentId(weighment.id);
       setSelectedBookingId(weighment.bookingId);
@@ -554,7 +757,8 @@ export function LiveOperatorDashboard({
       setFirstWeightInput(String(w.firstWeightKg));
       setWeighType(w.firstWeightType === "TARE" ? "DISPATCH" : "RECEIPT");
     }
-    setSecondWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "");
+    // Metrology safety: never pre-fill stale weights if cable dropped or signal lost
+    setSecondWeightInput(isSerialConnected && !signalLost && manualWeightKg > 0 ? String(manualWeightKg) : "");
     setModalOpen(true);
   }
 
@@ -562,6 +766,7 @@ export function LiveOperatorDashboard({
   function handleOpenDirectWeigh(booking?: QueueItem, forceWalkIn = false) {
     setCompletedResult(null);
     setModalMode("DIRECT");
+    setIdempotencyKey(typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `IDEM-${Date.now()}`);
     if (booking) {
       setSelectedBookingId(booking.id);
       setIsWalkIn(false);
@@ -572,12 +777,12 @@ export function LiveOperatorDashboard({
       setSelectedBookingId(queue[0].id);
       setIsWalkIn(false);
     }
-    setFirstWeightInput(manualWeightKg > 0 ? String(manualWeightKg) : "");
+    setFirstWeightInput(isSerialConnected && !signalLost && manualWeightKg > 0 ? String(manualWeightKg) : "");
     setSecondWeightInput("");
     setModalOpen(true);
   }
 
-  // Submit manual weighment action
+  // Submit manual weighment action (carries idempotencyKey to prevent duplicate weighments on LTE retry)
   async function handleSubmitManual() {
     setSubmitting(true);
     try {
@@ -596,6 +801,7 @@ export function LiveOperatorDashboard({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             action: "FIRST_WEIGH",
+            idempotencyKey: idempotencyKey || undefined,
             siteCode,
             bookingId: isWalkIn ? undefined : selectedBookingId,
             plate: isWalkIn ? walkInPlate.trim().toUpperCase() : undefined,
@@ -627,6 +833,7 @@ export function LiveOperatorDashboard({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             action: "SECOND_WEIGH",
+            idempotencyKey: idempotencyKey || undefined,
             siteCode,
             transactionId: selectedWeighmentId || undefined,
             bookingId: selectedBookingId || undefined,
@@ -660,6 +867,7 @@ export function LiveOperatorDashboard({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             action: "DIRECT_WEIGH",
+            idempotencyKey: idempotencyKey || undefined,
             siteCode,
             bookingId: isWalkIn ? undefined : selectedBookingId,
             plate: isWalkIn ? walkInPlate.trim().toUpperCase() : undefined,

@@ -30,6 +30,7 @@ const securityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: process.env.VERCEL ? undefined : "standalone",
+  outputFileTracingRoot: path.resolve(__dirname, '../../'),
   transpilePackages: ["@weighbridge/database", "@weighbridge/shared-types", "@weighbridge/mqtt-topics"],
   experimental: { serverActions: { bodySizeLimit: "4mb" } },
   async headers() {

@@ -15,7 +15,8 @@ export function DriverKiosk({ siteCode }: { siteCode: string }) {
   const toast = useToast();
 
   useEffect(() => {
-    const timer = setInterval(async () => {
+    const poll = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const response = await fetch("/api/edge/live", { cache: "no-store" });
         if (!response.ok) return;
@@ -23,7 +24,10 @@ export function DriverKiosk({ siteCode }: { siteCode: string }) {
         if (body.data?.state) setState(body.data.state);
         setPending(body.data?.pending_driver_decision ?? null);
       } catch { /* keep showing the last known state on transient errors */ }
-    }, 1_500);
+    };
+
+    poll();
+    const timer = setInterval(poll, 5_000);
     return () => clearInterval(timer);
   }, []);
 

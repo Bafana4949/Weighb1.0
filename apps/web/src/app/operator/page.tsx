@@ -17,8 +17,17 @@ import { siteIdentifierWhere } from "@/lib/utils";
 // which site it actually serves instead of guessing.
 async function resolveDaemonSite(organisationId: string | null) {
   const scope = organisationId ? { organisationId } : {};
+  const daemonUrl = process.env.SITE_DAEMON_URL;
+  const isLocalhost = !daemonUrl || daemonUrl.includes("localhost") || daemonUrl.includes("127.0.0.1");
+  const isCloud = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.K_SERVICE);
+
+  // In cloud deployments without an explicit remote daemon URL, do not stall on localhost
+  if (isCloud && isLocalhost) {
+    return prisma.site.findFirst({ where: { isActive: true, ...scope }, orderBy: { code: "asc" } });
+  }
+
   try {
-    const response = await fetch(`${process.env.SITE_DAEMON_URL ?? "http://localhost:8000"}/health`, { cache: "no-store", signal: AbortSignal.timeout(2000) });
+    const response = await fetch(`${daemonUrl ?? "http://localhost:8000"}/health`, { cache: "no-store", signal: AbortSignal.timeout(600) });
     if (!response.ok) throw new Error(`daemon returned ${response.status}`);
     const body = await response.json();
     if (typeof body.site_id === "string") {
@@ -27,7 +36,6 @@ async function resolveDaemonSite(organisationId: string | null) {
     }
   } catch {
     // Daemon unreachable — fall through to the best-effort fallback below
-    // rather than failing the whole page.
   }
   return prisma.site.findFirst({ where: { isActive: true, ...scope }, orderBy: { code: "asc" } });
 }

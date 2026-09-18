@@ -60,41 +60,64 @@ if (envExists) {
   const envContent = fs.readFileSync(envPath, 'utf8');
   
   // 3. Required env vars
-  const requiredVars = ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DATABASE_URL', 'AUTH_SECRET', 'SITE_DAEMON_API_KEY', 'PASSWORD_PEPPER'];
+  const isCloudSupabase = envContent.includes('supabase.co') || envContent.includes('supabase.com');
+  const requiredVars = isCloudSupabase
+    ? ['DATABASE_URL', 'AUTH_SECRET', 'PASSWORD_PEPPER', 'NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']
+    : ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DATABASE_URL', 'AUTH_SECRET', 'PASSWORD_PEPPER'];
+
+  console.log(`Database mode detected: ${isCloudSupabase ? 'Cloud Supabase PostgreSQL' : 'Local Docker PostgreSQL'}`);
+
   for (const v of requiredVars) {
     const hasVar = new RegExp(`^${v}=.+$`, 'm').test(envContent);
-    const isPlaceholder = envContent.includes(`${v}=replace_with_`) || envContent.includes(`${v}=weighbridge_dev_change_me`);
+    const isPlaceholder = envContent.includes(`${v}=replace_with_`) || envContent.includes(`${v}=weighbridge_dev_change_me`) || envContent.includes(`${v}=your-anon-key-here`);
     check(`Environment variable ${v} is set`, hasVar, `Missing in .env`);
     if (hasVar) {
       warn(`Environment variable ${v} is not a placeholder`, !isPlaceholder, `You should replace the default placeholder with a secure value.`);
     }
   }
+
+  // Check optional edge daemon API key
+  const hasDaemonKey = /^SITE_DAEMON_API_KEY=.+$/m.test(envContent);
+  warn('Environment variable SITE_DAEMON_API_KEY is configured (optional for edge hardware sync)', hasDaemonKey, 'Optional: define SITE_DAEMON_API_KEY if connecting physical scale lane daemons.');
 }
 
-// 4. Port 5432 availability
-const port5432InUse = await isPortInUse(5432);
-if (port5432InUse) {
-  warn('Port 5432 availability', false, 'Port 5432 is already in use. If the Docker Compose Postgres container is not running, you likely have a local Windows PostgreSQL instance running. This will cause authentication failures (P1000) for the seed script.');
+// 4. Port 5432 check (relevant only if running local Docker Postgres)
+const isCloudDb = fs.existsSync(envPath) && (fs.readFileSync(envPath, 'utf8').includes('supabase.co') || fs.readFileSync(envPath, 'utf8').includes('supabase.com'));
+if (!isCloudDb) {
+  const port5432InUse = await isPortInUse(5432);
+  if (port5432InUse) {
+    warn('Port 5432 availability', false, 'Port 5432 is already in use. If the Docker Compose Postgres container is not running, you likely have a local Windows PostgreSQL instance running. This will cause authentication failures (P1000) for the seed script.');
+  } else {
+    check('Port 5432 availability', true, '');
+  }
 } else {
-  check('Port 5432 availability', true, '');
+  console.log('ℹ️  Port 5432 local check skipped (using Cloud Supabase database)');
 }
 
-// 5. Docker CLI
+// 5. Docker CLI & daemon
 let dockerAvailable = false;
 try {
   execSync('docker --version', { stdio: 'ignore' });
   dockerAvailable = true;
 } catch (e) {}
-check('Docker CLI available', dockerAvailable, 'Docker CLI not found. Install Docker Desktop for Windows.');
 
-// 5. Docker daemon
+if (!isCloudDb) {
+  check('Docker CLI available', dockerAvailable, 'Docker CLI not found. Install Docker Desktop for Windows.');
+} else {
+  warn('Docker CLI available', dockerAvailable, 'Docker is optional when running against cloud-hosted Supabase.');
+}
+
 let daemonReachable = false;
 if (dockerAvailable) {
   try {
     execSync('docker info', { stdio: 'ignore' });
     daemonReachable = true;
   } catch (e) {
-    check('Docker daemon reachable', false, 'Docker daemon is not running. Open Docker Desktop and wait for the engine to start.');
+    if (!isCloudDb) {
+      check('Docker daemon reachable', false, 'Docker daemon is not running. Open Docker Desktop and wait for the engine to start.');
+    } else {
+      warn('Docker daemon reachable', false, 'Docker daemon not running (optional when using Cloud Supabase).');
+    }
   }
 }
 if (daemonReachable) {
@@ -113,7 +136,6 @@ if (daemonReachable) {
   if (composeValid) {
     try {
       const psOutput = execSync('docker compose ps --format json', { encoding: 'utf8' });
-      // Depending on docker compose version, output might be array or ndjson
       const services = psOutput.trim().split('\n').filter(Boolean).map(line => {
         try { return JSON.parse(line); } catch (e) { return null; }
       }).flat().filter(Boolean);
@@ -125,12 +147,11 @@ if (daemonReachable) {
       warn('Mosquitto container exists', !!mosquitto, 'Mosquitto container not found. Run `docker compose up -d postgres mosquitto`.');
 
       if (postgres) {
-        const state = postgres.State || postgres.Status; // Depends on version
+        const state = postgres.State || postgres.Status;
         const health = postgres.Health || 'unknown';
         const isHealthy = health === 'healthy' || state?.includes('Up');
         warn('Postgres container is healthy', isHealthy, `Container is in state: ${state}, Health: ${health}`);
       }
-
     } catch (e) {
       // Ignored if containers are not up yet
     }

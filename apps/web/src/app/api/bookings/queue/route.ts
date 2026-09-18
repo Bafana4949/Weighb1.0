@@ -54,7 +54,25 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
     take: 100,
   });
 
-  return ok(
+  let latestTs = 0;
+  for (const item of queue) {
+    const t = item.updatedAt ? new Date(item.updatedAt).getTime() : new Date(item.createdAt).getTime();
+    if (t > latestTs) latestTs = t;
+  }
+  const etag = `"${resolvedSite.id}-${queue.length}-${latestTs}"`;
+
+  const ifNoneMatch = request.headers.get("if-none-match");
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        etag,
+        "cache-control": "private, no-cache",
+      },
+    });
+  }
+
+  const res = ok(
     queue.map((item) => ({
       id: item.id,
       reference: item.reference,
@@ -70,4 +88,7 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
       status: item.status,
     }))
   );
+  res.headers.set("etag", etag);
+  res.headers.set("cache-control", "private, no-cache");
+  return res;
 });

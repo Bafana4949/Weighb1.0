@@ -275,7 +275,7 @@ export async function POST(request: NextRequest) {
       return fail("Invalid JSON payload", 400);
     }
 
-    const { action, siteCode } = body;
+    const { action, siteCode, idempotencyKey } = body;
     if (!siteCode) return fail("siteCode is required", 422);
 
     const resolvedSite = await prisma.site.findFirst({ where: siteIdentifierWhere(siteCode) });
@@ -297,6 +297,25 @@ export async function POST(request: NextRequest) {
   // ACTION: FIRST_WEIGH (Weigh-In / 1st Weight)
   // --------------------------------------------------------------------------
   if (action === "FIRST_WEIGH") {
+    // Idempotency check: if this request was already recorded on the server, return it
+    if (idempotencyKey) {
+      const existing = await prisma.weighbridgeTransaction.findFirst({
+        where: { edgeTransactionId: `IDEM-${idempotencyKey}` },
+        include: { booking: { include: { vehicle: true } } },
+      });
+      if (existing) {
+        const isDispatch = existing.tareCapturedAt !== null;
+        const recordedWeight = isDispatch ? existing.tareWeightKg : existing.grossWeightKg;
+        return ok({
+          message: `1st Weighment captured successfully for ${existing.booking.vehicle.plate}: ${recordedWeight.toLocaleString()} kg (idempotent replay)`,
+          transactionId: existing.id,
+          status: existing.status,
+          firstWeightKg: recordedWeight,
+          firstWeightType: isDispatch ? "TARE" : "GROSS",
+        });
+      }
+    }
+
     const { bookingId, weightKg, weighType, notes, plate, driverName, transporterName, trailer, commodity, orderId } = body;
     const parsedWeight = Math.round(Number(weightKg));
 
@@ -334,7 +353,7 @@ export async function POST(request: NextRequest) {
     }
 
     const isDispatch = weighType !== "RECEIPT";
-    const tempEdgeId = `MANUAL-INPROG-${resolvedSite.code}-${Date.now()}`;
+    const tempEdgeId = idempotencyKey ? `IDEM-${idempotencyKey}` : `MANUAL-INPROG-${resolvedSite.code}-${Date.now()}`;
     const tempWaybill = `WB-INPROG-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const prior = await prisma.weighbridgeTransaction.findFirst({
@@ -401,7 +420,46 @@ export async function POST(request: NextRequest) {
   // ACTION: SECOND_WEIGH (Weigh-Out / 2nd Weight & Waybill Generation)
   // --------------------------------------------------------------------------
   if (action === "SECOND_WEIGH") {
+    // Idempotency check: if this request was already finalized, return the completed transaction
+    if (idempotencyKey) {
+      const existing = await prisma.weighbridgeTransaction.findFirst({
+        where: { edgeTransactionId: `IDEM-${idempotencyKey}`, status: "COMPLETED" },
+        include: { vehicle: true },
+      });
+      if (existing) {
+        return ok({
+          message: `Weighment finalized for ${existing.vehicle.plate}! Net Cargo: ${existing.netWeightKg.toLocaleString()} kg (idempotent replay)`,
+          transaction: existing,
+          waybillNumber: existing.waybillNumber,
+          waybillUrl: `/waybills/${existing.id}`,
+          grossWeightKg: existing.grossWeightKg,
+          tareWeightKg: existing.tareWeightKg,
+          netWeightKg: existing.netWeightKg,
+        });
+      }
+    }
+
     const { transactionId, bookingId, weightKg, notes, mineTicketNumber } = body;
+
+    // Also check if transactionId was already completed (e.g. timeout retry on flaky LTE)
+    if (transactionId) {
+      const checkExisting = await prisma.weighbridgeTransaction.findUnique({
+        where: { id: transactionId },
+        include: { vehicle: true },
+      });
+      if (checkExisting && checkExisting.status === "COMPLETED") {
+        return ok({
+          message: `Weighment finalized for ${checkExisting.vehicle.plate}! Net Cargo: ${checkExisting.netWeightKg.toLocaleString()} kg (idempotent replay)`,
+          transaction: checkExisting,
+          waybillNumber: checkExisting.waybillNumber,
+          waybillUrl: `/waybills/${checkExisting.id}`,
+          grossWeightKg: checkExisting.grossWeightKg,
+          tareWeightKg: checkExisting.tareWeightKg,
+          netWeightKg: checkExisting.netWeightKg,
+        });
+      }
+    }
+
     const parsedWeight = Math.round(Number(weightKg));
 
     if (!parsedWeight || parsedWeight <= 0) return fail("Valid scale weight (kg) is required", 422);
@@ -436,59 +494,77 @@ export async function POST(request: NextRequest) {
     const overload = actualGross > legalMaxGvw;
     const overloadVarianceKg = overload ? actualGross - legalMaxGvw : 0;
 
-    const waybillNumber = await generateNextWaybillNumber(resolvedSite.code, resolvedSite.id);
-    const edgeTransactionId = `MANUAL-${resolvedSite.code}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-    const prior = await prisma.weighbridgeTransaction.findFirst({
-      where: { siteId: resolvedSite.id, status: "COMPLETED" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    });
-    const previousHash = prior?.integrityHash ?? "0".repeat(64);
-
-    const integrityHash = computeIntegrityHash({
-      edgeTransactionId,
-      bookingId: transaction.bookingId,
-      vehicleId: transaction.vehicleId,
-      driverId: transaction.driverId,
-      siteId: resolvedSite.id,
-      grossWeightKg: actualGross,
-      tareWeightKg: actualTare,
-      netWeightKg,
-      commodity: transaction.commodity,
-      capturedAt: now,
-      waybillNumber,
-      previousHash,
-    });
-    const confirmationHash = createHash("sha256").update(`${integrityHash}:${Date.now()}`).digest("hex");
+    const edgeTransactionId = idempotencyKey ? `IDEM-${idempotencyKey}` : `MANUAL-${resolvedSite.code}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const entryTime = transaction.entryAt ?? transaction.createdAt;
     const turnaroundSeconds = Math.max(60, Math.round((now.getTime() - new Date(entryTime).getTime()) / 1000));
     const isDispatch = transaction.booking.order?.type ? transaction.booking.order.type === "DISPATCH" : true;
 
-    const completed = await prisma.weighbridgeTransaction.update({
-      where: { id: transaction.id },
-      data: {
+    // Retry loop on waybill collision (P2002) to handle simultaneous submissions cleanly
+    let completed: any = null;
+    let finalWaybillNumber = "";
+    const MAX_ATTEMPTS = 5;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      finalWaybillNumber = await generateNextWaybillNumber(resolvedSite.code, resolvedSite.id);
+
+      const prior = await prisma.weighbridgeTransaction.findFirst({
+        where: { siteId: resolvedSite.id, status: "COMPLETED" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      });
+      const previousHash = prior?.integrityHash ?? "0".repeat(64);
+
+      const integrityHash = computeIntegrityHash({
         edgeTransactionId,
+        bookingId: transaction.bookingId,
+        vehicleId: transaction.vehicleId,
+        driverId: transaction.driverId,
+        siteId: resolvedSite.id,
         grossWeightKg: actualGross,
         tareWeightKg: actualTare,
         netWeightKg,
-        grossCapturedAt: transaction.grossCapturedAt ?? now,
-        tareCapturedAt: transaction.tareCapturedAt ?? now,
-        exitAt: now,
+        commodity: transaction.commodity,
         capturedAt: now,
-        turnaroundSeconds,
-        waybillNumber,
-        integrityHash,
-        confirmationHash,
+        waybillNumber: finalWaybillNumber,
         previousHash,
-        status: "COMPLETED",
-        transactionType: isDispatch ? "OUTBOUND" : "INBOUND",
-        overload,
-        overloadVarianceKg,
-        mineTicketNumber: mineTicketNumber ?? transaction.mineTicketNumber,
-        operatorId: operatorId ?? transaction.operatorId,
-      },
-    });
+      });
+      const confirmationHash = createHash("sha256").update(`${integrityHash}:${Date.now()}`).digest("hex");
+
+      try {
+        completed = await prisma.weighbridgeTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            edgeTransactionId,
+            grossWeightKg: actualGross,
+            tareWeightKg: actualTare,
+            netWeightKg,
+            grossCapturedAt: transaction.grossCapturedAt ?? now,
+            tareCapturedAt: transaction.tareCapturedAt ?? now,
+            exitAt: now,
+            capturedAt: now,
+            turnaroundSeconds,
+            waybillNumber: finalWaybillNumber,
+            integrityHash,
+            confirmationHash,
+            previousHash,
+            status: "COMPLETED",
+            transactionType: isDispatch ? "OUTBOUND" : "INBOUND",
+            overload,
+            overloadVarianceKg,
+            mineTicketNumber: mineTicketNumber ?? transaction.mineTicketNumber,
+            operatorId: operatorId ?? transaction.operatorId,
+          },
+        });
+        break;
+      } catch (updateErr: any) {
+        if (updateErr?.code === "P2002" && attempt < MAX_ATTEMPTS) {
+          console.warn(`Waybill collision on attempt ${attempt} (${finalWaybillNumber}), retrying sequence...`);
+          await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+          continue;
+        }
+        throw updateErr;
+      }
+    }
 
     let orderFulfilled = false;
     if (transaction.booking.orderId) {
@@ -514,7 +590,7 @@ export async function POST(request: NextRequest) {
       entityType: "weighbridge_transaction",
       entityId: completed.id,
       afterData: {
-        waybillNumber,
+        waybillNumber: finalWaybillNumber,
         plate: transaction.vehicle.plate,
         grossWeightKg: actualGross,
         tareWeightKg: actualTare,
@@ -538,6 +614,25 @@ export async function POST(request: NextRequest) {
   // ACTION: DIRECT_WEIGH (Enter both 1st & 2nd weights simultaneously)
   // --------------------------------------------------------------------------
   if (action === "DIRECT_WEIGH") {
+    // Idempotency check: if this direct weigh was already completed
+    if (idempotencyKey) {
+      const existing = await prisma.weighbridgeTransaction.findFirst({
+        where: { edgeTransactionId: `IDEM-${idempotencyKey}`, status: "COMPLETED" },
+        include: { vehicle: true },
+      });
+      if (existing) {
+        return ok({
+          message: `Transaction recorded for ${existing.vehicle.plate}! Net Cargo: ${existing.netWeightKg.toLocaleString()} kg (idempotent replay)`,
+          transaction: existing,
+          waybillNumber: existing.waybillNumber,
+          waybillUrl: `/waybills/${existing.id}`,
+          grossWeightKg: existing.grossWeightKg,
+          tareWeightKg: existing.tareWeightKg,
+          netWeightKg: existing.netWeightKg,
+        });
+      }
+    }
+
     const { bookingId, weight1Kg, weight2Kg, notes, mineTicketNumber, plate, driverName, transporterName, trailer, commodity, orderId } = body;
     const w1 = Math.round(Number(weight1Kg));
     const w2 = Math.round(Number(weight2Kg));
@@ -576,64 +671,81 @@ export async function POST(request: NextRequest) {
     const overload = actualGross > legalMaxGvw;
     const overloadVarianceKg = overload ? actualGross - legalMaxGvw : 0;
 
-    const waybillNumber = await generateNextWaybillNumber(resolvedSite.code, resolvedSite.id);
-    const edgeTransactionId = `MANUAL-${resolvedSite.code}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-    const prior = await prisma.weighbridgeTransaction.findFirst({
-      where: { siteId: resolvedSite.id, status: "COMPLETED" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    });
-    const previousHash = prior?.integrityHash ?? "0".repeat(64);
-
-    const integrityHash = computeIntegrityHash({
-      edgeTransactionId,
-      bookingId: booking.id,
-      vehicleId: booking.vehicleId,
-      driverId: booking.driverId,
-      siteId: resolvedSite.id,
-      grossWeightKg: actualGross,
-      tareWeightKg: actualTare,
-      netWeightKg,
-      commodity: booking.commodity,
-      capturedAt: now,
-      waybillNumber,
-      previousHash,
-    });
-    const confirmationHash = createHash("sha256").update(`${integrityHash}:${Date.now()}`).digest("hex");
-
+    const edgeTransactionId = idempotencyKey ? `IDEM-${idempotencyKey}` : `MANUAL-${resolvedSite.code}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const isDispatch = booking.order?.type ? booking.order.type === "DISPATCH" : true;
     const entryTime = new Date(now.getTime() - 15 * 60 * 1000); // 15 mins turnaround fallback
 
-    const completed = await prisma.weighbridgeTransaction.create({
-      data: {
+    // Retry loop on waybill collision (P2002)
+    let completed: any = null;
+    let finalWaybillNumber = "";
+    const MAX_ATTEMPTS = 5;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      finalWaybillNumber = await generateNextWaybillNumber(resolvedSite.code, resolvedSite.id);
+
+      const prior = await prisma.weighbridgeTransaction.findFirst({
+        where: { siteId: resolvedSite.id, status: "COMPLETED" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      });
+      const previousHash = prior?.integrityHash ?? "0".repeat(64);
+
+      const integrityHash = computeIntegrityHash({
         edgeTransactionId,
         bookingId: booking.id,
         vehicleId: booking.vehicleId,
-        trailerId: booking.trailerId,
         driverId: booking.driverId,
         siteId: resolvedSite.id,
-        operatorId,
         grossWeightKg: actualGross,
         tareWeightKg: actualTare,
         netWeightKg,
         commodity: booking.commodity,
-        waybillNumber,
-        integrityHash,
-        confirmationHash,
-        previousHash,
-        status: "COMPLETED",
-        transactionType: isDispatch ? "OUTBOUND" : "INBOUND",
-        overload,
-        overloadVarianceKg,
-        mineTicketNumber: mineTicketNumber ?? null,
-        entryAt: entryTime,
-        grossCapturedAt: now,
-        tareCapturedAt: entryTime,
-        exitAt: now,
         capturedAt: now,
-        turnaroundSeconds: 900,
-      },
-    });
+        waybillNumber: finalWaybillNumber,
+        previousHash,
+      });
+      const confirmationHash = createHash("sha256").update(`${integrityHash}:${Date.now()}`).digest("hex");
+
+      try {
+        completed = await prisma.weighbridgeTransaction.create({
+          data: {
+            edgeTransactionId,
+            bookingId: booking.id,
+            vehicleId: booking.vehicleId,
+            trailerId: booking.trailerId,
+            driverId: booking.driverId,
+            siteId: resolvedSite.id,
+            operatorId,
+            grossWeightKg: actualGross,
+            tareWeightKg: actualTare,
+            netWeightKg,
+            commodity: booking.commodity,
+            waybillNumber: finalWaybillNumber,
+            integrityHash,
+            confirmationHash,
+            previousHash,
+            status: "COMPLETED",
+            transactionType: isDispatch ? "OUTBOUND" : "INBOUND",
+            overload,
+            overloadVarianceKg,
+            mineTicketNumber: mineTicketNumber ?? null,
+            entryAt: entryTime,
+            grossCapturedAt: now,
+            tareCapturedAt: entryTime,
+            exitAt: now,
+            capturedAt: now,
+            turnaroundSeconds: 900,
+          },
+        });
+        break;
+      } catch (createErr: any) {
+        if (createErr?.code === "P2002" && attempt < MAX_ATTEMPTS) {
+          console.warn(`Waybill collision on attempt ${attempt} (${finalWaybillNumber}), retrying sequence...`);
+          await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+          continue;
+        }
+        throw createErr;
+      }
+    }
 
     let orderFulfilled = false;
     if (booking.orderId) {
@@ -659,7 +771,7 @@ export async function POST(request: NextRequest) {
       entityType: "weighbridge_transaction",
       entityId: completed.id,
       afterData: {
-        waybillNumber,
+        waybillNumber: finalWaybillNumber,
         plate: booking.vehicle.plate,
         grossWeightKg: actualGross,
         tareWeightKg: actualTare,

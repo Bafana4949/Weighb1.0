@@ -84,8 +84,10 @@ export function transporterScope(user: UserContext): { booking: { transporterOrg
  * Handler wrapper that catches TenantScopeError thrown inside route queries
  * and returns a clean 403 response instead of an unhandled 500 error.
  */
-export function withScopeErrors<T extends (...args: any[]) => Promise<Response>>(handler: T): T {
-  return (async (...args: Parameters<T>): Promise<Response> => {
+export function withScopeErrors<T extends (...args: any[]) => Promise<any>>(
+  handler: T
+): (...args: Parameters<T>) => Promise<Response> {
+  return async (...args: Parameters<T>): Promise<Response> => {
     try {
       return await handler(...args);
     } catch (e) {
@@ -97,5 +99,5 @@ export function withScopeErrors<T extends (...args: any[]) => Promise<Response>>
       }
       throw e;
     }
-  }) as T;
+  };
 }
