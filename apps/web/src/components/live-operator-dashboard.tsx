@@ -130,6 +130,11 @@ export function LiveOperatorDashboard({
   const [signalLost, setSignalLost] = useState<boolean>(false);
   const [isAutoConnecting, setIsAutoConnecting] = useState<boolean>(false);
 
+  const isAutoConnectingRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
   const keepReadingRef = useRef<boolean>(true);
   const isReadingRef = useRef<boolean>(false);
   const activePortRef = useRef<any>(null);
@@ -231,7 +236,7 @@ export function LiveOperatorDashboard({
       } catch (fatalErr: any) {
         console.warn("Fatal serial connection ended:", fatalErr);
       } finally {
-        if (activePortRef.current === port) {
+        if (activePortRef.current === port && !abortController.signal.aborted) {
           isReadingRef.current = false;
           setIsSerialConnected(false);
           setManualWeightKg(0);
@@ -446,7 +451,7 @@ export function LiveOperatorDashboard({
 
   async function disconnectSerial() {
     try {
-      localStorage.removeItem("weighbridge_scale_auto_connect");
+      localStorage.setItem("weighbridge_scale_auto_connect", "false");
     } catch {}
 
     // 1. Abort loop first to cleanly signal active reader
@@ -529,9 +534,10 @@ export function LiveOperatorDashboard({
     }
   };
 
-  const tryAutoConnectScale = useCallback(async (isMountedCheck: () => boolean) => {
+  const tryAutoConnectScale = useCallback(async () => {
     if (typeof navigator === "undefined" || !("serial" in navigator)) return;
     if (activePortRef.current && isReadingRef.current) return;
+    if (isAutoConnectingRef.current) return;
 
     let autoConnectFlag: string | null = null;
     try {
@@ -540,11 +546,29 @@ export function LiveOperatorDashboard({
     // If the operator explicitly clicked Disconnect, respect their choice
     if (autoConnectFlag === "false") return;
 
-    try {
-      const ports = await (navigator as any).serial.getPorts();
-      if (!ports || ports.length === 0 || !isMountedCheck()) return;
-
+    isAutoConnectingRef.current = true;
+    if (isMountedRef.current) {
       setIsAutoConnecting(true);
+    }
+
+    try {
+      // On page load/refresh, Chromium may take a moment to enumerate granted ports.
+      // Poll getPorts() up to 4 times with 300ms intervals before giving up.
+      let ports: any[] = [];
+      for (let pAttempt = 0; pAttempt < 4; pAttempt++) {
+        if (!isMountedRef.current) return;
+        try {
+          ports = await (navigator as any).serial.getPorts();
+          if (ports && ports.length > 0) break;
+        } catch {}
+        if (pAttempt < 3) {
+          await new Promise((res) => setTimeout(res, 300));
+        }
+      }
+
+      if (!ports || ports.length === 0 || !isMountedRef.current) {
+        return;
+      }
 
       // Validate stored baud against allowed settings to prevent NaN corruption
       const rawBaud = parseInt(localStorage.getItem("weighbridge_scale_baud") || "9600", 10);
@@ -563,7 +587,7 @@ export function LiveOperatorDashboard({
       const savedProduct = localStorage.getItem("weighbridge_scale_product_id");
 
       let selectedPort = ports[0];
-      if (savedVendor) {
+      if (savedVendor && ports.length > 1) {
         const matched = ports.find((p: any) => {
           const info = p.getInfo?.() || {};
           return String(info.usbVendorId) === savedVendor && (!savedProduct || String(info.usbProductId) === savedProduct);
@@ -571,13 +595,13 @@ export function LiveOperatorDashboard({
         if (matched) selectedPort = matched;
       }
 
-      // Retry with backoff to give the OS/browser time to release the previous document's handle
+      // Retry with backoff to give the OS/browser time to release the previous document's serial handle
       let opened = false;
-      const MAX_RETRIES = 6;
-      const RETRY_DELAYS = [150, 300, 600, 1000, 1500, 2500];
+      const MAX_RETRIES = 8;
+      const RETRY_DELAYS = [200, 400, 700, 1000, 1500, 2000, 2500, 3000];
 
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        if (!isMountedCheck()) break;
+        if (!isMountedRef.current) break;
 
         if (selectedPort.readable) {
           opened = true;
@@ -594,31 +618,21 @@ export function LiveOperatorDashboard({
           opened = true;
           break;
         } catch (openErr: any) {
-          const msg = openErr?.message || String(openErr);
-          const isBusy =
-            msg.includes("in use") ||
-            msg.includes("already open") ||
-            openErr?.name === "NetworkError" ||
-            msg.includes("access");
-
-          if (isBusy && attempt < MAX_RETRIES - 1) {
+          console.warn(`[Scale Auto-Connect] Port open attempt ${attempt + 1}/${MAX_RETRIES} pending:`, openErr?.message || openErr);
+          if (attempt < MAX_RETRIES - 1) {
             await new Promise((res) => setTimeout(res, RETRY_DELAYS[attempt]));
-            continue;
-          }
-
-          if (attempt === MAX_RETRIES - 1 && isBusy) {
-            console.warn("Scale COM port still busy after retries:", msg);
           }
         }
       }
 
-      if (opened && selectedPort.readable && isMountedCheck()) {
+      if (opened && selectedPort.readable && isMountedRef.current) {
         setSerialBaud(savedBaud);
         setSerialFraming(savedFraming);
         setSerialPort(selectedPort);
         setIsSerialConnected(true);
+        setSignalLost(false);
         startReaderLoop(selectedPort, savedFraming);
-        toast({
+        toastRef.current({
           title: "Scale Auto-Connected",
           body: `Restored live indicator feed at ${savedBaud} baud (${dataBits}-${parity.toUpperCase()}-1).`,
         });
@@ -626,16 +640,17 @@ export function LiveOperatorDashboard({
     } catch (err) {
       console.warn("Auto-reconnect error:", err);
     } finally {
-      if (isMountedCheck()) {
+      isAutoConnectingRef.current = false;
+      if (isMountedRef.current) {
         setIsAutoConnecting(false);
       }
     }
-  }, [toast]);
+  }, []);
 
-  // Web Serial persistent connection, cable replug listeners, and unmount cleanup
+  // Web Serial persistent connection, cable replug listeners, and page lifecycle management
   useEffect(() => {
-    let isMounted = true;
-    tryAutoConnectScale(() => isMounted);
+    isMountedRef.current = true;
+    tryAutoConnectScale();
 
     const handleBeforeUnload = () => {
       if (loopAbortControllerRef.current) {
@@ -656,7 +671,7 @@ export function LiveOperatorDashboard({
 
     // Cable replug listeners: filter events to ensure printers don't disrupt scale feed
     const handleCableConnect = (event: any) => {
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
       if (activePortRef.current && isReadingRef.current) return;
 
       const connectedPort = event?.target;
@@ -665,17 +680,17 @@ export function LiveOperatorDashboard({
 
       if (connectedPort && savedVendor) {
         const info = connectedPort.getInfo?.() || {};
-        if (String(info.usbVendorId) !== savedVendor || (savedProduct && String(info.usbProductId) !== savedProduct)) {
+        if (info.usbVendorId && (String(info.usbVendorId) !== savedVendor || (savedProduct && String(info.usbProductId) !== savedProduct))) {
           return;
         }
       }
 
-      toast({ title: "Scale Cable Plugged In", body: "Re-establishing scale connection..." });
-      tryAutoConnectScale(() => isMounted);
+      toastRef.current({ title: "Scale Cable Plugged In", body: "Re-establishing scale connection..." });
+      tryAutoConnectScale();
     };
 
     const handleCableDisconnect = (event: any) => {
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
       // Only disconnect if a scale port was active AND matches the disconnected port
       if (!activePortRef.current || event?.target !== activePortRef.current) {
         return;
@@ -689,7 +704,7 @@ export function LiveOperatorDashboard({
       setSignalLost(true);
       activePortRef.current = null;
       setSerialPort(null);
-      toast({
+      toastRef.current({
         title: "Scale Cable Unplugged",
         body: "Scale USB cable was disconnected. Live scale weight halted.",
         severity: "HIGH",
@@ -702,9 +717,7 @@ export function LiveOperatorDashboard({
     }
 
     return () => {
-      isMounted = false;
-      keepReadingRef.current = false;
-      isReadingRef.current = false;
+      isMountedRef.current = false;
       if (typeof window !== "undefined") {
         window.removeEventListener("beforeunload", handleBeforeUnload);
         window.removeEventListener("pagehide", handleBeforeUnload);
@@ -713,26 +726,6 @@ export function LiveOperatorDashboard({
         (navigator as any).serial.removeEventListener("connect", handleCableConnect);
         (navigator as any).serial.removeEventListener("disconnect", handleCableDisconnect);
       }
-      if (loopAbortControllerRef.current) {
-        loopAbortControllerRef.current.abort();
-        loopAbortControllerRef.current = null;
-      }
-      (async () => {
-        try {
-          if (activeReaderRef.current) {
-            await activeReaderRef.current.cancel().catch(() => {});
-            activeReaderRef.current = null;
-          }
-          if (readerLoopPromiseRef.current) {
-            await readerLoopPromiseRef.current.catch(() => {});
-            readerLoopPromiseRef.current = null;
-          }
-          if (activePortRef.current) {
-            await activePortRef.current.close().catch(() => {});
-            activePortRef.current = null;
-          }
-        } catch {}
-      })();
     };
   }, [tryAutoConnectScale]);
 
