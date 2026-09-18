@@ -60,3 +60,36 @@ export function computeIntegrityHash(payloadOrInput: string | WeighmentHashInput
   const payloadStr = typeof payloadOrInput === "string" ? payloadOrInput : buildWeighmentPayload(payloadOrInput);
   return createHash("sha256").update(payloadStr).digest("hex");
 }
+
+export const GENESIS_HASH = "0".repeat(64);
+
+export interface ChainHeadResult {
+  integrityHash: string;
+  capturedAt: Date | null;
+}
+
+/**
+ * Returns the current linear chain head for a given site.
+ * Filters exclusively for finalized (COMPLETED or HELD) transactions with an integrity hash,
+ * ordered by completion time (capturedAt desc, then id desc).
+ * Ignores IN_PROGRESS weighments to prevent chain branching.
+ */
+export async function getChainHead(
+  client: any,
+  siteId: string
+): Promise<ChainHeadResult> {
+  const head = await client.weighbridgeTransaction.findFirst({
+    where: {
+      siteId,
+      status: { in: ["COMPLETED", "HELD"] },
+      integrityHash: { not: "" },
+    },
+    orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
+    select: { integrityHash: true, capturedAt: true },
+  });
+
+  return {
+    integrityHash: head?.integrityHash ?? GENESIS_HASH,
+    capturedAt: head?.capturedAt ?? null,
+  };
+}

@@ -7,6 +7,7 @@ import { reconcileSchema } from "@/lib/validation";
 import { runFraudChecks } from "@/lib/fraud";
 import { logger } from "@/lib/logger";
 import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
+import { getChainHead } from "@/lib/chain";
 
 export type ReconcileInput = z.infer<typeof reconcileSchema>;
 
@@ -94,16 +95,9 @@ export async function reconcileTransaction(input: ReconcileInput) {
     });
     if (duplicateInTransaction) return { duplicate: true as const, transaction: duplicateInTransaction };
 
-    const prior = await tx.weighbridgeTransaction.findFirst({
-      where: {
-        siteId: booking.siteId,
-        status: { in: [TransactionStatus.COMPLETED, TransactionStatus.HELD] },
-        integrityHash: { not: "" },
-      },
-      orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
-    });
-    if ((prior?.integrityHash ?? "0".repeat(64)) !== input.previous_hash) {
-      logger.error("transaction_hash_chain_mismatch", { site_id: booking.siteId, edge_transaction_id: input.edge_transaction_id, expected_previous_hash: prior?.integrityHash ?? "genesis" });
+    const prior = await getChainHead(tx, booking.siteId);
+    if (prior.integrityHash !== input.previous_hash) {
+      logger.error("transaction_hash_chain_mismatch", { site_id: booking.siteId, edge_transaction_id: input.edge_transaction_id, expected_previous_hash: prior.integrityHash });
       throw new Error("HASH_CHAIN_MISMATCH");
     }
 

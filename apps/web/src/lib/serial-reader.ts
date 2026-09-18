@@ -102,7 +102,7 @@ export async function runReaderLoop(
 
     const onAbort = () => {
       try {
-        reader.cancel();
+        reader.cancel().catch(() => {});
       } catch {}
     };
 

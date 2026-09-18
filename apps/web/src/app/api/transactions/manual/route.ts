@@ -7,7 +7,7 @@ import { audit } from "@/lib/audit";
 import { siteIdentifierWhere } from "@/lib/utils";
 import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
 
-import { buildWeighmentPayload, computeIntegrityHash } from "@/lib/chain";
+import { buildWeighmentPayload, computeIntegrityHash, getChainHead } from "@/lib/chain";
 import { assertWeightInvariant } from "@/lib/weights";
 
 async function generateNextWaybillNumber(siteCode: string, siteId: string, client: any = prisma): Promise<string> {
@@ -523,15 +523,8 @@ export async function POST(request: NextRequest) {
 
       // Predecessor lookup: ordered by completion time (capturedAt desc, then id desc)
       // Includes both COMPLETED and HELD records (overloaded trucks still chain)
-      const prior = await tx.weighbridgeTransaction.findFirst({
-        where: {
-          siteId: resolvedSite.id,
-          status: { in: ["COMPLETED", "HELD"] },
-          integrityHash: { not: "" },
-        },
-        orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
-      });
-      const previousHash = prior?.integrityHash ?? "0".repeat(64);
+      const prior = await getChainHead(tx, resolvedSite.id);
+      const previousHash = prior.integrityHash;
 
       // Unique sequential waybill number generated safely inside lock
       const finalWaybillNumber = await generateNextWaybillNumber(resolvedSite.code, resolvedSite.id, tx);
@@ -723,15 +716,8 @@ export async function POST(request: NextRequest) {
 
       // Predecessor lookup: ordered by completion time (capturedAt desc, then id desc)
       // Includes both COMPLETED and HELD records (overloaded trucks still chain)
-      const prior = await tx.weighbridgeTransaction.findFirst({
-        where: {
-          siteId: resolvedSite.id,
-          status: { in: ["COMPLETED", "HELD"] },
-          integrityHash: { not: "" },
-        },
-        orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
-      });
-      const previousHash = prior?.integrityHash ?? "0".repeat(64);
+      const prior = await getChainHead(tx, resolvedSite.id);
+      const previousHash = prior.integrityHash;
 
       // Unique sequential waybill number generated safely inside lock
       const finalWaybillNumber = await generateNextWaybillNumber(resolvedSite.code, resolvedSite.id, tx);
