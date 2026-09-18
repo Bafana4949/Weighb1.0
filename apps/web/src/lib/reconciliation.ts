@@ -7,7 +7,7 @@ import { reconcileSchema } from "@/lib/validation";
 import { runFraudChecks } from "@/lib/fraud";
 import { logger } from "@/lib/logger";
 import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
-import { getChainHead } from "@/lib/chain";
+import { GENESIS_HASH, getChainHead } from "@/lib/chain";
 
 export type ReconcileInput = z.infer<typeof reconcileSchema>;
 
@@ -97,8 +97,31 @@ export async function reconcileTransaction(input: ReconcileInput) {
 
     const prior = await getChainHead(tx, booking.siteId);
     if (prior.integrityHash !== input.previous_hash) {
-      logger.error("transaction_hash_chain_mismatch", { site_id: booking.siteId, edge_transaction_id: input.edge_transaction_id, expected_previous_hash: prior.integrityHash });
-      throw new Error("HASH_CHAIN_MISMATCH");
+      // Check if the previous_hash points to a valid historical predecessor at this site
+      // (occurs when offline edge queue catches up after interim weighments occurred at the site)
+      const historicalPredecessor = await tx.weighbridgeTransaction.findFirst({
+        where: {
+          siteId: booking.siteId,
+          integrityHash: input.previous_hash,
+          status: { in: [TransactionStatus.COMPLETED, TransactionStatus.HELD] },
+        },
+      });
+
+      if (!historicalPredecessor && input.previous_hash !== GENESIS_HASH) {
+        logger.error("transaction_hash_chain_mismatch", {
+          site_id: booking.siteId,
+          edge_transaction_id: input.edge_transaction_id,
+          expected_previous_hash: prior.integrityHash,
+          received_previous_hash: input.previous_hash,
+        });
+        throw new Error("HASH_CHAIN_MISMATCH");
+      }
+
+      logger.warn("transaction_hash_chain_offline_recovery", {
+        site_id: booking.siteId,
+        edge_transaction_id: input.edge_transaction_id,
+        historical_predecessor_id: historicalPredecessor?.id ?? "genesis",
+      });
     }
 
     const transaction = await tx.weighbridgeTransaction.create({ data: {
