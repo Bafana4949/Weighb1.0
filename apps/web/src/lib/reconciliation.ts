@@ -92,8 +92,8 @@ export async function reconcileTransaction(input: ReconcileInput) {
     if (duplicateInTransaction) return { duplicate: true as const, transaction: duplicateInTransaction };
 
     const prior = await tx.weighbridgeTransaction.findFirst({
-      where: { siteId: booking.siteId },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      where: { siteId: booking.siteId, status: "COMPLETED" },
+      orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
     });
     if ((prior?.integrityHash ?? "0".repeat(64)) !== input.previous_hash) {
       logger.error("transaction_hash_chain_mismatch", { site_id: booking.siteId, edge_transaction_id: input.edge_transaction_id, expected_previous_hash: prior?.integrityHash ?? "genesis" });

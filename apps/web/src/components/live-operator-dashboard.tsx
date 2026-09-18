@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { runReaderLoop, parseMettlerWeight } from "@/lib/serial-reader";
 
 const VALID_BAUDS = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200] as const;
 const VALID_FRAMINGS = ["8-none", "7-even", "7-odd"] as const;
@@ -133,6 +134,7 @@ export function LiveOperatorDashboard({
   const activePortRef = useRef<any>(null);
   const activeReaderRef = useRef<any>(null);
   const readerLoopPromiseRef = useRef<Promise<void> | null>(null);
+  const loopAbortControllerRef = useRef<AbortController | null>(null);
 
   const [capabilities, setCapabilities] = useState<{
     hasScale: boolean;
@@ -191,158 +193,50 @@ export function LiveOperatorDashboard({
     return () => clearInterval(interval);
   }, [isSerialConnected, lastPacketTime]);
 
-  function parseMettlerWeight(raw: string): { weightKg: number; isStable: boolean } | null {
-    if (!raw) return null;
-
-    // 1. Toledo Continuous Protocol: STX <SWA><SWB><SWC><6 chars indicated weight><6 chars tare><CR>
-    const stxIndex = raw.indexOf("\x02");
-    if (stxIndex !== -1) {
-      const sub = raw.slice(stxIndex);
-      if (sub.length >= 10) {
-        const swa = sub.charCodeAt(1) & 0x7f;
-        const swb = sub.charCodeAt(2) & 0x7f;
-
-        // Bit 5 is always 1 on valid Toledo status words (0x20)
-        const isStandardToledo = (swa & 0x20) !== 0 && (swb & 0x20) !== 0;
-        const isStable = isStandardToledo ? (swb & 0x08) === 0 : true;
-        const isKg = isStandardToledo ? (swb & 0x10) !== 0 : true;
-        const outOfRange = isStandardToledo ? (swb & 0x04) !== 0 : false;
-
-        // Reject rather than coerce (Claude/Metrology directive)
-        if (outOfRange || !isKg) return null;
-
-        const digits = sub.slice(4, 10).trim();
-        if (/^\d{1,6}$/.test(digits)) {
-          const val = parseInt(digits, 10);
-          if (Number.isSafeInteger(val) && val >= 0) {
-            return { weightKg: val, isStable };
-          }
-        }
-      }
-    }
-
-    const cleaned = raw.replace(/[^\x20-\x7E]/g, " ").trim();
-    if (!cleaned) return null;
-
-    // 2. MT-SICS command format (e.g. "S S 2200 kg" = stable, "S D 2200 kg" = dynamic)
-    const sicsMatch = cleaned.match(/(?:S\s+([SDI])|ST\s*,\s*GS\s*,?\s*[+-]?|Net|Gross|WT:?)\s*([+-]?\s*\d+(?:\.\d+)?)/i);
-    if (sicsMatch && sicsMatch[2]) {
-      const statusCode = sicsMatch[1]?.toUpperCase();
-      const isStable = statusCode === "S" || statusCode === undefined;
-      const candidate = parseFloat(sicsMatch[2].replace(/\s+/g, ""));
-      if (!isNaN(candidate) && candidate >= 0) {
-        return { weightKg: Math.round(candidate), isStable };
-      }
-    }
-
-    // 3. Explicit unit match (e.g. "2200 kg")
-    const kgMatch = cleaned.match(/(\d+(?:\.\d+)?)\s*(?:kg|t\b)/i);
-    if (kgMatch && kgMatch[1]) {
-      const candidate = parseFloat(kgMatch[1]);
-      if (!isNaN(candidate) && candidate >= 0) {
-        return { weightKg: Math.round(candidate), isStable: true };
-      }
-    }
-
-    return null;
-  }
-
   function startReaderLoop(port: any, framing: "8-none" | "7-even" | "7-odd") {
     if (activePortRef.current === port && isReadingRef.current) {
       return;
     }
 
-    const dataBits = framing.startsWith("7") ? 7 : 8;
-    const parity = framing.endsWith("even") ? "even" : framing.endsWith("odd") ? "odd" : "none";
-    let buffer = "";
+    if (loopAbortControllerRef.current) {
+      loopAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    loopAbortControllerRef.current = abortController;
+
     keepReadingRef.current = true;
     isReadingRef.current = true;
     activePortRef.current = port;
 
     readerLoopPromiseRef.current = (async () => {
       try {
-        while (port?.readable && keepReadingRef.current) {
-          let reader: any;
-          try {
-            reader = port.readable.getReader();
-            activeReaderRef.current = reader;
-            setSerialReader(reader);
-          } catch (getReaderErr: any) {
-            // Under Web Serial, getReader() throws synchronously if the stream is already locked.
-            // Breaking here immediately prevents 100% CPU infinite spinning that locks up the main thread.
-            console.warn("Failed to acquire serial stream reader, terminating loop:", getReaderErr);
-            break;
-          }
-
-          try {
-            for (;;) {
-              if (!keepReadingRef.current) break;
-              const { value, done } = await reader.read();
-              if (done) break;
-              if (value && value.length > 0) {
-                const mask = dataBits === 7 || parity !== "none" ? 0x7f : 0xff;
-                let chunk = "";
-                for (let i = 0; i < value.length; i++) {
-                  chunk += String.fromCharCode(value[i] & mask);
-                }
-                buffer += chunk;
-                setIndicatorPacketCount((prev) => (prev + 1) % 100000);
-
-                if (buffer.includes("\r") || buffer.includes("\n") || buffer.length > 64) {
-                  const stxIndex = buffer.lastIndexOf("\x02");
-                  const crIndex = buffer.lastIndexOf("\r");
-                  if (stxIndex !== -1 && crIndex > stxIndex) {
-                    const frame = buffer.substring(stxIndex, crIndex + 1);
-                    setIndicatorRawText(frame.replace(/[^\x20-\x7E]/g, " ").trim());
-                    const parsed = parseMettlerWeight(frame);
-                    if (parsed !== null) {
-                      setManualWeightKg(parsed.weightKg);
-                      setIsIndicatorStable(parsed.isStable);
-                      setLastPacketTime(Date.now());
-                      setSignalLost(false);
-                    }
-                    buffer = buffer.substring(crIndex + 1);
-                  } else {
-                    const lines = buffer.split(/[\r\n]+/);
-                    buffer = lines.pop() ?? "";
-                    for (const line of lines) {
-                      const trimmed = line.trim();
-                      if (!trimmed) continue;
-                      setIndicatorRawText(trimmed);
-                      const parsed = parseMettlerWeight(trimmed);
-                      if (parsed !== null) {
-                        setManualWeightKg(parsed.weightKg);
-                        setIsIndicatorStable(parsed.isStable);
-                        setLastPacketTime(Date.now());
-                        setSignalLost(false);
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          } catch (streamErr: any) {
-            // Recoverable framing / parity error on serial line:
-            // Under the Web Serial spec, port.readable is replaced with a new stream.
-            // Outer loop acquires a fresh reader if keepReadingRef is still true.
-            console.warn("Serial stream framing/parity hiccup, recovering reader:", streamErr?.name || streamErr);
-          } finally {
-            try {
-              reader?.releaseLock();
-            } catch {}
-            activeReaderRef.current = null;
-            setSerialReader(null);
-          }
-        }
+        await runReaderLoop(port, {
+          framing,
+          signal: abortController.signal,
+          onFrame: (frame) => {
+            setIndicatorRawText(frame.replace(/[^\x20-\x7E]/g, " ").trim());
+            setIndicatorPacketCount((prev) => (prev + 1) % 100000);
+          },
+          onWeight: (parsed) => {
+            setManualWeightKg(parsed.weightKg);
+            setIsIndicatorStable(parsed.isStable);
+            setLastPacketTime(Date.now());
+            setSignalLost(false);
+          },
+          onRecoverableError: (err) => {
+            console.warn("Serial stream recoverable framing/parity hiccup:", err?.name || err);
+          },
+        });
       } catch (fatalErr: any) {
         console.warn("Fatal serial connection ended:", fatalErr);
       } finally {
-        isReadingRef.current = false;
-        setIsSerialConnected(false);
-        // Metrology safety requirement: zero-out weight and flag unstable upon cable drop
-        setManualWeightKg(0);
-        setIsIndicatorStable(false);
-        setSignalLost(true);
+        if (activePortRef.current === port) {
+          isReadingRef.current = false;
+          setIsSerialConnected(false);
+          setManualWeightKg(0);
+          setIsIndicatorStable(false);
+          setSignalLost(true);
+        }
       }
     })();
   }
@@ -554,7 +448,11 @@ export function LiveOperatorDashboard({
       localStorage.removeItem("weighbridge_scale_auto_connect");
     } catch {}
 
-    // 1. Set keepReadingRef.current = false first to stop reader loops
+    // 1. Abort loop first to cleanly signal active reader
+    if (loopAbortControllerRef.current) {
+      loopAbortControllerRef.current.abort();
+      loopAbortControllerRef.current = null;
+    }
     keepReadingRef.current = false;
     isReadingRef.current = false;
 
@@ -730,8 +628,8 @@ export function LiveOperatorDashboard({
 
     const handleCableDisconnect = (event: any) => {
       if (!isMounted) return;
-      // Only disconnect if the disconnected port matches our active scale port
-      if (event?.target && activePortRef.current && event.target !== activePortRef.current) {
+      // Only disconnect if a scale port was active AND matches the disconnected port
+      if (!activePortRef.current || event?.target !== activePortRef.current) {
         return;
       }
 

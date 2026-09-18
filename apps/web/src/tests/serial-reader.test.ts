@@ -1,65 +1,51 @@
 import { describe, expect, it, vi } from "vitest";
+import { runReaderLoop, parseMettlerWeight, SerialPortLike } from "@/lib/serial-reader";
 
-describe("Web Serial Reader Loop & Port Lifecycle", () => {
+describe("Web Serial runReaderLoop & Mettler Toledo Protocol Parser", () => {
   it("terminates immediately if getReader() throws (prevents main thread freeze)", async () => {
     let getReaderCalls = 0;
-    const fakePort = {
+    const fakePort: SerialPortLike = {
       readable: {
         getReader: () => {
           getReaderCalls++;
           throw new TypeError("Failed to execute 'getReader' on 'ReadableStream': ReadableStream is locked");
         },
-      },
+      } as any,
     };
 
-    let keepReading = true;
-    let loopTerminated = false;
+    let recoverableErrors: any[] = [];
+    await runReaderLoop(fakePort, {
+      onRecoverableError: (err) => recoverableErrors.push(err),
+    });
 
-    // Simulate our safe reader loop
-    const readerLoopPromise = (async () => {
-      while (fakePort.readable && keepReading) {
-        let reader: any;
-        try {
-          reader = fakePort.readable.getReader();
-        } catch (getReaderErr) {
-          // Break immediately to prevent infinite unawaited spinning
-          break;
-        }
-
-        try {
-          // read logic
-        } finally {
-          reader?.releaseLock();
-        }
-      }
-      loopTerminated = true;
-    })();
-
-    await readerLoopPromise;
-
-    expect(loopTerminated).toBe(true);
-    expect(getReaderCalls).toBe(1); // Exited on first failure, never spun infinitely
+    expect(getReaderCalls).toBe(1); // Exited immediately, never spun in a tight loop!
+    expect(recoverableErrors.length).toBe(1);
   });
 
   it("recovers from recoverable framing/parity error on the serial stream", async () => {
-    let streamCount = 0;
-    let packetsParsed: number[] = [];
+    let streamIndex = 0;
+    const weights: number[] = [];
 
-    const createFakeStream = () => {
-      streamCount++;
-      let callCount = 0;
+    // Simulate W3C Web Serial behavior: port.readable is replaced with a new stream upon line error
+    const createStream = (id: number) => {
+      let readCount = 0;
       return {
         getReader: () => ({
           read: async () => {
-            callCount++;
-            if (streamCount === 1 && callCount === 1) {
-              // Simulate framing error on first read
+            readCount++;
+            if (id === 0 && readCount === 1) {
               const err = new Error("Framing error detected on RS-232 line");
               err.name = "FramingError";
+              // Simulate port automatically switching to fresh stream
+              currentReadable = createStream(1);
               throw err;
             }
-            if (callCount === 1) {
-              return { value: new Uint8Array([83, 32, 83, 32, 50, 52, 48, 48, 13]), done: false }; // "S S 2400\r"
+            if (id === 1 && readCount === 1) {
+              // Valid Toledo continuous frame: STX <SWA><SWB><SWC> 34500  14500<CR>
+              // SWA: 0x20, SWB: 0x30 (kg, stable, in range), SWC: 0x20
+              const frame = "\x02\x20\x30\x20 34500 14500\r";
+              const encoder = new TextEncoder();
+              return { value: encoder.encode(frame), done: false };
             }
             return { value: undefined, done: true };
           },
@@ -68,96 +54,44 @@ describe("Web Serial Reader Loop & Port Lifecycle", () => {
       };
     };
 
-    let currentStream = createFakeStream();
-    const fakePort = {
+    let currentReadable: any = createStream(0);
+    const fakePort: SerialPortLike = {
       get readable() {
-        return currentStream;
+        return currentReadable;
       },
     };
 
-    let keepReading = true;
-    let loopFinished = false;
+    const abortController = new AbortController();
 
-    const readerLoop = (async () => {
-      while (fakePort.readable && keepReading) {
-        let reader: any;
-        try {
-          reader = fakePort.readable.getReader();
-        } catch {
-          break;
-        }
+    await runReaderLoop(fakePort, {
+      signal: abortController.signal,
+      onWeight: (w) => {
+        weights.push(w.weightKg);
+        abortController.abort(); // Stop after receiving recovered weight
+      },
+    });
 
-        try {
-          for (;;) {
-            if (!keepReading) break;
-            const { value, done } = await reader.read();
-            if (done) break;
-            if (value) {
-              const text = String.fromCharCode(...value);
-              const match = text.match(/\d+/);
-              if (match) packetsParsed.push(parseInt(match[0], 10));
-            }
-          }
-        } catch (streamErr: any) {
-          // Recoverable error: replace readable with a new stream
-          currentStream = createFakeStream();
-        } finally {
-          reader?.releaseLock();
-        }
-
-        if (packetsParsed.length > 0) break; // Finished after recovery
-      }
-      loopFinished = true;
-    })();
-
-    await readerLoop;
-
-    expect(loopFinished).toBe(true);
-    expect(streamCount).toBe(2); // Recovered onto second stream
-    expect(packetsParsed).toEqual([2400]);
+    expect(weights).toEqual([34500]);
   });
 
-  it("disconnect sequence follows exact spec order: stop flag -> cancel reader -> await loop -> close port", async () => {
-    const executionOrder: string[] = [];
+  it("parseMettlerWeight correctly parses Toledo and MT-SICS frames", () => {
+    // 1. Toledo Continuous
+    const toledoFrame = "\x02\x20\x30\x20 48200 14200\r";
+    const toledoParsed = parseMettlerWeight(toledoFrame);
+    expect(toledoParsed).not.toBeNull();
+    expect(toledoParsed?.weightKg).toBe(48200);
+    expect(toledoParsed?.isStable).toBe(true);
 
-    const fakeReader = {
-      cancel: vi.fn(async () => {
-        executionOrder.push("reader.cancel");
-      }),
-      read: vi.fn(async () => {
-        await new Promise((r) => setTimeout(r, 10));
-        return { value: undefined, done: true };
-      }),
-      releaseLock: vi.fn(),
-    };
+    // 2. MT-SICS Stable ("S S 34500 kg")
+    const sicsStable = parseMettlerWeight("S S 34500 kg\r\n");
+    expect(sicsStable).toEqual({ weightKg: 34500, isStable: true });
 
-    const fakePort = {
-      close: vi.fn(async () => {
-        executionOrder.push("port.close");
-      }),
-    };
+    // 3. MT-SICS Dynamic/In-Motion ("S D 22100 kg")
+    const sicsMotion = parseMettlerWeight("S D 22100 kg\r\n");
+    expect(sicsMotion).toEqual({ weightKg: 22100, isStable: false });
 
-    let keepReading = true;
-    const loopPromise = (async () => {
-      executionOrder.push("loop.start");
-      while (keepReading) {
-        await fakeReader.read();
-        break;
-      }
-      executionOrder.push("loop.ended");
-    })();
-
-    // Perform disconnect sequence
-    keepReading = false;
-    await fakeReader.cancel();
-    await loopPromise;
-    await fakePort.close();
-
-    expect(executionOrder).toEqual([
-      "loop.start",
-      "reader.cancel",
-      "loop.ended",
-      "port.close",
-    ]);
+    // 4. Corrupt / Empty
+    expect(parseMettlerWeight("")).toBeNull();
+    expect(parseMettlerWeight("ERROR")).toBeNull();
   });
 });
