@@ -129,7 +129,10 @@ export function LiveOperatorDashboard({
   const [signalLost, setSignalLost] = useState<boolean>(false);
 
   const keepReadingRef = useRef<boolean>(true);
+  const isReadingRef = useRef<boolean>(false);
   const activePortRef = useRef<any>(null);
+  const activeReaderRef = useRef<any>(null);
+  const readerLoopPromiseRef = useRef<Promise<void> | null>(null);
 
   const [capabilities, setCapabilities] = useState<{
     hasScale: boolean;
@@ -245,20 +248,33 @@ export function LiveOperatorDashboard({
   }
 
   function startReaderLoop(port: any, framing: "8-none" | "7-even" | "7-odd") {
+    if (activePortRef.current === port && isReadingRef.current) {
+      return;
+    }
+
     const dataBits = framing.startsWith("7") ? 7 : 8;
     const parity = framing.endsWith("even") ? "even" : framing.endsWith("odd") ? "odd" : "none";
     let buffer = "";
     keepReadingRef.current = true;
+    isReadingRef.current = true;
     activePortRef.current = port;
 
-    (async () => {
+    readerLoopPromiseRef.current = (async () => {
       try {
         while (port?.readable && keepReadingRef.current) {
           let reader: any;
           try {
             reader = port.readable.getReader();
+            activeReaderRef.current = reader;
             setSerialReader(reader);
+          } catch (getReaderErr: any) {
+            // Under Web Serial, getReader() throws synchronously if the stream is already locked.
+            // Breaking here immediately prevents 100% CPU infinite spinning that locks up the main thread.
+            console.warn("Failed to acquire serial stream reader, terminating loop:", getReaderErr);
+            break;
+          }
 
+          try {
             for (;;) {
               if (!keepReadingRef.current) break;
               const { value, done } = await reader.read();
@@ -308,18 +324,20 @@ export function LiveOperatorDashboard({
           } catch (streamErr: any) {
             // Recoverable framing / parity error on serial line:
             // Under the Web Serial spec, port.readable is replaced with a new stream.
-            // Outer loop acquires a fresh reader.
+            // Outer loop acquires a fresh reader if keepReadingRef is still true.
             console.warn("Serial stream framing/parity hiccup, recovering reader:", streamErr?.name || streamErr);
           } finally {
             try {
               reader?.releaseLock();
             } catch {}
+            activeReaderRef.current = null;
             setSerialReader(null);
           }
         }
       } catch (fatalErr: any) {
         console.warn("Fatal serial connection ended:", fatalErr);
       } finally {
+        isReadingRef.current = false;
         setIsSerialConnected(false);
         // Metrology safety requirement: zero-out weight and flag unstable upon cable drop
         setManualWeightKg(0);
@@ -536,19 +554,37 @@ export function LiveOperatorDashboard({
       localStorage.removeItem("weighbridge_scale_auto_connect");
     } catch {}
 
+    // 1. Set keepReadingRef.current = false first to stop reader loops
+    keepReadingRef.current = false;
+    isReadingRef.current = false;
+
     try {
-      if (serialReader) {
-        await serialReader.cancel();
+      // 2. Await reader.cancel()
+      const reader = activeReaderRef.current || serialReader;
+      if (reader) {
+        await reader.cancel().catch(() => {});
+        activeReaderRef.current = null;
         setSerialReader(null);
       }
-      if (serialPort) {
-        await serialPort.close();
-        setSerialPort(null);
+      // 3. Await loop's promise to finish cleanly
+      if (readerLoopPromiseRef.current) {
+        await readerLoopPromiseRef.current.catch(() => {});
+        readerLoopPromiseRef.current = null;
       }
+      // 4. Await port.close()
+      const portToClose = activePortRef.current || serialPort;
+      if (portToClose) {
+        await portToClose.close().catch(() => {});
+        activePortRef.current = null;
+      }
+      setSerialPort(null);
     } catch (e) {
       console.warn("Error disconnecting serial:", e);
     } finally {
       setIsSerialConnected(false);
+      setManualWeightKg(0);
+      setIsIndicatorStable(false);
+      setSignalLost(true);
       toast({ title: "Scale Indicator Disconnected" });
     }
   }
@@ -558,11 +594,14 @@ export function LiveOperatorDashboard({
   // Fetch Queue from server with conditional ETag (HTTP 304 saves LTE data)
   const fetchQueue = async () => {
     try {
-      const headers: Record<string, string> = { cache: "no-store" };
+      const headers: Record<string, string> = {};
       if (lastQueueEtagRef.current) {
         headers["If-None-Match"] = lastQueueEtagRef.current;
       }
-      const response = await fetch(`/api/bookings/queue?site=${siteCode}`, { headers });
+      const response = await fetch(`/api/bookings/queue?site=${siteCode}`, {
+        cache: "no-store",
+        headers,
+      });
       if (response.status === 304) return; // 304 Not Modified — queue unchanged
       if (!response.ok) return;
       const etag = response.headers.get("etag");
@@ -593,6 +632,8 @@ export function LiveOperatorDashboard({
 
   const tryAutoConnectScale = useCallback(async (isMountedCheck: () => boolean) => {
     if (typeof navigator === "undefined" || !("serial" in navigator)) return;
+    if (activePortRef.current && isReadingRef.current) return;
+
     let shouldAutoConnect = false;
     try {
       shouldAutoConnect = localStorage.getItem("weighbridge_scale_auto_connect") === "true";
@@ -667,26 +708,46 @@ export function LiveOperatorDashboard({
     let isMounted = true;
     tryAutoConnectScale(() => isMounted);
 
-    // Cable replug listeners
-    const handleCableConnect = () => {
-      if (isMounted) {
-        toast({ title: "Scale Cable Plugged In", body: "Re-establishing scale connection..." });
-        tryAutoConnectScale(() => isMounted);
+    // Cable replug listeners: filter events to ensure printers don't disrupt scale feed
+    const handleCableConnect = (event: any) => {
+      if (!isMounted) return;
+      if (activePortRef.current && isReadingRef.current) return;
+
+      const connectedPort = event?.target;
+      const savedVendor = localStorage.getItem("weighbridge_scale_vendor_id");
+      const savedProduct = localStorage.getItem("weighbridge_scale_product_id");
+
+      if (connectedPort && savedVendor) {
+        const info = connectedPort.getInfo?.() || {};
+        if (String(info.usbVendorId) !== savedVendor || (savedProduct && String(info.usbProductId) !== savedProduct)) {
+          return;
+        }
       }
+
+      toast({ title: "Scale Cable Plugged In", body: "Re-establishing scale connection..." });
+      tryAutoConnectScale(() => isMounted);
     };
 
-    const handleCableDisconnect = () => {
-      if (isMounted) {
-        setIsSerialConnected(false);
-        setManualWeightKg(0);
-        setIsIndicatorStable(false);
-        setSignalLost(true);
-        toast({
-          title: "Scale Cable Unplugged",
-          body: "Scale USB cable was disconnected. Live scale weight halted.",
-          severity: "HIGH",
-        });
+    const handleCableDisconnect = (event: any) => {
+      if (!isMounted) return;
+      // Only disconnect if the disconnected port matches our active scale port
+      if (event?.target && activePortRef.current && event.target !== activePortRef.current) {
+        return;
       }
+
+      keepReadingRef.current = false;
+      isReadingRef.current = false;
+      setIsSerialConnected(false);
+      setManualWeightKg(0);
+      setIsIndicatorStable(false);
+      setSignalLost(true);
+      activePortRef.current = null;
+      setSerialPort(null);
+      toast({
+        title: "Scale Cable Unplugged",
+        body: "Scale USB cable was disconnected. Live scale weight halted.",
+        severity: "HIGH",
+      });
     };
 
     if (typeof navigator !== "undefined" && "serial" in navigator) {
@@ -697,13 +758,27 @@ export function LiveOperatorDashboard({
     return () => {
       isMounted = false;
       keepReadingRef.current = false;
+      isReadingRef.current = false;
       if (typeof navigator !== "undefined" && "serial" in navigator) {
         (navigator as any).serial.removeEventListener("connect", handleCableConnect);
         (navigator as any).serial.removeEventListener("disconnect", handleCableDisconnect);
       }
-      try {
-        activePortRef.current?.close();
-      } catch {}
+      (async () => {
+        try {
+          if (activeReaderRef.current) {
+            await activeReaderRef.current.cancel().catch(() => {});
+            activeReaderRef.current = null;
+          }
+          if (readerLoopPromiseRef.current) {
+            await readerLoopPromiseRef.current.catch(() => {});
+            readerLoopPromiseRef.current = null;
+          }
+          if (activePortRef.current) {
+            await activePortRef.current.close().catch(() => {});
+            activePortRef.current = null;
+          }
+        } catch {}
+      })();
     };
   }, [tryAutoConnectScale]);
 
@@ -1052,7 +1127,7 @@ export function LiveOperatorDashboard({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <WeightGauge weight={manualWeightKg} stable={isSerialConnected ? isIndicatorStable && !signalLost : true} />
+          <WeightGauge weight={manualWeightKg} stable={isSerialConnected ? isIndicatorStable && !signalLost : false} />
 
           {/* Live Indicator Stream Diagnostic Telemetry */}
           {isSerialConnected && (
