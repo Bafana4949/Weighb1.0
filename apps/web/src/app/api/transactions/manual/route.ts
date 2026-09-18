@@ -478,6 +478,8 @@ export async function POST(request: NextRequest) {
       // Advisory xact lock strictly serializes completions per site
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${resolvedSite.id}))`;
 
+      const completionTime = new Date();
+
       const transaction = await tx.weighbridgeTransaction.findFirst({
         where: transactionId
           ? { id: transactionId }
@@ -516,12 +518,17 @@ export async function POST(request: NextRequest) {
       const overloadVarianceKg = overload ? actualGross - legalMaxGvw : 0;
 
       const entryTime = transaction.entryAt ?? transaction.createdAt;
-      const turnaroundSeconds = Math.max(60, Math.round((now.getTime() - new Date(entryTime).getTime()) / 1000));
+      const turnaroundSeconds = Math.max(60, Math.round((completionTime.getTime() - new Date(entryTime).getTime()) / 1000));
       const isDispatch = transaction.booking.order?.type ? transaction.booking.order.type === "DISPATCH" : true;
 
       // Predecessor lookup: ordered by completion time (capturedAt desc, then id desc)
+      // Includes both COMPLETED and HELD records (overloaded trucks still chain)
       const prior = await tx.weighbridgeTransaction.findFirst({
-        where: { siteId: resolvedSite.id, status: "COMPLETED" },
+        where: {
+          siteId: resolvedSite.id,
+          status: { in: ["COMPLETED", "HELD"] },
+          integrityHash: { not: "" },
+        },
         orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
       });
       const previousHash = prior?.integrityHash ?? "0".repeat(64);
@@ -539,7 +546,7 @@ export async function POST(request: NextRequest) {
         tareWeightKg: actualTare,
         netWeightKg,
         commodity: transaction.commodity,
-        capturedAt: now,
+        capturedAt: completionTime,
         waybillNumber: finalWaybillNumber,
         previousHash,
       });
@@ -552,10 +559,10 @@ export async function POST(request: NextRequest) {
           grossWeightKg: actualGross,
           tareWeightKg: actualTare,
           netWeightKg,
-          grossCapturedAt: transaction.grossCapturedAt ?? now,
-          tareCapturedAt: transaction.tareCapturedAt ?? now,
-          exitAt: now,
-          capturedAt: now,
+          grossCapturedAt: transaction.grossCapturedAt ?? completionTime,
+          tareCapturedAt: transaction.tareCapturedAt ?? completionTime,
+          exitAt: completionTime,
+          capturedAt: completionTime,
           turnaroundSeconds,
           waybillNumber: finalWaybillNumber,
           integrityHash,
@@ -573,7 +580,7 @@ export async function POST(request: NextRequest) {
 
       let orderFulfilled = false;
       if (transaction.booking.orderId) {
-        const synced = await syncOrderFulfillmentStatus(transaction.booking.orderId);
+        const synced = await syncOrderFulfillmentStatus(transaction.booking.orderId, tx);
         orderFulfilled = synced?.status === "FULFILLED";
       }
 
@@ -712,9 +719,16 @@ export async function POST(request: NextRequest) {
       // Advisory xact lock strictly serializes completions per site
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${resolvedSite.id}))`;
 
+      const completionTime = new Date();
+
       // Predecessor lookup: ordered by completion time (capturedAt desc, then id desc)
+      // Includes both COMPLETED and HELD records (overloaded trucks still chain)
       const prior = await tx.weighbridgeTransaction.findFirst({
-        where: { siteId: resolvedSite.id, status: "COMPLETED" },
+        where: {
+          siteId: resolvedSite.id,
+          status: { in: ["COMPLETED", "HELD"] },
+          integrityHash: { not: "" },
+        },
         orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
       });
       const previousHash = prior?.integrityHash ?? "0".repeat(64);
@@ -732,7 +746,7 @@ export async function POST(request: NextRequest) {
         tareWeightKg: actualTare,
         netWeightKg,
         commodity: booking.commodity,
-        capturedAt: now,
+        capturedAt: completionTime,
         waybillNumber: finalWaybillNumber,
         previousHash,
       });
@@ -761,10 +775,10 @@ export async function POST(request: NextRequest) {
           overloadVarianceKg,
           mineTicketNumber: mineTicketNumber ?? null,
           entryAt: entryTime,
-          grossCapturedAt: now,
+          grossCapturedAt: completionTime,
           tareCapturedAt: entryTime,
-          exitAt: now,
-          capturedAt: now,
+          exitAt: completionTime,
+          capturedAt: completionTime,
           turnaroundSeconds: 900,
         },
         include: { vehicle: true },
@@ -772,7 +786,7 @@ export async function POST(request: NextRequest) {
 
       let orderFulfilled = false;
       if (booking.orderId) {
-        const synced = await syncOrderFulfillmentStatus(booking.orderId);
+        const synced = await syncOrderFulfillmentStatus(booking.orderId, tx);
         orderFulfilled = synced?.status === "FULFILLED";
       }
 

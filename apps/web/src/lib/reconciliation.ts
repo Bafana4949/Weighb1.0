@@ -85,6 +85,9 @@ export async function reconcileTransaction(input: ReconcileInput) {
   const held = overload || underweightEmpty || overweightLoaded;
 
   const result = await runSerializable(() => prisma.$transaction(async (tx) => {
+    // Acquire site-level advisory xact lock to serialize with manual route
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking.siteId}))`;
+
     // Recheck idempotency and the site chain inside the same serializable transaction.
     const duplicateInTransaction = await tx.weighbridgeTransaction.findFirst({
       where: { OR: [{ edgeTransactionId: input.edge_transaction_id }, { integrityHash: input.integrity_hash }] },
@@ -92,7 +95,11 @@ export async function reconcileTransaction(input: ReconcileInput) {
     if (duplicateInTransaction) return { duplicate: true as const, transaction: duplicateInTransaction };
 
     const prior = await tx.weighbridgeTransaction.findFirst({
-      where: { siteId: booking.siteId, status: "COMPLETED" },
+      where: {
+        siteId: booking.siteId,
+        status: { in: [TransactionStatus.COMPLETED, TransactionStatus.HELD] },
+        integrityHash: { not: "" },
+      },
       orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
     });
     if ((prior?.integrityHash ?? "0".repeat(64)) !== input.previous_hash) {

@@ -94,4 +94,43 @@ describe("Web Serial runReaderLoop & Mettler Toledo Protocol Parser", () => {
     expect(parseMettlerWeight("")).toBeNull();
     expect(parseMettlerWeight("ERROR")).toBeNull();
   });
+
+  it("cancels pending reader.read() immediately when abort signal fires (prevents disconnect hang)", async () => {
+    let cancelCalled = false;
+    let pendingReadResolve: ((val: any) => void) | null = null;
+
+    const fakePort: SerialPortLike = {
+      readable: {
+        getReader: () => ({
+          read: () => {
+            return new Promise((resolve) => {
+              pendingReadResolve = resolve;
+            });
+          },
+          cancel: vi.fn(async () => {
+            cancelCalled = true;
+            if (pendingReadResolve) {
+              pendingReadResolve({ value: undefined, done: true });
+            }
+          }),
+          releaseLock: vi.fn(),
+        }),
+      } as any,
+    };
+
+    const abortController = new AbortController();
+    const loopPromise = runReaderLoop(fakePort, {
+      signal: abortController.signal,
+    });
+
+    // Abort while read() is blocking indefinitely
+    setTimeout(() => {
+      abortController.abort();
+    }, 20);
+
+    // If cancel() isn't called on abort, this promise would hang forever
+    await loopPromise;
+
+    expect(cancelCalled).toBe(true);
+  });
 });

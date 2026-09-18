@@ -100,6 +100,20 @@ export async function runReaderLoop(
       break;
     }
 
+    const onAbort = () => {
+      try {
+        reader.cancel();
+      } catch {}
+    };
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        onAbort();
+      } else {
+        options.signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+
     try {
       for (;;) {
         if (options.signal?.aborted) break;
@@ -145,6 +159,11 @@ export async function runReaderLoop(
       options.onRecoverableError?.(streamErr);
       if (options.signal?.aborted) break;
     } finally {
+      if (options.signal) {
+        try {
+          options.signal.removeEventListener("abort", onAbort);
+        } catch {}
+      }
       try {
         reader?.releaseLock();
       } catch {}
