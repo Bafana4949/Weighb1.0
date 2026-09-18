@@ -128,6 +128,7 @@ export function LiveOperatorDashboard({
   const [isIndicatorStable, setIsIndicatorStable] = useState<boolean>(true);
   const [lastPacketTime, setLastPacketTime] = useState<number>(0);
   const [signalLost, setSignalLost] = useState<boolean>(false);
+  const [isAutoConnecting, setIsAutoConnecting] = useState<boolean>(false);
 
   const keepReadingRef = useRef<boolean>(true);
   const isReadingRef = useRef<boolean>(false);
@@ -532,15 +533,18 @@ export function LiveOperatorDashboard({
     if (typeof navigator === "undefined" || !("serial" in navigator)) return;
     if (activePortRef.current && isReadingRef.current) return;
 
-    let shouldAutoConnect = false;
+    let autoConnectFlag: string | null = null;
     try {
-      shouldAutoConnect = localStorage.getItem("weighbridge_scale_auto_connect") === "true";
+      autoConnectFlag = localStorage.getItem("weighbridge_scale_auto_connect");
     } catch {}
-    if (!shouldAutoConnect) return;
+    // If the operator explicitly clicked Disconnect, respect their choice
+    if (autoConnectFlag === "false") return;
 
     try {
       const ports = await (navigator as any).serial.getPorts();
       if (!ports || ports.length === 0 || !isMountedCheck()) return;
+
+      setIsAutoConnecting(true);
 
       // Validate stored baud against allowed settings to prevent NaN corruption
       const rawBaud = parseInt(localStorage.getItem("weighbridge_scale_baud") || "9600", 10);
@@ -554,7 +558,7 @@ export function LiveOperatorDashboard({
       const dataBits = savedFraming.startsWith("7") ? 7 : 8;
       const parity = savedFraming.endsWith("even") ? "even" : savedFraming.endsWith("odd") ? "odd" : "none";
 
-      // Match port against stored USB Vendor / Product ID to avoid opening receipt printers
+      // Match port against stored USB Vendor / Product ID
       const savedVendor = localStorage.getItem("weighbridge_scale_vendor_id");
       const savedProduct = localStorage.getItem("weighbridge_scale_product_id");
 
@@ -567,37 +571,64 @@ export function LiveOperatorDashboard({
         if (matched) selectedPort = matched;
       }
 
-      try {
-        await selectedPort.open({
-          baudRate: savedBaud,
-          dataBits,
-          stopBits: 1,
-          parity,
-        });
-      } catch (openErr: any) {
-        const msg = openErr?.message || String(openErr);
-        if (msg.includes("in use") || msg.includes("already open") || openErr?.name === "NetworkError") {
-          toast({
-            title: "Scale Port Unavailable",
-            body: "The scale COM port is in use by another program or browser tab.",
-            severity: "WARNING",
+      // Retry with backoff to give the OS/browser time to release the previous document's handle
+      let opened = false;
+      const MAX_RETRIES = 6;
+      const RETRY_DELAYS = [150, 300, 600, 1000, 1500, 2500];
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        if (!isMountedCheck()) break;
+
+        if (selectedPort.readable) {
+          opened = true;
+          break;
+        }
+
+        try {
+          await selectedPort.open({
+            baudRate: savedBaud,
+            dataBits,
+            stopBits: 1,
+            parity,
           });
+          opened = true;
+          break;
+        } catch (openErr: any) {
+          const msg = openErr?.message || String(openErr);
+          const isBusy =
+            msg.includes("in use") ||
+            msg.includes("already open") ||
+            openErr?.name === "NetworkError" ||
+            msg.includes("access");
+
+          if (isBusy && attempt < MAX_RETRIES - 1) {
+            await new Promise((res) => setTimeout(res, RETRY_DELAYS[attempt]));
+            continue;
+          }
+
+          if (attempt === MAX_RETRIES - 1 && isBusy) {
+            console.warn("Scale COM port still busy after retries:", msg);
+          }
         }
       }
 
-      if (selectedPort.readable && isMountedCheck()) {
+      if (opened && selectedPort.readable && isMountedCheck()) {
         setSerialBaud(savedBaud);
         setSerialFraming(savedFraming);
         setSerialPort(selectedPort);
         setIsSerialConnected(true);
         startReaderLoop(selectedPort, savedFraming);
         toast({
-          title: "Scale Reconnected",
+          title: "Scale Auto-Connected",
           body: `Restored live indicator feed at ${savedBaud} baud (${dataBits}-${parity.toUpperCase()}-1).`,
         });
       }
     } catch (err) {
       console.warn("Auto-reconnect error:", err);
+    } finally {
+      if (isMountedCheck()) {
+        setIsAutoConnecting(false);
+      }
     }
   }, [toast]);
 
@@ -605,6 +636,23 @@ export function LiveOperatorDashboard({
   useEffect(() => {
     let isMounted = true;
     tryAutoConnectScale(() => isMounted);
+
+    const handleBeforeUnload = () => {
+      if (loopAbortControllerRef.current) {
+        loopAbortControllerRef.current.abort();
+      }
+      if (activeReaderRef.current) {
+        try { activeReaderRef.current.cancel().catch(() => {}); } catch {}
+      }
+      if (activePortRef.current) {
+        try { activePortRef.current.close().catch(() => {}); } catch {}
+      }
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("beforeunload", handleBeforeUnload);
+      window.addEventListener("pagehide", handleBeforeUnload);
+    }
 
     // Cable replug listeners: filter events to ensure printers don't disrupt scale feed
     const handleCableConnect = (event: any) => {
@@ -657,9 +705,17 @@ export function LiveOperatorDashboard({
       isMounted = false;
       keepReadingRef.current = false;
       isReadingRef.current = false;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("beforeunload", handleBeforeUnload);
+        window.removeEventListener("pagehide", handleBeforeUnload);
+      }
       if (typeof navigator !== "undefined" && "serial" in navigator) {
         (navigator as any).serial.removeEventListener("connect", handleCableConnect);
         (navigator as any).serial.removeEventListener("disconnect", handleCableDisconnect);
+      }
+      if (loopAbortControllerRef.current) {
+        loopAbortControllerRef.current.abort();
+        loopAbortControllerRef.current = null;
       }
       (async () => {
         try {
@@ -965,6 +1021,11 @@ export function LiveOperatorDashboard({
               <Badge variant="default" className="font-mono text-xs flex items-center gap-1.5 animate-pulse bg-emerald-500/20 text-emerald-500 border-emerald-500/40">
                 <span className="h-2 w-2 rounded-full bg-emerald-500" />
                 INDICATOR ONLINE: {manualWeightKg} KG
+              </Badge>
+            ) : isAutoConnecting ? (
+              <Badge variant="warning" className="font-mono text-xs flex items-center gap-1.5 bg-amber-500/10 text-amber-500 border-amber-500/30">
+                <RefreshCw size={11} className="animate-spin" />
+                RECONNECTING SCALE…
               </Badge>
             ) : (
               <Badge variant="warning" className="font-mono text-xs">
