@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UserRole } from "@prisma/client";
 import { mineScope, roleAllowed } from "@/lib/access";
 import { bookingSchema, transporterSchema } from "@/lib/validation";
-import { aggregateTransactionRows } from "@/lib/reports";
+import { aggregateTransactionRows, averageLoadKg } from "@/lib/reports";
+import { formatKg } from "@/lib/weights";
 
 const { findFirst } = vi.hoisted(() => ({ findFirst: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({ prisma: { weighbridgeTransaction: { findFirst } } }));
@@ -58,6 +59,15 @@ describe("API domain rules", () => {
 
   it("aggregates report values accurately", () => {
     expect(aggregateTransactionRows([{ netWeightKg: 32000, turnaroundSeconds: 1200 }, { netWeightKg: 34000, turnaroundSeconds: 1800 }])).toEqual({ transactionCount: 2, totalTonnageKg: 66000, averageLoadKg: 33000, averageTurnaroundSeconds: 1500 });
+  });
+
+  it("rounds the reports average load so formatKg cannot crash the page", () => {
+    // formatKg is deliberately strict: an unrounded average crashed /admin/reports in production.
+    expect(() => formatKg(100001 / 3)).toThrow(/Non-integer kg/);
+    expect(averageLoadKg(100001, 3)).toBe(33334);
+    expect(() => formatKg(averageLoadKg(100001, 3))).not.toThrow();
+    expect(averageLoadKg(0, 0)).toBe(0);
+    expect(averageLoadKg(66000, 2)).toBe(33000);
   });
 
   it("computes a deterministic edge integrity hash", () => {

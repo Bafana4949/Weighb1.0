@@ -2,6 +2,16 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { siteIdentifierWhere } from "@/lib/utils";
 
+/**
+ * Average load per truck, in whole kilograms.
+ * formatKg (lib/weights.ts) throws on non-integer kg, so this derived display value
+ * must be rounded here. Stored weights stay exact — only the average is rounded.
+ */
+export function averageLoadKg(totalTonnageKg: number, trucks: number): number {
+  if (!trucks || !Number.isFinite(totalTonnageKg)) return 0;
+  return Math.round(totalTonnageKg / trucks);
+}
+
 export function dateRange(searchParams: URLSearchParams): { gte: Date; lte: Date } {
   const toStr = searchParams.get("to");
   let lte: Date;

@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { userScope } from "@/lib/access";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
-import { dateRange, incidentsReport, tonnageByGroup, turnaroundBySite } from "@/lib/reports";
+import { averageLoadKg, dateRange, incidentsReport, tonnageByGroup, turnaroundBySite } from "@/lib/reports";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
     turnaroundBySite(range, scope),
     incidentsReport(range, scope),
   ]);
-  const avgLoadKg = trucks ? totalTonnageKg / trucks : 0;
+  const avgLoadKg = averageLoadKg(totalTonnageKg, trucks);
 
   return <AppShell role={s.user.role} userName={s.user.name ?? "Admin"} orgName={s.user.organisationName} isSuperAdmin={isPlatformSuperAdmin(s.user)}>
     <div className="space-y-4">
