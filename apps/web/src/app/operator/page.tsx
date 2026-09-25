@@ -55,8 +55,8 @@ export default async function OperatorPage({ searchParams }: { searchParams: Pro
   const today = startOfDay(new Date());
   const [queue, aggregate, turnaround, allSites] = await Promise.all([
     prisma.booking.findMany({ where: { siteId: site.id, ...activeWindowWhere() }, include: { vehicle: true, driver: true, trailer: true, transporterOrganisation: true }, orderBy: { windowStart: "asc" }, take: 100 }),
-    prisma.weighbridgeTransaction.aggregate({ where: { siteId: site.id, capturedAt: { gte: today } }, _count: true, _sum: { netWeightKg: true } }),
-    prisma.weighbridgeTransaction.aggregate({ where: { siteId: site.id, capturedAt: { gte: today }, turnaroundSeconds: { not: null } }, _avg: { turnaroundSeconds: true } }),
+    prisma.weighbridgeTransaction.aggregate({ where: { siteId: site.id, status: "COMPLETED", capturedAt: { gte: today } }, _count: true, _sum: { netWeightKg: true } }),
+    prisma.weighbridgeTransaction.aggregate({ where: { siteId: site.id, status: "COMPLETED", capturedAt: { gte: today }, turnaroundSeconds: { not: null } }, _avg: { turnaroundSeconds: true } }),
     prisma.site.findMany({ where: { isActive: true, ...scope }, orderBy: { code: "asc" }, select: { code: true, name: true } }),
   ]);
   return <AppShell role={session.user.role} userName={session.user.name ?? session.user.email ?? "Operator"} isSuperAdmin={isPlatformSuperAdmin(session.user)}><LiveOperatorDashboard siteCode={site.code} availableSites={allSites} initialQueue={queue.map((item)=>({id:item.id,reference:item.reference,plate:item.vehicle.plate,driver:`${item.driver.firstName} ${item.driver.lastName}`,trailer:item.trailer?.trailerId??"",transporter:item.transporterOrganisation.name,commodity:item.commodity,status:item.status}))} stats={{trucks:aggregate._count,tonnage:aggregate._sum.netWeightKg??0,turnaround:turnaround._avg.turnaroundSeconds??0,pending:queue.length}}/></AppShell>;

@@ -2,7 +2,16 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { runReaderLoop, parseMettlerWeight } from "@/lib/serial-reader";
+import {
+  runReaderLoop,
+  releaseSerialPort,
+  findScalePort,
+  toOpenOptions,
+  openPortWithRetry,
+  DEFAULT_OPEN_RETRY_DELAYS,
+  SCALE_PROFILES,
+  type SerialFraming,
+} from "@/lib/serial-reader";
 
 const VALID_BAUDS = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200] as const;
 const VALID_FRAMINGS = ["8-none", "7-even", "7-odd"] as const;
@@ -129,6 +138,7 @@ export function LiveOperatorDashboard({
   const [lastPacketTime, setLastPacketTime] = useState<number>(0);
   const [signalLost, setSignalLost] = useState<boolean>(false);
   const [isAutoConnecting, setIsAutoConnecting] = useState<boolean>(false);
+  const [scaleScanStatus, setScaleScanStatus] = useState<string | null>(null);
 
   const isAutoConnectingRef = useRef<boolean>(false);
   const isMountedRef = useRef<boolean>(true);
@@ -141,6 +151,21 @@ export function LiveOperatorDashboard({
   const activeReaderRef = useRef<any>(null);
   const readerLoopPromiseRef = useRef<Promise<void> | null>(null);
   const loopAbortControllerRef = useRef<AbortController | null>(null);
+  const manuallyDisconnectedRef = useRef<boolean>(false);
+  // True while the operator is in Manual Connect / Auto-Detect, so the watchdog never grabs the port mid-probe
+  const userConnectInProgressRef = useRef<boolean>(false);
+  // Bumped whenever an in-flight auto-connect must stand down (Disconnect clicked, manual connect started, page hidden)
+  const connectGenerationRef = useRef<number>(0);
+  const autoConnectPromiseRef = useRef<Promise<void> | null>(null);
+  const teardownPromiseRef = useRef<Promise<void> | null>(null);
+  // Last valid weight frame; lets the watchdog spot a port that is open but silent (wrong port, indicator off)
+  const lastWeightAtRef = useRef<number>(0);
+  // Earliest time the watchdog may run another full port scan after one found nothing
+  const nextScanAtRef = useRef<number>(0);
+  const serialBaudRef = useRef<number>(serialBaud);
+  serialBaudRef.current = serialBaud;
+  const serialFramingRef = useRef<"8-none" | "7-even" | "7-odd">(serialFraming);
+  serialFramingRef.current = serialFraming;
 
   const [capabilities, setCapabilities] = useState<{
     hasScale: boolean;
@@ -213,12 +238,17 @@ export function LiveOperatorDashboard({
     keepReadingRef.current = true;
     isReadingRef.current = true;
     activePortRef.current = port;
+    lastWeightAtRef.current = Date.now();
 
     readerLoopPromiseRef.current = (async () => {
       try {
         await runReaderLoop(port, {
           framing,
           signal: abortController.signal,
+          onReader: (reader) => {
+            activeReaderRef.current = reader;
+            setSerialReader(reader);
+          },
           onFrame: (frame) => {
             setIndicatorRawText(frame.replace(/[^\x20-\x7E]/g, " ").trim());
             setIndicatorPacketCount((prev) => (prev + 1) % 100000);
@@ -226,7 +256,8 @@ export function LiveOperatorDashboard({
           onWeight: (parsed) => {
             setManualWeightKg(parsed.weightKg);
             setIsIndicatorStable(parsed.isStable);
-            setLastPacketTime(Date.now());
+            lastWeightAtRef.current = Date.now();
+            setLastPacketTime(lastWeightAtRef.current);
             setSignalLost(false);
           },
           onRecoverableError: (err) => {
@@ -242,9 +273,97 @@ export function LiveOperatorDashboard({
           setManualWeightKg(0);
           setIsIndicatorStable(false);
           setSignalLost(true);
+          activePortRef.current = null;
         }
       }
     })();
+  }
+
+  // Ref-only teardown (safe from effect cleanups): abort loop -> wait for reader lock release -> close port.
+  const teardownSerialConnection = useCallback((fallbackPort?: any, fallbackReader?: any): Promise<void> => {
+    loopAbortControllerRef.current?.abort();
+    loopAbortControllerRef.current = null;
+    keepReadingRef.current = false;
+    isReadingRef.current = false;
+
+    const port = activePortRef.current || fallbackPort;
+    const reader = activeReaderRef.current || fallbackReader;
+    const loop = readerLoopPromiseRef.current;
+    activePortRef.current = null;
+    activeReaderRef.current = null;
+    readerLoopPromiseRef.current = null;
+
+    const done = (async () => {
+      if (reader) await reader.cancel().catch(() => {});
+      if (loop) await loop.catch(() => {});
+      await releaseSerialPort(port, reader);
+    })();
+    const tracked = done.finally(() => {
+      if (teardownPromiseRef.current === tracked) teardownPromiseRef.current = null;
+    });
+    teardownPromiseRef.current = tracked;
+    return tracked;
+  }, []);
+
+  // Port is already open with a verified profile: remember it for the next refresh and start streaming
+  function adoptScalePort(
+    port: any,
+    profile: { baud: number; framing: SerialFraming },
+    title: string,
+    body: string,
+    severity?: "WARNING" | "HIGH"
+  ) {
+    setSerialBaud(profile.baud);
+    setSerialFraming(profile.framing);
+    setSerialPort(port);
+    setIsSerialConnected(true);
+    setSignalLost(false);
+    setScaleScanStatus(null);
+
+    try {
+      const info = port.getInfo?.() || {};
+      localStorage.setItem("weighbridge_scale_auto_connect", "true");
+      localStorage.setItem("weighbridge_scale_baud", String(profile.baud));
+      localStorage.setItem("weighbridge_scale_framing", profile.framing);
+      if (info.usbVendorId) localStorage.setItem("weighbridge_scale_vendor_id", String(info.usbVendorId));
+      if (info.usbProductId) localStorage.setItem("weighbridge_scale_product_id", String(info.usbProductId));
+    } catch {}
+
+    startReaderLoop(port, profile.framing);
+    toastRef.current({ title, body, ...(severity ? { severity } : {}) });
+  }
+
+  // Called before the port picker opens: keeps the watchdog and any in-flight auto-connect away from the port
+  function claimPortForUser() {
+    manuallyDisconnectedRef.current = false;
+    userConnectInProgressRef.current = true;
+    connectGenerationRef.current++;
+  }
+
+  // Called after the picker resolves: wait for the stood-down auto-connect, then release whatever is still open
+  async function beginUserConnect() {
+    await autoConnectPromiseRef.current?.catch(() => {});
+    await teardownSerialConnection(serialPort);
+  }
+
+  // Ports this site may already use (policy or an earlier picker grant), remembered scale first.
+  // Buttons only fall back to the browser's port picker when this is empty.
+  async function getGrantedPorts(): Promise<any[]> {
+    let ports: any[] = [];
+    try {
+      ports = await (navigator as any).serial.getPorts();
+    } catch {}
+    let savedVendor: string | null = null;
+    let savedProduct: string | null = null;
+    try {
+      savedVendor = localStorage.getItem("weighbridge_scale_vendor_id");
+      savedProduct = localStorage.getItem("weighbridge_scale_product_id");
+    } catch {}
+    const isSaved = (p: any) => {
+      const info = p.getInfo?.() || {};
+      return !!savedVendor && String(info.usbVendorId) === savedVendor && (!savedProduct || String(info.usbProductId) === savedProduct);
+    };
+    return [...ports.filter(isSaved), ...ports.filter((p) => !isSaved(p))];
   }
 
   async function connectSerial() {
@@ -256,8 +375,11 @@ export function LiveOperatorDashboard({
       });
       return;
     }
+    claimPortForUser();
     try {
-      const port = await (navigator as any).serial.requestPort();
+      // getPorts() is instant, so the click's user activation is still valid if the picker is needed
+      const port = (await getGrantedPorts())[0] ?? (await (navigator as any).serial.requestPort());
+      await beginUserConnect();
       const dataBits = serialFraming.startsWith("7") ? 7 : 8;
       const parity = serialFraming.endsWith("even") ? "even" : serialFraming.endsWith("odd") ? "odd" : "none";
       await port.open({
@@ -296,6 +418,8 @@ export function LiveOperatorDashboard({
           severity: "HIGH",
         });
       }
+    } finally {
+      userConnectInProgressRef.current = false;
     }
   }
 
@@ -311,131 +435,39 @@ export function LiveOperatorDashboard({
       return;
     }
 
+    claimPortForUser();
     try {
-      const port = await (navigator as any).serial.requestPort();
+      // Scan every already-authorised port; only show the browser picker when none is authorised yet
+      const granted = await getGrantedPorts();
+      const candidates = granted.length > 0 ? granted : [await (navigator as any).serial.requestPort()];
+      const port = candidates[0];
+      await beginUserConnect();
       setIsDetecting(true);
       toast({
         title: "Sniffing Connected Scale...",
         body: "Probing serial baud rates and framing protocols...",
       });
 
-      const PROFILES = [
-        { baud: 9600, framing: "7-even" as const, label: "9600 baud, 7-E-1 (Mettler Toledo Continuous)" },
-        { baud: 9600, framing: "8-none" as const, label: "9600 baud, 8-N-1 (Standard Continuous)" },
-        { baud: 4800, framing: "7-even" as const, label: "4800 baud, 7-E-1 (Mettler Toledo 4800)" },
-        { baud: 4800, framing: "8-none" as const, label: "4800 baud, 8-N-1 (Avery / Rice Lake)" },
-        { baud: 2400, framing: "7-even" as const, label: "2400 baud, 7-E-1" },
-        { baud: 19200, framing: "8-none" as const, label: "19200 baud, 8-N-1" },
-      ];
+      const found = await findScalePort(candidates, {
+        preferredProfile: { baud: serialBaud, framing: serialFraming },
+      });
+      setIsDetecting(false);
 
-      let detectedProfile: (typeof PROFILES)[0] | null = null;
-      let activeReader: any = null;
-
-      for (const profile of PROFILES) {
-        const dataBits = profile.framing.startsWith("7") ? 7 : 8;
-        const parity = profile.framing.endsWith("even") ? "even" : profile.framing.endsWith("odd") ? "odd" : "none";
-
-        try {
-          await port.open({
-            baudRate: profile.baud,
-            dataBits,
-            stopBits: 1,
-            parity,
-          });
-
-          const reader = port.readable.getReader();
-          let candidateBuffer = "";
-          const startTime = Date.now();
-
-          // Probe for up to 600ms
-          while (Date.now() - startTime < 600) {
-            const readPromise = reader.read();
-            const timeoutPromise = new Promise<{ value: undefined; done: boolean }>((res) =>
-              setTimeout(() => res({ value: undefined, done: false }), 200)
-            );
-
-            const { value, done } = await Promise.race([readPromise, timeoutPromise]);
-            if (done) break;
-            if (value && value.length > 0) {
-              const mask = dataBits === 7 || parity !== "none" ? 0x7f : 0xff;
-              for (let i = 0; i < value.length; i++) {
-                candidateBuffer += String.fromCharCode(value[i] & mask);
-              }
-
-              const parsed = parseMettlerWeight(candidateBuffer);
-              if (parsed !== null && parsed.weightKg >= 0) {
-                detectedProfile = profile;
-                activeReader = reader;
-                break;
-              }
-            }
-          }
-
-          if (detectedProfile) {
-            break;
-          } else {
-            await reader.cancel();
-            await port.close();
-          }
-        } catch {
-          try {
-            await port.close();
-          } catch {}
-        }
-      }
-
-      if (detectedProfile && activeReader) {
-        setSerialBaud(detectedProfile.baud);
-        setSerialFraming(detectedProfile.framing);
-        setSerialPort(port);
-        setIsSerialConnected(true);
-        setIsDetecting(false);
-
-        try {
-          const info = port.getInfo?.() || {};
-          localStorage.setItem("weighbridge_scale_auto_connect", "true");
-          localStorage.setItem("weighbridge_scale_baud", String(detectedProfile.baud));
-          localStorage.setItem("weighbridge_scale_framing", detectedProfile.framing);
-          if (info.usbVendorId) localStorage.setItem("weighbridge_scale_vendor_id", String(info.usbVendorId));
-          if (info.usbProductId) localStorage.setItem("weighbridge_scale_product_id", String(info.usbProductId));
-        } catch {}
-
-        toast({
-          title: "Scale Auto-Detected!",
-          body: `Locked onto ${detectedProfile.label}. Streaming live weight.`,
-        });
-
-        try {
-          await activeReader.cancel();
-          activeReader.releaseLock();
-        } catch {}
-
-        startReaderLoop(port, detectedProfile.framing);
+      if (found) {
+        const label = SCALE_PROFILES.find(
+          (p) => p.baud === found.profile.baud && p.framing === found.profile.framing
+        )?.label ?? `${found.profile.baud} baud, ${found.profile.framing}`;
+        adoptScalePort(found.port, found.profile, "Scale Auto-Detected!", `Locked onto ${label}. Streaming live weight.`);
       } else {
-        setIsDetecting(false);
-        // Fallback open with standard 9600 8-none
-        await port.open({ baudRate: 9600, dataBits: 8, stopBits: 1, parity: "none" });
-        setSerialBaud(9600);
-        setSerialFraming("8-none");
-        setSerialPort(port);
-        setIsSerialConnected(true);
-
-        try {
-          const info = port.getInfo?.() || {};
-          localStorage.setItem("weighbridge_scale_auto_connect", "true");
-          localStorage.setItem("weighbridge_scale_baud", "9600");
-          localStorage.setItem("weighbridge_scale_framing", "8-none");
-          if (info.usbVendorId) localStorage.setItem("weighbridge_scale_vendor_id", String(info.usbVendorId));
-          if (info.usbProductId) localStorage.setItem("weighbridge_scale_product_id", String(info.usbProductId));
-        } catch {}
-
-        startReaderLoop(port, "8-none");
-
-        toast({
-          title: "Scale Connected",
-          body: "Using default 9600 8-N-1. If weights do not stream, ensure the scale is in continuous output mode.",
-          severity: "WARNING",
-        });
+        // Nothing streamed on any profile: connect with the selected settings so the operator can see raw data
+        await port.open(toOpenOptions({ baud: serialBaud, framing: serialFraming }));
+        adoptScalePort(
+          port,
+          { baud: serialBaud, framing: serialFraming },
+          "Scale Connected",
+          `No weight frames detected. Using ${serialBaud} ${serialFraming}; ensure the indicator is in continuous output mode.`,
+          "WARNING"
+        );
       }
     } catch (err: any) {
       setIsDetecting(false);
@@ -446,45 +478,24 @@ export function LiveOperatorDashboard({
           severity: "HIGH",
         });
       }
+    } finally {
+      userConnectInProgressRef.current = false;
     }
   }
 
   async function disconnectSerial() {
-    try {
-      localStorage.setItem("weighbridge_scale_auto_connect", "false");
-    } catch {}
-
-    // 1. Abort loop first to cleanly signal active reader
-    if (loopAbortControllerRef.current) {
-      loopAbortControllerRef.current.abort();
-      loopAbortControllerRef.current = null;
-    }
-    keepReadingRef.current = false;
-    isReadingRef.current = false;
+    // Session-only: blocks the watchdog until the operator reconnects; a page refresh clears it
+    manuallyDisconnectedRef.current = true;
+    connectGenerationRef.current++;
 
     try {
-      // 2. Await reader.cancel()
-      const reader = activeReaderRef.current || serialReader;
-      if (reader) {
-        await reader.cancel().catch(() => {});
-        activeReaderRef.current = null;
-        setSerialReader(null);
-      }
-      // 3. Await loop's promise to finish cleanly
-      if (readerLoopPromiseRef.current) {
-        await readerLoopPromiseRef.current.catch(() => {});
-        readerLoopPromiseRef.current = null;
-      }
-      // 4. Await port.close()
-      const portToClose = activePortRef.current || serialPort;
-      if (portToClose) {
-        await portToClose.close().catch(() => {});
-        activePortRef.current = null;
-      }
-      setSerialPort(null);
+      await autoConnectPromiseRef.current?.catch(() => {});
+      await teardownSerialConnection(serialPort, serialReader);
     } catch (e) {
       console.warn("Error disconnecting serial:", e);
     } finally {
+      setSerialReader(null);
+      setSerialPort(null);
       setIsSerialConnected(false);
       setManualWeightKg(0);
       setIsIndicatorStable(false);
@@ -534,149 +545,204 @@ export function LiveOperatorDashboard({
     }
   };
 
-  const tryAutoConnectScale = useCallback(async () => {
-    if (typeof navigator === "undefined" || !("serial" in navigator)) return;
-    if (activePortRef.current && isReadingRef.current) return;
-    if (isAutoConnectingRef.current) return;
+  const tryAutoConnectScale = useCallback((forcedPort?: any): Promise<void> => {
+    if (typeof navigator === "undefined" || !("serial" in navigator)) return Promise.resolve();
+    if (activePortRef.current && isReadingRef.current) return Promise.resolve();
+    if (autoConnectPromiseRef.current) return autoConnectPromiseRef.current;
+    if (userConnectInProgressRef.current) return Promise.resolve();
 
-    let autoConnectFlag: string | null = null;
+    // Respect manual disconnect only in the current tab session; a refresh resets the ref and reconnects
+    if (manuallyDisconnectedRef.current) return Promise.resolve();
+
+    // Clear any stale blocking flag written by older builds
     try {
-      autoConnectFlag = localStorage.getItem("weighbridge_scale_auto_connect");
+      if (localStorage.getItem("weighbridge_scale_auto_connect") === "false") {
+        localStorage.removeItem("weighbridge_scale_auto_connect");
+      }
     } catch {}
-    // If the operator explicitly clicked Disconnect, respect their choice
-    if (autoConnectFlag === "false") return;
+
+    const generation = connectGenerationRef.current;
+    const isStale = () =>
+      manuallyDisconnectedRef.current || generation !== connectGenerationRef.current;
 
     isAutoConnectingRef.current = true;
-    if (isMountedRef.current) {
-      setIsAutoConnecting(true);
-    }
+    setIsAutoConnecting(true);
 
-    try {
+    const run = (async () => {
+      // Let an in-progress teardown finish closing the port before reopening it
+      await teardownPromiseRef.current?.catch(() => {});
       // On page load/refresh, Chromium may take a moment to enumerate granted ports.
-      // Poll getPorts() up to 4 times with 300ms intervals before giving up.
-      let ports: any[] = [];
-      for (let pAttempt = 0; pAttempt < 4; pAttempt++) {
-        if (!isMountedRef.current) return;
+      let ports: any[] = forcedPort ? [forcedPort] : [];
+      for (let pAttempt = 0; pAttempt < 10 && !forcedPort; pAttempt++) {
+        if (isStale()) return;
         try {
           ports = await (navigator as any).serial.getPorts();
           if (ports && ports.length > 0) break;
         } catch {}
-        if (pAttempt < 3) {
-          await new Promise((res) => setTimeout(res, 300));
-        }
+        if (pAttempt < 9) await new Promise((res) => setTimeout(res, 250));
       }
-
-      if (!ports || ports.length === 0 || !isMountedRef.current) {
+      if (!ports || ports.length === 0) {
+        // Browser has not been given access to any COM port (no SerialAllowAllPortsForUrls policy, never authorised)
+        setScaleScanStatus("no-ports");
+        nextScanAtRef.current = Date.now() + 5000;
         return;
       }
 
-      // Validate stored baud against allowed settings to prevent NaN corruption
-      const rawBaud = parseInt(localStorage.getItem("weighbridge_scale_baud") || "9600", 10);
-      const savedBaud = (VALID_BAUDS as readonly number[]).includes(rawBaud) ? rawBaud : 9600;
+      // Validate stored protocol against allowed settings to prevent NaN corruption
+      let storedBaud: string | null = null;
+      let storedFraming: string | null = null;
+      let savedVendor: string | null = null;
+      let savedProduct: string | null = null;
+      try {
+        storedBaud = localStorage.getItem("weighbridge_scale_baud");
+        storedFraming = localStorage.getItem("weighbridge_scale_framing");
+        savedVendor = localStorage.getItem("weighbridge_scale_vendor_id");
+        savedProduct = localStorage.getItem("weighbridge_scale_product_id");
+      } catch {}
 
-      const rawFraming = localStorage.getItem("weighbridge_scale_framing") as any;
-      const savedFraming: "8-none" | "7-even" | "7-odd" = (VALID_FRAMINGS as readonly string[]).includes(rawFraming)
+      const rawBaud = parseInt(storedBaud || String(serialBaudRef.current), 10);
+      const savedBaud = (VALID_BAUDS as readonly number[]).includes(rawBaud) ? rawBaud : 9600;
+      const rawFraming = (storedFraming || serialFramingRef.current) as any;
+      const savedFraming: SerialFraming = (VALID_FRAMINGS as readonly string[]).includes(rawFraming)
         ? rawFraming
         : "8-none";
 
-      const dataBits = savedFraming.startsWith("7") ? 7 : 8;
-      const parity = savedFraming.endsWith("even") ? "even" : savedFraming.endsWith("odd") ? "odd" : "none";
-
-      // Match port against stored USB Vendor / Product ID
-      const savedVendor = localStorage.getItem("weighbridge_scale_vendor_id");
-      const savedProduct = localStorage.getItem("weighbridge_scale_product_id");
-
-      let selectedPort = ports[0];
-      if (savedVendor && ports.length > 1) {
-        const matched = ports.find((p: any) => {
+      // Scan every port x every profile; only a port that actually streams weight frames is connected.
+      // The last known scale (USB vendor/product id) goes first with open retries for the F5 COM-release window.
+      const found = await findScalePort(ports, {
+        preferredProfile: { baud: savedBaud, framing: savedFraming },
+        isPreferredPort: (p: any) => {
+          if (!savedVendor) return ports.length === 1;
           const info = p.getInfo?.() || {};
           return String(info.usbVendorId) === savedVendor && (!savedProduct || String(info.usbProductId) === savedProduct);
-        });
-        if (matched) selectedPort = matched;
-      }
+        },
+        shouldAbort: isStale,
+      });
 
-      // Retry with backoff to give the OS/browser time to release the previous document's serial handle
-      let opened = false;
-      const MAX_RETRIES = 8;
-      const RETRY_DELAYS = [200, 400, 700, 1000, 1500, 2000, 2500, 3000];
+      if (!found) {
+        // Fallback: If sniffing frames in the short probe window didn't capture a frame,
+        // open the port directly using the saved/selected baud & framing so the continuous reader loop runs.
+        const candidatePort = ports.find((p) => {
+          if (!savedVendor) return true;
+          const info = p.getInfo?.() || {};
+          return String(info.usbVendorId) === savedVendor && (!savedProduct || String(info.usbProductId) === savedProduct);
+        }) || ports[0];
 
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        if (!isMountedRef.current) break;
-
-        if (selectedPort.readable) {
-          opened = true;
-          break;
-        }
-
-        try {
-          await selectedPort.open({
-            baudRate: savedBaud,
-            dataBits,
-            stopBits: 1,
-            parity,
-          });
-          opened = true;
-          break;
-        } catch (openErr: any) {
-          console.warn(`[Scale Auto-Connect] Port open attempt ${attempt + 1}/${MAX_RETRIES} pending:`, openErr?.message || openErr);
-          if (attempt < MAX_RETRIES - 1) {
-            await new Promise((res) => setTimeout(res, RETRY_DELAYS[attempt]));
+        if (candidatePort && !isStale() && isMountedRef.current) {
+          const opened = await openPortWithRetry(
+            candidatePort,
+            toOpenOptions({ baud: savedBaud, framing: savedFraming }),
+            { delays: DEFAULT_OPEN_RETRY_DELAYS, shouldAbort: isStale }
+          );
+          if (opened && !isStale() && isMountedRef.current) {
+            adoptScalePort(
+              candidatePort,
+              { baud: savedBaud, framing: savedFraming },
+              "Scale Indicator Connected",
+              `Connected at ${savedBaud} baud (${savedFraming}). Live weight active.`
+            );
+            return;
           }
         }
+
+        if (!isStale()) setScaleScanStatus("not-found");
+        nextScanAtRef.current = Date.now() + 8000;
+        return;
+      }
+      if (isStale() || !isMountedRef.current) {
+        await releaseSerialPort(found.port);
+        return;
       }
 
-      if (opened && selectedPort.readable && isMountedRef.current) {
-        setSerialBaud(savedBaud);
-        setSerialFraming(savedFraming);
-        setSerialPort(selectedPort);
-        setIsSerialConnected(true);
-        setSignalLost(false);
-        startReaderLoop(selectedPort, savedFraming);
-        toastRef.current({
-          title: "Scale Auto-Connected",
-          body: `Restored live indicator feed at ${savedBaud} baud (${dataBits}-${parity.toUpperCase()}-1).`,
-        });
-      }
-    } catch (err) {
-      console.warn("Auto-reconnect error:", err);
-    } finally {
-      isAutoConnectingRef.current = false;
-      if (isMountedRef.current) {
-        setIsAutoConnecting(false);
-      }
-    }
+      adoptScalePort(
+        found.port,
+        found.profile,
+        "Scale Indicator Connected",
+        `Live scale stream locked at ${found.profile.baud} baud (${found.profile.framing}).`
+      );
+    })()
+      .catch((err) => console.warn("Auto-reconnect error:", err))
+      .finally(() => {
+        isAutoConnectingRef.current = false;
+        autoConnectPromiseRef.current = null;
+        if (isMountedRef.current) setIsAutoConnecting(false);
+      });
+
+    autoConnectPromiseRef.current = run;
+    return run;
   }, []);
 
-  // Web Serial persistent connection, cable replug listeners, and page lifecycle management
+  // Web Serial persistent connection, cable replug listeners, background watchdog, and page lifecycle management
   useEffect(() => {
     isMountedRef.current = true;
-    tryAutoConnectScale();
+    void tryAutoConnectScale();
 
-    const handleBeforeUnload = () => {
-      if (loopAbortControllerRef.current) {
-        loopAbortControllerRef.current.abort();
+    // Synchronous best-effort release so Windows frees the COM handle before the reloaded page asks for it
+    const handlePageExit = () => {
+      connectGenerationRef.current++;
+      loopAbortControllerRef.current?.abort();
+      loopAbortControllerRef.current = null;
+      keepReadingRef.current = false;
+      isReadingRef.current = false;
+
+      const reader = activeReaderRef.current;
+      const port = activePortRef.current;
+      activeReaderRef.current = null;
+      activePortRef.current = null;
+      readerLoopPromiseRef.current = null;
+
+      if (reader) {
+        try { reader.cancel().catch(() => {}); } catch {}
+        // close() rejects while the stream is locked, so drop the lock synchronously first
+        try { reader.releaseLock(); } catch {}
       }
-      if (activeReaderRef.current) {
-        try { activeReaderRef.current.cancel().catch(() => {}); } catch {}
+      if (port) {
+        // If the lock could not be dropped yet, close again once cancel() settles
+        try { port.close().catch(() => releaseSerialPort(port, reader)); } catch {}
       }
-      if (activePortRef.current) {
-        try { activePortRef.current.close().catch(() => {}); } catch {}
-      }
+      setIsSerialConnected(false);
     };
 
     if (typeof window !== "undefined") {
-      window.addEventListener("beforeunload", handleBeforeUnload);
-      window.addEventListener("pagehide", handleBeforeUnload);
+      window.addEventListener("beforeunload", handlePageExit);
+      window.addEventListener("pagehide", handlePageExit);
     }
+
+    // Continuous Watchdog: every 2.0s, reconnect if the feed is down or the open port has gone silent.
+    // Reads refs only — state captured by this closure would be frozen at first render.
+    const DEAD_FEED_MS = 8000;
+    const watchdogTimer = setInterval(() => {
+      if (!isMountedRef.current || manuallyDisconnectedRef.current) return;
+      if (userConnectInProgressRef.current || isAutoConnectingRef.current) return;
+      if (typeof navigator === "undefined" || !("serial" in navigator)) return;
+
+      const isReading = isReadingRef.current && !!activePortRef.current;
+      const isDeadFeed = isReading && Date.now() - lastWeightAtRef.current > DEAD_FEED_MS;
+
+      if (isDeadFeed) {
+        // Open but no weight (wrong port, wrong baud, indicator switched off): drop it and rescan all ports
+        void teardownSerialConnection().then(() => {
+          setIsSerialConnected(false);
+          nextScanAtRef.current = 0;
+          return tryAutoConnectScale();
+        });
+      } else if (!isReading && Date.now() >= nextScanAtRef.current) {
+        void tryAutoConnectScale();
+      }
+    }, 2000);
 
     // Cable replug listeners: filter events to ensure printers don't disrupt scale feed
     const handleCableConnect = (event: any) => {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || manuallyDisconnectedRef.current) return;
       if (activePortRef.current && isReadingRef.current) return;
 
       const connectedPort = event?.target;
-      const savedVendor = localStorage.getItem("weighbridge_scale_vendor_id");
-      const savedProduct = localStorage.getItem("weighbridge_scale_product_id");
+      let savedVendor: string | null = null;
+      let savedProduct: string | null = null;
+      try {
+        savedVendor = localStorage.getItem("weighbridge_scale_vendor_id");
+        savedProduct = localStorage.getItem("weighbridge_scale_product_id");
+      } catch {}
 
       if (connectedPort && savedVendor) {
         const info = connectedPort.getInfo?.() || {};
@@ -686,7 +752,7 @@ export function LiveOperatorDashboard({
       }
 
       toastRef.current({ title: "Scale Cable Plugged In", body: "Re-establishing scale connection..." });
-      tryAutoConnectScale();
+      void tryAutoConnectScale(connectedPort);
     };
 
     const handleCableDisconnect = (event: any) => {
@@ -696,6 +762,8 @@ export function LiveOperatorDashboard({
         return;
       }
 
+      loopAbortControllerRef.current?.abort();
+      loopAbortControllerRef.current = null;
       keepReadingRef.current = false;
       isReadingRef.current = false;
       setIsSerialConnected(false);
@@ -718,16 +786,19 @@ export function LiveOperatorDashboard({
 
     return () => {
       isMountedRef.current = false;
+      clearInterval(watchdogTimer);
       if (typeof window !== "undefined") {
-        window.removeEventListener("beforeunload", handleBeforeUnload);
-        window.removeEventListener("pagehide", handleBeforeUnload);
+        window.removeEventListener("beforeunload", handlePageExit);
+        window.removeEventListener("pagehide", handlePageExit);
       }
       if (typeof navigator !== "undefined" && "serial" in navigator) {
         (navigator as any).serial.removeEventListener("connect", handleCableConnect);
         (navigator as any).serial.removeEventListener("disconnect", handleCableDisconnect);
       }
+      // Client-side navigation away from /operator: release the port so the next mount can reopen it
+      void teardownSerialConnection();
     };
-  }, [tryAutoConnectScale]);
+  }, [tryAutoConnectScale, teardownSerialConnection]);
 
   // Queue and In-Progress polling (12s interval with document.hidden guard)
   useEffect(() => {
@@ -1004,8 +1075,12 @@ export function LiveOperatorDashboard({
               Scale Indicator Weight Entry
             </CardTitle>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {isSerialConnected 
+              {isSerialConnected
                 ? "Streaming live weight directly from connected Mettler Toledo indicator"
+                : scaleScanStatus === "no-ports"
+                ? "This browser has no access to any COM port. Click Auto-Detect Scale or Manual Connect once to grant port access."
+                : scaleScanStatus === "not-found"
+                ? "Scanning serial ports for a streaming scale indicator. Check that the indicator cable is connected and set to continuous output."
                 : "Connect your physical USB/Serial indicator or type weight manually"}
             </p>
           </div>
