@@ -74,6 +74,42 @@ describe("Web Serial runReaderLoop & Mettler Toledo Protocol Parser", () => {
     expect(weights).toEqual([34500]);
   });
 
+  it("reassembles fragmented UART chunks under 7-E-1 framing and captures live weight", async () => {
+    const weights: number[] = [];
+    // Toledo continuous frame split across 3 fragmented USB packets:
+    // Packet 1: "\x02!0 " (header: STX + SWA + SWB + SWC)
+    // Packet 2: "034200" (weight: 34,200 kg)
+    // Packet 3: "000000\r" (tare + CR)
+    const chunks = [
+      new TextEncoder().encode("\x02!0 "),
+      new TextEncoder().encode("034200"),
+      new TextEncoder().encode("000000\r"),
+    ];
+
+    let chunkIdx = 0;
+    const fakePort: SerialPortLike = {
+      readable: {
+        getReader: () => ({
+          read: async () => {
+            if (chunkIdx < chunks.length) {
+              return { value: chunks[chunkIdx++], done: false };
+            }
+            return { value: undefined, done: true };
+          },
+          releaseLock: vi.fn(),
+          cancel: vi.fn(),
+        }),
+      } as any,
+    };
+
+    await runReaderLoop(fakePort, {
+      framing: "7-even",
+      onWeight: (w) => weights.push(w.weightKg),
+    });
+
+    expect(weights).toEqual([34200]);
+  });
+
   it("parseMettlerWeight correctly parses Toledo and MT-SICS frames", () => {
     // 1. Toledo Continuous
     const toledoFrame = "\x02\x20\x30\x20 48200 14200\r";
@@ -90,7 +126,16 @@ describe("Web Serial runReaderLoop & Mettler Toledo Protocol Parser", () => {
     const sicsMotion = parseMettlerWeight("S D 22100 kg\r\n");
     expect(sicsMotion).toEqual({ weightKg: 22100, isStable: false });
 
-    // 4. Corrupt / Empty
+    // 4. Multi-column indicator telemetry (e.g. captured packet "10     00    00" and active gross weight)
+    expect(parseMettlerWeight("10     00    00")).toEqual({ weightKg: 10, isStable: true });
+    expect(parseMettlerWeight("10  34500  00")).toEqual({ weightKg: 34500, isStable: true });
+    expect(parseMettlerWeight("02  24500  00\r")).toEqual({ weightKg: 24500, isStable: true });
+
+    // 5. Bare numbers and empty weighbridge zero
+    expect(parseMettlerWeight("0")).toEqual({ weightKg: 0, isStable: true });
+    expect(parseMettlerWeight("  28400  ")).toEqual({ weightKg: 28400, isStable: true });
+
+    // 6. Corrupt / Empty
     expect(parseMettlerWeight("")).toBeNull();
     expect(parseMettlerWeight("ERROR")).toBeNull();
   });

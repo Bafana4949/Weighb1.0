@@ -146,12 +146,16 @@ export async function runReaderLoop(
       }
     }
 
+    let isStreamDone = false;
     try {
       for (;;) {
         if (options.signal?.aborted) break;
 
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) {
+          isStreamDone = true;
+          break;
+        }
 
         if (value && value.length > 0) {
           let chunk = "";
@@ -186,6 +190,7 @@ export async function runReaderLoop(
           }
         }
       }
+      if (isStreamDone) break;
     } catch (streamErr: any) {
       // Under Web Serial spec, framing/parity error rejects read(), but replaces port.readable
       options.onRecoverableError?.(streamErr);
