@@ -1,6 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api";
+import { formatSADate } from "@/lib/datetime";
 
 function csv(value: unknown) {
   const text = String(value ?? "");
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
   const headers = ["Roster Date", "Truck", "Trailer 1", "Trailer 2", "Driver"];
   const rows = roster.map(r => {
     return [
-      r.rosterDate.toISOString().slice(0, 10),
+      formatSADate(r.rosterDate),
       r.vehicle.plate,
       r.trailer1?.trailerId ?? "",
       r.trailer2?.trailerId ?? "",
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
   return new Response(lines.join("\r\n"), {
     headers: {
       "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="roster-export-${new Date().toISOString().slice(0, 10)}.csv"`
+      "content-disposition": `attachment; filename="roster-export-${formatSADate(new Date())}.csv"`
     }
   });
 }

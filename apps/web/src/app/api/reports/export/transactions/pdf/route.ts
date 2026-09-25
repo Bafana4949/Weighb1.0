@@ -10,8 +10,10 @@ import { TransactionDocument } from "./transaction-document";
 
 export const runtime = "nodejs";
 
-function isoDate(d: Date | null) { return d ? d.toISOString().slice(0, 10) : "—"; }
-function isoTime(d: Date | null) { return d ? d.toISOString().slice(11, 19) : "—"; }
+import { formatSADate, formatSATime, formatSADateTime } from "@/lib/datetime";
+
+const isoDate = formatSADate;
+const isoTime = formatSATime;
 function formatTurnaroundTime(seconds: number | null): string {
   if (seconds === null) return "—";
   const hours = Math.floor(seconds / 3600);
@@ -128,7 +130,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
     totalTare,
     avgNet,
     avgTime: formatTurnaroundTime(Math.round(avgTimeSecs)),
-    generatedAt: new Date().toLocaleString("en-ZA"),
+    generatedAt: formatSADateTime(new Date()),
   });
 
   const buffer = await renderToBuffer(document as unknown as Parameters<typeof renderToBuffer>[0]);

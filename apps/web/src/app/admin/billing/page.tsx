@@ -8,15 +8,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
+import { formatSADate, parseSAEndOfDay, parseSAStartOfDay } from "@/lib/datetime";
 
-function isoDate(d: Date) { return d.toISOString().slice(0, 10); }
+function isoDate(d: Date) { return formatSADate(d); }
 
 export default async function Billing({ searchParams }: { searchParams: Promise<{ from?: string; to?: string }> }) {
   const s = await auth();
   if (!s?.user) redirect("/login");
   const params = await searchParams;
-  const to = params.to ? new Date(params.to) : new Date();
-  const from = params.from ? new Date(params.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const to = params.to ? parseSAEndOfDay(params.to) : new Date();
+  const from = params.from ? parseSAStartOfDay(params.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   const transactions = await prisma.weighbridgeTransaction.findMany({
     where: { status: "COMPLETED", capturedAt: { gte: from, lte: to }, ...userSiteScope(s.user) },

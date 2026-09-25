@@ -9,8 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatKg } from "@/lib/utils";
+import { formatSADate } from "@/lib/datetime";
 
-function isoDate(d: Date) { return d.toISOString().slice(0, 10); }
+function isoDate(d: Date) { return formatSADate(d); }
 function selectClass() { return "h-9 w-full rounded-sm border border-border bg-surface px-3 text-sm"; }
 
 export default async function Reports({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; group?: string }> }) {

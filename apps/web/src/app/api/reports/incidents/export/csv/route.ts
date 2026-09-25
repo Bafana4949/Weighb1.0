@@ -3,6 +3,7 @@ import { requireRole, withScopeErrors } from "@/lib/api";
 import { userScope } from "@/lib/access";
 import { dateRange, incidentsReport } from "@/lib/reports";
 import { rateLimitOrFail } from "@/lib/rate-limit";
+import { formatSADate, formatSADateTime } from "@/lib/datetime";
 
 function csv(value: unknown) {
   const text = String(value ?? "");
@@ -27,8 +28,8 @@ export const GET = withScopeErrors(async function GET(request: Request) {
       r.status,
       r.site,
       r.description,
-      r.created_at.toISOString(),
-      r.resolved_at?.toISOString() ?? "",
+      formatSADateTime(r.created_at),
+      r.resolved_at ? formatSADateTime(r.resolved_at) : "",
       r.resolved_by ?? "",
     ].map(csv).join(",")),
   ];
@@ -36,7 +37,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   return new Response(lines.join("\r\n"), {
     headers: {
       "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="incidents-report-${new Date().toISOString().slice(0, 10)}.csv"`,
+      "content-disposition": `attachment; filename="incidents-report-${formatSADate(new Date())}.csv"`,
     },
   });
 });

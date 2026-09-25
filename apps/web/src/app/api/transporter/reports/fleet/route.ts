@@ -2,6 +2,7 @@ import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole, withScopeErrors } from "@/lib/api";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
+import { formatSADate } from "@/lib/datetime";
 
 function csv(value: unknown) {
   const text = String(value ?? "");
@@ -75,7 +76,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   return new Response(lines.join("\r\n"), {
     headers: {
       "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="fleet-export-${new Date().toISOString().slice(0, 10)}.csv"`,
+      "content-disposition": `attachment; filename="fleet-export-${formatSADate(new Date())}.csv"`,
     },
   });
 });

@@ -8,9 +8,10 @@ import { routeNotification } from "@/lib/notifications";
 import { parsePagination,safeUserSelect } from "@/lib/utils";
 import { serviceOrderSchema } from "@/lib/validation";
 import { rateLimitOrFail } from "@/lib/rate-limit";
+import { formatSADate } from "@/lib/datetime";
 
 async function nextTicketNumber(tx: Prisma.TransactionClient, orgCode: string): Promise<string> {
-  const datePart = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const datePart = formatSADate(new Date()).replaceAll("-", "");
   const prefix = `SO-${orgCode}-${datePart}-`;
   const count = await tx.serviceOrder.count({ where: { orderNumber: { startsWith: prefix } } });
   return `${prefix}${String(count + 1).padStart(4, "0")}`;

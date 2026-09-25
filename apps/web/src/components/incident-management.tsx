@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/providers";
+import { formatSADateTime } from "@/lib/datetime";
 
 type IncidentRow = {
   id: string; type: string; severity: string; status: string; title: string; description: string;
@@ -41,7 +42,7 @@ export function IncidentManagement({ initialIncidents }: { initialIncidents: Inc
           <TableCell><Badge variant={i.severity === "CRITICAL" || i.severity === "HIGH" ? "destructive" : i.severity === "MEDIUM" ? "warning" : "default"}>{i.severity}</Badge></TableCell>
           <TableCell className="text-xs">{i.site?.name ?? "—"}</TableCell>
           <TableCell className="text-xs">{i.vehicle?.plate ?? "—"}{i.driver ? ` · ${i.driver.firstName} ${i.driver.lastName}` : ""}</TableCell>
-          <TableCell className="text-2xs">{new Date(i.createdAt).toLocaleString("en-ZA")}</TableCell>
+          <TableCell className="text-2xs">{formatSADateTime(i.createdAt)}</TableCell>
           <TableCell><Badge variant={i.status === "OPEN" ? "destructive" : i.status === "ACKNOWLEDGED" ? "warning" : "default"}>{i.status}</Badge></TableCell>
           <TableCell><div className="flex gap-1.5">
             {i.status !== "RESOLVED" && i.status !== "DISMISSED" ? <>

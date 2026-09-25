@@ -7,6 +7,7 @@ import { userScope } from "@/lib/access";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatSADateTime } from "@/lib/datetime";
 
 export default async function Incidents() {
   const s = await auth();
@@ -40,7 +41,7 @@ export default async function Incidents() {
             <TableBody>
               {rows.map((x) => (
                 <TableRow key={x.id}>
-                  <TableCell className="font-mono text-xs">{x.createdAt.toLocaleString("en-ZA")}</TableCell>
+                  <TableCell className="font-mono text-xs">{formatSADateTime(x.createdAt)}</TableCell>
                   <TableCell>{x.site.code}</TableCell>
                   <TableCell>{x.type}</TableCell>
                   <TableCell>

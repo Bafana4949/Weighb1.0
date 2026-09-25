@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { siteIdentifierWhere } from "@/lib/utils";
+import { parseSAEndOfDay, parseSAStartOfDay } from "@/lib/datetime";
 
 /**
  * Average load per truck, in whole kilograms.
@@ -16,7 +17,7 @@ export function dateRange(searchParams: URLSearchParams): { gte: Date; lte: Date
   const toStr = searchParams.get("to");
   let lte: Date;
   if (toStr) {
-    lte = new Date(toStr.includes("T") ? toStr : `${toStr}T23:59:59.999Z`);
+    lte = parseSAEndOfDay(toStr);
   } else {
     lte = new Date();
   }
@@ -24,7 +25,7 @@ export function dateRange(searchParams: URLSearchParams): { gte: Date; lte: Date
   const fromStr = searchParams.get("from");
   let gte: Date;
   if (fromStr) {
-    gte = new Date(fromStr.includes("T") ? fromStr : `${fromStr}T00:00:00.000Z`);
+    gte = parseSAStartOfDay(fromStr);
   } else {
     gte = new Date(lte.getTime() - 7 * 24 * 60 * 60 * 1000);
   }

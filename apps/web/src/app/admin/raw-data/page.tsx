@@ -11,9 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download, FileText } from "lucide-react";
+import { formatSADate, formatSATime } from "@/lib/datetime";
 
-function isoDate(d: Date | null) { return d ? d.toISOString().slice(0, 10) : "—"; }
-function isoTime(d: Date | null) { return d ? d.toISOString().slice(11, 19) : "—"; }
+const isoDate = formatSADate;
+const isoTime = formatSATime;
 function formatTurnaroundTime(seconds: number | null): string {
   if (seconds === null) return "—";
   const hours = Math.floor(seconds / 3600);

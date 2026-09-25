@@ -9,9 +9,10 @@ import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
 
 import { buildWeighmentPayload, computeIntegrityHash, getChainHead } from "@/lib/chain";
 import { assertWeightInvariant } from "@/lib/weights";
+import { formatSADate } from "@/lib/datetime";
 
 async function generateNextWaybillNumber(siteCode: string, siteId: string, client: any = prisma): Promise<string> {
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const dateStr = formatSADate(new Date()).replace(/-/g, "");
   const prefix = `WB-${siteCode}-${dateStr}-`;
   const lastToday = await client.weighbridgeTransaction.findFirst({
     where: {

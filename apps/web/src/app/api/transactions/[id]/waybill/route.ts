@@ -58,7 +58,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     afterData: { copy: copyParam, printCount: updated.printCount },
   });
 
-  const tz = transaction.site.timezone;
+  const tz = transaction.site.timezone || "Africa/Johannesburg";
   const order = transaction.booking.order;
   const isDispatch = order?.type ? order.type === "DISPATCH" : true;
   const transactionType: "DISPATCH" | "RECEIPT" = isDispatch ? "DISPATCH" : "RECEIPT";

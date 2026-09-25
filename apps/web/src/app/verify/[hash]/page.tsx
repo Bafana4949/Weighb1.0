@@ -25,7 +25,7 @@ export default async function Verify({ params }: { params: Promise<{ hash: strin
 
   if (!t) notFound();
 
-  const tz = t.site.timezone;
+  const tz = t.site.timezone || "Africa/Johannesburg";
   const order = t.booking.order;
   const isDispatch = order?.type ? order.type === "DISPATCH" : true;
   const transactionType = isDispatch ? "DISPATCH" : "RECEIPT";

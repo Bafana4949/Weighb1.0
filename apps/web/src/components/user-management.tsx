@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/components/providers";
+import { formatSADateTime } from "@/lib/datetime";
 
 type OrgOption = { id: string; name: string };
 type Role = "TRANSPORTER" | "OPERATOR" | "ADMIN" | "SECURITY";
@@ -144,7 +145,7 @@ export function UserManagement({ initialUsers, organisations, roles, currentUser
             </div>
           </TableCell>
           <TableCell><Badge variant={u.status === "ACTIVE" ? "default" : u.status === "INVITED" ? "warning" : "destructive"}>{u.status}</Badge></TableCell>
-          <TableCell className="font-mono text-xs">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString("en-ZA") : "Never"}</TableCell>
+          <TableCell className="font-mono text-xs">{u.lastLoginAt ? formatSADateTime(u.lastLoginAt) : "Never"}</TableCell>
           <TableCell><div className="flex gap-1.5">
             <Button variant="ghost" size="sm" onClick={() => setEditing(u)} disabled={busy}><Pencil size={13} className="mr-1" />Edit</Button>
             <Button variant="ghost" size="sm" onClick={() => resetPassword(u)} disabled={busy}><KeyRound size={13} className="mr-1" />Reset password</Button>

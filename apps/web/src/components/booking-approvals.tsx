@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/providers";
+import { formatSADateTime } from "@/lib/datetime";
 
 type BookingRow = {
   id: string; reference: string; status: string; commodity: string; targetTonnageKg: number;
@@ -71,7 +72,7 @@ export function BookingApprovals({ initialBookings }: { initialBookings: Booking
             <TableCell className="text-xs">{b.driver.firstName} {b.driver.lastName}<p className="text-2xs text-muted-foreground">{b.driver.licenceNumber}</p></TableCell>
             <TableCell className="text-xs">{b.site.name}</TableCell>
             <TableCell className="text-xs">{b.commodity} · {(b.targetTonnageKg / 1000).toFixed(1)} t</TableCell>
-            <TableCell className="text-2xs">{new Date(b.windowStart).toLocaleString("en-ZA")}<br /><span className="text-muted-foreground">to {new Date(b.windowEnd).toLocaleString("en-ZA")}</span></TableCell>
+            <TableCell className="text-2xs">{formatSADateTime(b.windowStart)}<br /><span className="text-muted-foreground">to {formatSADateTime(b.windowEnd)}</span></TableCell>
             <TableCell><div className="flex gap-1.5">
               <Button size="sm" disabled={busy === b.id} onClick={() => approve(b)}><CheckCircle2 size={13} className="mr-1" />Approve</Button>
               <Button size="sm" variant="destructive" disabled={busy === b.id} onClick={() => reject(b)}><XCircle size={13} className="mr-1" />Reject</Button>

@@ -8,8 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatSADate } from "@/lib/datetime";
 
-function isoDate(d: Date) { return d.toISOString().slice(0, 10); }
+function isoDate(d: Date) { return formatSADate(d); }
 
 export default async function ConsolidatedReports({ searchParams }: { searchParams: Promise<{ from?: string; to?: string }> }) {
   const s = await auth();

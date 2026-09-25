@@ -1,6 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api";
+import { formatSADate } from "@/lib/datetime";
 
 function csv(value: unknown) {
   const text = String(value ?? "");
@@ -38,8 +39,8 @@ export async function GET(request: Request) {
       b.order?.customerName ?? "",
       b.commodity,
       b.targetTonnageKg,
-      b.windowStart.toISOString().slice(0, 10),
-      b.windowEnd.toISOString().slice(0, 10),
+      formatSADate(b.windowStart),
+      formatSADate(b.windowEnd),
       b.status,
       b.vehicle.plate,
       `${b.driver.firstName} ${b.driver.lastName}`,
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
   return new Response(lines.join("\r\n"), {
     headers: {
       "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="assigned-orders-export-${new Date().toISOString().slice(0, 10)}.csv"`
+      "content-disposition": `attachment; filename="assigned-orders-export-${formatSADate(new Date())}.csv"`
     }
   });
 }

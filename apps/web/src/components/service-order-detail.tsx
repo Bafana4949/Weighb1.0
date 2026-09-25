@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/providers";
+import { formatSADateTime } from "@/lib/datetime";
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -90,7 +91,7 @@ export function ServiceOrderDetail({ order, comments, attachments, assignableUse
       <div>
         <p className="font-mono text-xs text-muted-foreground">{current.orderNumber}</p>
         <h1 className="text-2xl font-semibold text-foreground">{current.title}</h1>
-        <p className="mt-1 text-xs text-muted-foreground">{current.organisation.name}{current.site ? ` · ${current.site.name}` : ""} · opened by {current.createdBy.firstName} {current.createdBy.lastName} on {new Date(current.createdAt).toLocaleString("en-ZA")}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{current.organisation.name}{current.site ? ` · ${current.site.name}` : ""} · opened by {current.createdBy.firstName} {current.createdBy.lastName} on {formatSADateTime(current.createdAt)}</p>
       </div>
       <div className="flex gap-1.5">
         <Badge variant={priorityVariant(current.priority)}>{current.priority}</Badge>
@@ -156,7 +157,7 @@ export function ServiceOrderDetail({ order, comments, attachments, assignableUse
       <CardHeader><CardTitle>Activity</CardTitle></CardHeader>
       <CardContent className="space-y-3">
         {thread.map((c) => <div key={c.id} className="rounded-sm border border-border p-3">
-          <div className="flex items-center justify-between text-xs text-muted-foreground"><span>{c.author.firstName} {c.author.lastName}{c.isInternal && <Badge variant="muted" className="ml-2">Internal</Badge>}</span><span>{new Date(c.createdAt).toLocaleString("en-ZA")}</span></div>
+          <div className="flex items-center justify-between text-xs text-muted-foreground"><span>{c.author.firstName} {c.author.lastName}{c.isInternal && <Badge variant="muted" className="ml-2">Internal</Badge>}</span><span>{formatSADateTime(c.createdAt)}</span></div>
           <p className="mt-1 whitespace-pre-wrap text-sm">{c.body}</p>
         </div>)}
         {!thread.length && <p className="p-4 text-center text-sm text-muted-foreground">No activity yet</p>}

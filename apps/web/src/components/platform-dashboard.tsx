@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { formatSADateTime } from "@/lib/datetime";
 
 type Stat = { label: string; value: string | number; variant?: "default" | "warning" | "destructive" };
 type ClientRow = { id: string; name: string; status: string; trucksToday: number; tonnageTodayKg: number; openIncidents: number; sites: { id: string; name: string; code: string }[] };
@@ -51,7 +52,7 @@ export function PlatformDashboard({ stats, clients, activity }: { stats: Stat[];
             <TableCell className="text-xs">{a.action.replace(/_/g, " ")}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{a.entityType}</TableCell>
             <TableCell className="text-xs">{a.userName ?? "System"}</TableCell>
-            <TableCell className="text-2xs text-muted-foreground">{new Date(a.occurredAt).toLocaleString("en-ZA")}</TableCell>
+            <TableCell className="text-2xs text-muted-foreground">{formatSADateTime(a.occurredAt)}</TableCell>
           </TableRow>) : <TableRow><TableCell colSpan={4} className="p-8 text-center text-sm text-muted-foreground">No recent activity</TableCell></TableRow>}</TableBody>
         </Table>
       </CardContent>

@@ -46,7 +46,7 @@ export default async function Waybill({ params }: { params: Promise<{ id: string
 
   const url = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/verify/${t.integrityHash}`;
   const qr = await QRCode.toDataURL(url, { width: 220, margin: 1 });
-  const tz = t.site.timezone;
+  const tz = t.site.timezone || "Africa/Johannesburg";
   const order = t.booking.order;
   const isDispatch = order?.type ? order.type === "DISPATCH" : true;
   const transactionType: "DISPATCH" | "RECEIPT" = isDispatch ? "DISPATCH" : "RECEIPT";

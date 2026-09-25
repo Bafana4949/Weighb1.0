@@ -8,6 +8,7 @@ import { TenantScopeError } from "@/lib/access";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatKg } from "@/lib/weights";
+import { formatSADateTime } from "@/lib/datetime";
 
 export default async function History() {
   const s = await auth();
@@ -54,7 +55,7 @@ export default async function History() {
                       {x.waybillNumber}
                     </Link>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{x.capturedAt.toLocaleString("en-ZA")}</TableCell>
+                  <TableCell className="font-mono text-xs">{formatSADateTime(x.capturedAt)}</TableCell>
                   <TableCell>{x.vehicle.plate}</TableCell>
                   <TableCell>{x.site.code}</TableCell>
                   <TableCell className="font-mono">{formatKg(x.netWeightKg)}</TableCell>

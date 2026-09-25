@@ -4,9 +4,10 @@ import { ok, requireRole, withScopeErrors } from "@/lib/api";
 import { parsePagination, siteIdentifierWhere } from "@/lib/utils";
 import { userScope } from "@/lib/access";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
+import { formatSADateNullable, formatSATimeNullable, parseSAEndOfDay, parseSAStartOfDay } from "@/lib/datetime";
 
-function isoDate(d: Date | null) { return d ? d.toISOString().slice(0, 10) : null; }
-function isoTime(d: Date | null) { return d ? d.toISOString().slice(11, 19) : null; }
+const isoDate = formatSADateNullable;
+const isoTime = formatSATimeNullable;
 
 function formatTurnaroundTime(seconds: number | null): string | null {
   if (seconds === null) return null;
@@ -59,8 +60,8 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   if (from || to) {
     andConditions.push({
       capturedAt: {
-        ...(from ? { gte: new Date(from) } : {}),
-        ...(to ? { lte: new Date(to.includes('T') ? to : `${to}T23:59:59.999Z`) } : {})
+        ...(from ? { gte: parseSAStartOfDay(from) } : {}),
+        ...(to ? { lte: parseSAEndOfDay(to) } : {})
       }
     });
   }

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useToast } from "@/components/providers";
+import { formatSADateTime } from "@/lib/datetime";
 
 type SiteOption = { id: string; name: string };
 type SourceOption = { id: string; name: string };
@@ -363,7 +364,7 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
                   <TableCell className="font-mono">{b.vehicle.plate}</TableCell>
                   <TableCell className="text-xs">{b.driver.firstName} {b.driver.lastName}</TableCell>
                   <TableCell className="text-xs">{b.commodity} &middot; {(b.targetTonnageKg / 1000).toFixed(1)} t</TableCell>
-                  <TableCell className="text-2xs">{new Date(b.windowStart).toLocaleString("en-ZA")}<br /><span className="text-muted-foreground">to {new Date(b.windowEnd).toLocaleString("en-ZA")}</span></TableCell>
+                  <TableCell className="text-2xs">{formatSADateTime(b.windowStart)}<br /><span className="text-muted-foreground">to {formatSADateTime(b.windowEnd)}</span></TableCell>
                   <TableCell>
                     <Badge variant={b.status === "PENDING" ? "warning" : b.status === "REJECTED" ? "destructive" : "default"}>{b.status}</Badge>
                   </TableCell>

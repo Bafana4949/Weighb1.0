@@ -7,6 +7,7 @@ import { userScope } from "@/lib/access";
 import { dateRange,tonnageByGroup,turnaroundBySite } from "@/lib/reports";
 import { rateLimitOrFail } from "@/lib/rate-limit";
 import { ReportDocument } from "./report-document";
+import { formatSADate, formatSADateTime } from "@/lib/datetime";
 
 export const runtime = "nodejs";
 
@@ -33,22 +34,25 @@ export const GET = withScopeErrors(async function GET(request: Request) {
     ? turnaroundRows.reduce((s, r) => s + r.average_seconds * r.transactions, 0) / totalTurnaroundTx
     : 0;
 
+  const fromStr = formatSADate(range.gte);
+  const toStr = formatSADate(range.lte);
+
   const document = React.createElement(ReportDocument, {
     organisationName: organisation?.name ?? "All companies",
-    from: range.gte.toISOString().slice(0, 10),
-    to: range.lte.toISOString().slice(0, 10),
+    from: fromStr,
+    to: toStr,
     trucks: rawCount,
     totalTonnageT: (totalTonnageKg / 1000).toFixed(1),
     averageLoadKg: Math.round(averageLoadKg).toLocaleString(),
     averageTurnaroundMin: Math.round(averageTurnaroundSeconds / 60).toString(),
     tonnageRows,
     turnaroundRows,
-    generatedAt: new Date().toLocaleString("en-ZA"),
+    generatedAt: formatSADateTime(new Date()),
   });
   const buffer = await renderToBuffer(document as unknown as Parameters<typeof renderToBuffer>[0]);
   const isDownload = url.searchParams.get("download") === "true";
   const disposition = isDownload ? "attachment" : "inline";
   return new Response(new Uint8Array(buffer), {
-    headers: { "content-type": "application/pdf", "content-disposition": `${disposition}; filename="report-${range.gte.toISOString().slice(0, 10)}-to-${range.lte.toISOString().slice(0, 10)}.pdf"` },
+    headers: { "content-type": "application/pdf", "content-disposition": `${disposition}; filename="report-${fromStr}-to-${toStr}.pdf"` },
   });
 });

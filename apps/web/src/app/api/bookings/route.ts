@@ -8,6 +8,7 @@ import { assertOrganisationActive } from "@/lib/permissions";
 import { parsePagination,siteIdentifierWhere } from "@/lib/utils";
 import { routeNotification } from "@/lib/notifications";
 import { getOrderFulfilledKg } from "@/lib/order-fulfillment";
+import { parseSAEndOfDay, parseSAStartOfDay } from "@/lib/datetime";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { userScope } from "@/lib/access";
 
@@ -36,8 +37,8 @@ export const GET = withScopeErrors(async function GET(request: Request) {
     ...((from || to)
       ? {
           windowStart: {
-            ...(from ? { gte: new Date(from) } : {}),
-            ...(to ? { lte: new Date(to.includes("T") ? to : `${to}T23:59:59.999Z`) } : {}),
+            ...(from ? { gte: parseSAStartOfDay(from) } : {}),
+            ...(to ? { lte: parseSAEndOfDay(to) } : {}),
           },
         }
       : {}),
