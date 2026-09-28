@@ -20,11 +20,21 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   const url = new URL(request.url);
   const range = dateRange(url.searchParams);
   const group = url.searchParams.get("group") ?? "commodity";
+  const material = url.searchParams.get("material");
+  const orderNo = url.searchParams.get("orderNo");
   const scope = userScope(access.session!.user);
 
+  const extraWhere: any = {};
+  if (material) {
+    extraWhere.commodity = material;
+  }
+  if (orderNo) {
+    extraWhere.booking = { order: { orderNumber: orderNo } };
+  }
+
   const [{ rows: tonnageRows, rawCount, totalTonnageKg }, { sites: turnaroundRows }, organisation] = await Promise.all([
-    tonnageByGroup(range, group, scope),
-    turnaroundBySite(range, scope),
+    tonnageByGroup(range, group, scope, extraWhere),
+    turnaroundBySite(range, scope, extraWhere),
     access.session!.user.organisationId ? prisma.organisation.findUnique({ where: { id: access.session!.user.organisationId } }) : Promise.resolve(null),
   ]);
 

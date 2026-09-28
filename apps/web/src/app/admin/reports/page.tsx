@@ -10,24 +10,58 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatKg } from "@/lib/utils";
 import { formatSADate } from "@/lib/datetime";
+import { prisma } from "@/lib/prisma";
 
 function isoDate(d: Date) { return formatSADate(d); }
-function selectClass() { return "h-9 w-full rounded-sm border border-border bg-surface px-3 text-sm"; }
+function selectClass() { return "h-9 rounded-sm border border-border bg-surface px-3 text-sm"; }
 
-export default async function Reports({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; group?: string }> }) {
+export default async function Reports({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; group?: string; material?: string; orderNo?: string }> }) {
   const s = await auth();
   if (!s?.user) redirect("/login");
   const params = await searchParams;
   const urlParams = new URLSearchParams(params as Record<string, string>);
   const range = dateRange(urlParams);
   const group = params.group ?? "commodity";
+  const material = params.material ?? "";
+  const orderNo = params.orderNo ?? "";
   const scope = userScope(s.user);
-  const exportQuery = `from=${isoDate(range.gte)}&to=${isoDate(range.lte)}&group=${group}`;
 
-  const [{ rows: tonnageRows, rawCount: trucks, totalTonnageKg }, { sites: turnaroundBySiteRows, bottlenecks }, incidents] = await Promise.all([
-    tonnageByGroup(range, group, scope),
-    turnaroundBySite(range, scope),
+  const extraWhere: any = {};
+  if (material) {
+    extraWhere.commodity = material;
+  }
+  if (orderNo) {
+    extraWhere.booking = { order: { orderNumber: orderNo } };
+  }
+
+  const exportParams = new URLSearchParams();
+  exportParams.set("from", isoDate(range.gte));
+  exportParams.set("to", isoDate(range.lte));
+  if (group) exportParams.set("group", group);
+  if (material) exportParams.set("material", material);
+  if (orderNo) exportParams.set("orderNo", orderNo);
+  const exportQuery = exportParams.toString();
+
+  const [
+    { rows: tonnageRows, rawCount: trucks, totalTonnageKg },
+    { sites: turnaroundBySiteRows, bottlenecks },
+    incidents,
+    distinctProducts,
+    recentOrders
+  ] = await Promise.all([
+    tonnageByGroup(range, group, scope, extraWhere),
+    turnaroundBySite(range, scope, extraWhere),
     incidentsReport(range, scope),
+    prisma.weighbridgeTransaction.findMany({
+      select: { commodity: true },
+      distinct: ["commodity"],
+      orderBy: { commodity: "asc" }
+    }),
+    prisma.weighbridgeOrder.findMany({
+      select: { id: true, orderNumber: true, product: true },
+      orderBy: { createdAt: "desc" },
+      take: 20
+    })
   ]);
   const avgLoadKg = averageLoadKg(totalTonnageKg, trucks);
 
@@ -35,11 +69,34 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div><h1 className="text-2xl font-semibold text-foreground">Reports</h1><p className="text-xs text-muted-foreground">{isoDate(range.gte)} to {isoDate(range.lte)}.</p></div>
-        <form className="flex items-end gap-2" method="get">
+        <form className="flex flex-wrap items-end gap-2" method="get">
           <div><label className="mb-1 block text-2xs uppercase tracking-wider text-muted-foreground" htmlFor="from">From</label><input id="from" name="from" type="date" defaultValue={isoDate(range.gte)} className="h-9 rounded-sm border border-border bg-surface px-3 text-sm" /></div>
           <div><label className="mb-1 block text-2xs uppercase tracking-wider text-muted-foreground" htmlFor="to">To</label><input id="to" name="to" type="date" defaultValue={isoDate(range.lte)} className="h-9 rounded-sm border border-border bg-surface px-3 text-sm" /></div>
+          <div>
+            <label className="mb-1 block text-2xs uppercase tracking-wider text-muted-foreground" htmlFor="material">Product</label>
+            <select id="material" name="material" defaultValue={material} className={selectClass()}>
+              <option value="">All Products</option>
+              {distinctProducts.map(p => (
+                <option key={p.commodity} value={p.commodity}>{p.commodity}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-2xs uppercase tracking-wider text-muted-foreground" htmlFor="orderNo">Order</label>
+            <select id="orderNo" name="orderNo" defaultValue={orderNo} className={selectClass()}>
+              <option value="">All Orders</option>
+              {recentOrders.map(o => (
+                <option key={o.id} value={o.orderNumber}>{o.orderNumber}</option>
+              ))}
+            </select>
+          </div>
           <div><label className="mb-1 block text-2xs uppercase tracking-wider text-muted-foreground" htmlFor="group">Group tonnage by</label><select id="group" name="group" defaultValue={group} className={selectClass()}><option value="commodity">Product</option><option value="vehicle">Vehicle</option><option value="site">Site</option></select></div>
           <Button type="submit" variant="secondary">Update</Button>
+          {(material || orderNo) && (
+            <Button asChild variant="ghost" size="sm">
+              <a href={`/admin/reports?from=${isoDate(range.gte)}&to=${isoDate(range.lte)}`}>Clear Filters</a>
+            </Button>
+          )}
         </form>
       </div>
 

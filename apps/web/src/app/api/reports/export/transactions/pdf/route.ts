@@ -34,6 +34,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   const orgFilter = url.searchParams.get("org");
   const transactionNo = url.searchParams.get("transactionNo");
   const orderNo = url.searchParams.get("orderNo");
+  const material = url.searchParams.get("material");
   const type = url.searchParams.get("type");
   const status = url.searchParams.get("status");
   const overload = url.searchParams.get("overload");
@@ -56,6 +57,9 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   }
   if (orderNo) {
     andConditions.push({ booking: { order: { orderNumber: orderNo } } });
+  }
+  if (material) {
+    andConditions.push({ commodity: material });
   }
   if (type) {
     andConditions.push({ transactionType: type });
