@@ -34,7 +34,7 @@ export async function syncOrderFulfillmentStatus(
   const order = await db.weighbridgeOrder.findUnique({
     where: { id: orderId },
   });
-  if (!order || order.status === "CANCELLED" || order.status === "DRAFT") {
+  if (!order || order.status === "CANCELLED" || order.status === "DRAFT" || order.status === "PAUSED") {
     return order;
   }
 

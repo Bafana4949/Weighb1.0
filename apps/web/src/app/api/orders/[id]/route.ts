@@ -61,7 +61,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const a = await requireRole([UserRole.ADMIN]);
+  const a = await requireRole([UserRole.ADMIN, UserRole.OPERATOR]);
   if (a.error) return a.error;
   const { id } = await params;
   const before = await scoped(id, a.session!.user);
@@ -97,10 +97,17 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const finalOrder = (synced && synced.status !== updated.status)
     ? (await prisma.weighbridgeOrder.findUnique({ where: { id }, include: includeAll })) ?? updated
     : updated;
+
+  const auditAction = parsed.data.status === "PAUSED"
+    ? "ORDER_PAUSED"
+    : parsed.data.status === "ACTIVE" && before.status === "PAUSED"
+      ? "ORDER_RESUMED"
+      : "ORDER_UPDATED";
+
   await audit({
     userId: a.session!.user.id,
     siteId: before.siteId,
-    action: "ORDER_UPDATED",
+    action: auditAction,
     entityType: "weighbridge_order",
     entityId: id,
     beforeData: before,

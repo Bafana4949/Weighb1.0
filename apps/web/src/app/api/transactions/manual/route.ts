@@ -214,6 +214,20 @@ export async function GET(request: NextRequest) {
     where: {
       siteId: resolvedSite.id,
       status: "IN_PROGRESS",
+      OR: [
+        {
+          booking: {
+            orderId: null,
+          },
+        },
+        {
+          booking: {
+            order: {
+              status: "ACTIVE",
+            },
+          },
+        },
+      ],
     },
     include: {
       booking: {

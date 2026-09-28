@@ -33,6 +33,10 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
       ...activeWindowWhere(new Date(), resolvedSite.config?.journeyWindowGraceMinutes ?? 120),
       vehicle: { plateNormalized: normalisePlate(plate) },
       siteId: resolvedSite.id,
+      OR: [
+        { orderId: null },
+        { order: { status: "ACTIVE" } },
+      ],
     },
     include: { vehicle: true, driver: true, site: true },
     orderBy: { windowStart: "asc" },

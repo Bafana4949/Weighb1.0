@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Pencil, Plus, XCircle, Truck as TruckX } from "lucide-react";
+import { Pencil, Plus, XCircle, Truck as TruckX, PauseCircle, PlayCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -198,6 +198,33 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
     finally { setBusy(false); }
   }
 
+  async function togglePauseOrder(order: OrderRow, pause: boolean) {
+    const nextStatus = pause ? "PAUSED" : "ACTIVE";
+    const actionLabel = pause ? "Pause" : "Resume";
+    if (!window.confirm(`${actionLabel} order "${order.orderNumber}"? ${pause ? "Queued trucks for this order will be hidden from the weighbridge scale until resumed." : "Queued trucks for this order will become active and visible at the weighbridge scale."}`)) return;
+    setBusy(order.id);
+    try {
+      const response = await fetch(`/api/orders/${order.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? `Could not ${actionLabel.toLowerCase()} order`);
+      setOrders((current) => current.map((o) => o.id === order.id ? { ...o, status: nextStatus } : o));
+      toast({
+        title: pause ? "Order Paused" : "Order Resumed",
+        body: pause
+          ? `${order.orderNumber} is paused. Trucks for this order are now hidden from the weighbridge queue.`
+          : `${order.orderNumber} is active. Trucks for this order are now visible at the weighbridge scale.`
+      });
+    } catch (error) {
+      toast({ title: `Could not ${actionLabel.toLowerCase()} order`, body: String(error), severity: "HIGH" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function cancelOrder(order: OrderRow) {
     if (!window.confirm(`Cancel order ${order.orderNumber}? Transporters will no longer be able to book against it.`)) return;
     setBusy(true);
@@ -270,15 +297,44 @@ export function OrderManagement({ initialOrders, sites, sources, destinations, p
           <TableCell className="text-xs">{o.customerName ?? o.supplierName ?? "—"}</TableCell>
           <TableCell>{o.productRef?.name ?? o.product}{o.stockpile ? <p className="text-2xs text-muted-foreground">Stockpile {o.stockpile}</p> : null}</TableCell>
           <TableCell className="font-mono text-xs">{(fulfilledKg(o) / 1000).toFixed(1)} / {(o.estimatedMassKg / 1000).toFixed(1)} t</TableCell>
-          <TableCell><Badge variant={o.status === "ACTIVE" ? "default" : o.status === "FULFILLED" ? "info" : "destructive"}>{o.status}</Badge></TableCell>
-          <TableCell><div className="flex gap-1.5">
+          <TableCell><Badge variant={o.status === "ACTIVE" ? "default" : o.status === "FULFILLED" ? "info" : o.status === "PAUSED" ? "warning" : "destructive"}>{o.status}</Badge></TableCell>
+          <TableCell><div className="flex gap-1.5 items-center">
             <Button variant="outline" size="sm" onClick={() => setViewingBookings(o)}>
               {o.bookings.filter(b => b.status === "PENDING").length > 0 && <span className="mr-1.5 flex h-2 w-2 rounded-full bg-yellow-500"></span>}
               Bookings ({o.bookings.length})
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => openAssignModal(o)} disabled={!!busy || o.status === "CANCELLED" || o.status === "FULFILLED" || fulfilledKg(o) >= o.estimatedMassKg} title={fulfilledKg(o) >= o.estimatedMassKg ? "Order fulfilled. Edit mass to assign more trucks." : undefined}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => openAssignModal(o)}
+              disabled={!!busy || o.status === "CANCELLED" || o.status === "FULFILLED" || o.status === "PAUSED" || fulfilledKg(o) >= o.estimatedMassKg}
+              title={fulfilledKg(o) >= o.estimatedMassKg ? "Order fulfilled. Edit mass to assign more trucks." : o.status === "PAUSED" ? "Order is paused. Resume order to assign trucks." : undefined}
+            >
               <TruckX size={13} className="mr-1" /> Assign
             </Button>
+            {o.status === "ACTIVE" ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-amber-600 border-amber-300 hover:bg-amber-500/10 hover:text-amber-700 dark:border-amber-700/50"
+                onClick={() => togglePauseOrder(o, true)}
+                disabled={!!busy}
+                title="Pause this order to hide its trucks from the weighbridge queue"
+              >
+                <PauseCircle size={13} className="mr-1" />Pause
+              </Button>
+            ) : o.status === "PAUSED" ? (
+              <Button
+                variant="default"
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => togglePauseOrder(o, false)}
+                disabled={!!busy}
+                title="Resume this order to make its trucks visible at the weighbridge scale"
+              >
+                <PlayCircle size={13} className="mr-1" />Resume
+              </Button>
+            ) : null}
             <Button variant="ghost" size="sm" onClick={() => setEditing(o)} disabled={!!busy}><Pencil size={13} className="mr-1" />Edit</Button>
             <Button variant="ghost" size="sm" onClick={() => cancelOrder(o)} disabled={!!busy || o.status === "CANCELLED"}><XCircle size={13} className="mr-1" />Cancel</Button>
           </div></TableCell>

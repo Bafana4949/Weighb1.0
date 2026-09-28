@@ -216,6 +216,7 @@ enum OrderType {
 enum OrderStatus {
   DRAFT
   ACTIVE
+  PAUSED
   FULFILLED
   CANCELLED
 }

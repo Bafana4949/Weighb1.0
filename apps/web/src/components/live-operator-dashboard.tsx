@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -100,6 +100,36 @@ export function LiveOperatorDashboard({
   const [queue, setQueue] = useState<QueueItem[]>(initialQueue);
   const [activeWeighments, setActiveWeighments] = useState<ActiveWeighment[]>([]);
   const [loadingManual, setLoadingManual] = useState(false);
+  const [orderFilter, setOrderFilter] = useState<string>("ALL");
+
+  const distinctOrders = useMemo(() => {
+    const map = new Map<string, { orderNumber: string; waitingCount: number; inYardCount: number; commodity?: string }>();
+    for (const q of queue) {
+      if (q.orderNumber) {
+        const existing = map.get(q.orderNumber) || { orderNumber: q.orderNumber, waitingCount: 0, inYardCount: 0, commodity: q.commodity };
+        existing.waitingCount++;
+        map.set(q.orderNumber, existing);
+      }
+    }
+    for (const w of activeWeighments) {
+      if (w.orderNumber) {
+        const existing = map.get(w.orderNumber) || { orderNumber: w.orderNumber, waitingCount: 0, inYardCount: 0, commodity: w.commodity };
+        existing.inYardCount++;
+        map.set(w.orderNumber, existing);
+      }
+    }
+    return Array.from(map.values());
+  }, [queue, activeWeighments]);
+
+  const filteredQueue = useMemo(() => {
+    if (orderFilter === "ALL") return queue;
+    return queue.filter((q) => q.orderNumber === orderFilter);
+  }, [queue, orderFilter]);
+
+  const filteredActiveWeighments = useMemo(() => {
+    if (orderFilter === "ALL") return activeWeighments;
+    return activeWeighments.filter((w) => w.orderNumber === orderFilter);
+  }, [activeWeighments, orderFilter]);
 
   // Manual Weighment Modal States
   const [modalOpen, setModalOpen] = useState(false);
@@ -1306,6 +1336,54 @@ export function LiveOperatorDashboard({
         </CardContent>
       </Card>
 
+      {/* Order Focus Filter Bar */}
+      {distinctOrders.length > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-2.5 p-3 rounded-lg border border-primary/20 bg-primary/5 shadow-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              Focus Order:
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setOrderFilter("ALL")}
+                className={`px-3 py-1 text-xs rounded-xs transition-all font-medium cursor-pointer ${
+                  orderFilter === "ALL"
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "bg-surface text-muted-foreground hover:text-foreground border border-border"
+                }`}
+              >
+                All Orders ({queue.length + activeWeighments.length} trucks)
+              </button>
+              {distinctOrders.map((ord) => (
+                <button
+                  key={ord.orderNumber}
+                  type="button"
+                  onClick={() => setOrderFilter(ord.orderNumber)}
+                  className={`px-3 py-1 text-xs rounded-xs transition-all font-mono font-medium cursor-pointer flex items-center gap-1.5 ${
+                    orderFilter === ord.orderNumber
+                      ? "bg-primary text-primary-foreground font-semibold shadow-xs ring-2 ring-primary/30"
+                      : "bg-surface text-muted-foreground hover:text-foreground border border-border"
+                  }`}
+                >
+                  <span>{ord.orderNumber}</span>
+                  <span className="text-2xs opacity-80">
+                    ({ord.waitingCount ? `${ord.waitingCount} waiting` : ""}{ord.waitingCount && ord.inYardCount ? ", " : ""}{ord.inYardCount ? `${ord.inYardCount} in yard` : ""})
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <Link
+            href="/admin/orders"
+            className="text-xs text-primary hover:underline font-medium inline-flex items-center gap-1 ml-auto"
+          >
+            Manage / Pause Orders &rarr;
+          </Link>
+        </div>
+      )}
+
       {/* Dual Queue Layout */}
       <div className="grid gap-4 lg:grid-cols-2">
         {/* LEFT COLUMN: Arrival Queue (Ready for 1st Weight) */}
@@ -1320,12 +1398,14 @@ export function LiveOperatorDashboard({
                 Approved bookings waiting to enter and record empty tare
               </p>
             </div>
-            <Badge variant="muted">{queue.length} waiting</Badge>
+            <Badge variant="muted">
+              {orderFilter !== "ALL" ? `${filteredQueue.length} of ${queue.length}` : queue.length} waiting
+            </Badge>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border max-h-[500px] overflow-y-auto">
-              {queue.length ? (
-                queue.map((item, index) => (
+              {filteredQueue.length ? (
+                filteredQueue.map((item, index) => (
                   <div
                     key={item.id}
                     className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
@@ -1368,7 +1448,7 @@ export function LiveOperatorDashboard({
               ) : (
                 <div className="p-8 text-center text-sm text-muted-foreground">
                   <Truck className="mx-auto mb-2 opacity-50" size={24} />
-                  No approved bookings currently waiting in arrival queue.
+                  {orderFilter !== "ALL" ? `No waiting trucks found for order ${orderFilter}.` : "No approved bookings currently waiting in arrival queue."}
                 </div>
               )}
             </div>
@@ -1388,13 +1468,13 @@ export function LiveOperatorDashboard({
               </p>
             </div>
             <Badge variant="default" className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30">
-              {activeWeighments.length} on site
+              {orderFilter !== "ALL" ? `${filteredActiveWeighments.length} of ${activeWeighments.length}` : activeWeighments.length} on site
             </Badge>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border max-h-[500px] overflow-y-auto">
-              {activeWeighments.length ? (
-                activeWeighments.map((w) => (
+              {filteredActiveWeighments.length ? (
+                filteredActiveWeighments.map((w) => (
                   <div
                     key={w.id}
                     className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
@@ -1437,7 +1517,7 @@ export function LiveOperatorDashboard({
               ) : (
                 <div className="p-8 text-center text-sm text-muted-foreground">
                   <Truck className="mx-auto mb-2 opacity-50 text-emerald-500" size={24} />
-                  No vehicles currently in the yard awaiting 2nd weighment.
+                  {orderFilter !== "ALL" ? `No in-yard vehicles found for order ${orderFilter}.` : "No vehicles currently in the yard awaiting 2nd weighment."}
                 </div>
               )}
             </div>
@@ -1596,9 +1676,9 @@ export function LiveOperatorDashboard({
                     className="w-full h-9 rounded-sm border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
                   >
                     <option value="">-- Choose active in-yard truck --</option>
-                    {activeWeighments.map((w) => (
+                    {filteredActiveWeighments.map((w) => (
                       <option key={w.id} value={w.id}>
-                        {w.plate} {w.trailer ? `+${w.trailer}` : ""} · 1st: {formatKg(w.firstWeightKg)} ({w.firstWeightType}) · {w.driver}
+                        {w.plate} {w.trailer ? `+${w.trailer}` : ""} · 1st: {formatKg(w.firstWeightKg)} ({w.firstWeightType}) · {w.driver} {w.orderNumber ? `[Order: ${w.orderNumber}]` : ""}
                       </option>
                     ))}
                   </select>
@@ -1615,7 +1695,7 @@ export function LiveOperatorDashboard({
                           !isWalkIn ? "bg-background text-foreground shadow-xs font-semibold" : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
-                        From Queue ({queue.length})
+                        From Queue ({filteredQueue.length})
                       </button>
                       <button
                         type="button"
@@ -1637,15 +1717,15 @@ export function LiveOperatorDashboard({
                         className="w-full h-9 rounded-sm border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
                       >
                         <option value="">-- Choose vehicle from queue --</option>
-                        {queue.map((q) => (
+                        {filteredQueue.map((q) => (
                           <option key={q.id} value={q.id}>
-                            {q.plate} {q.trailer ? `+${q.trailer}` : ""} · {q.reference} · {q.driver} ({q.commodity})
+                            {q.plate} {q.trailer ? `+${q.trailer}` : ""} · {q.reference} · {q.driver} ({q.commodity}) {q.orderNumber ? `[Order: ${q.orderNumber}]` : ""}
                           </option>
                         ))}
                       </select>
-                      {queue.length === 0 && (
+                      {filteredQueue.length === 0 && (
                         <p className="text-2xs text-amber-500">
-                          Queue is empty. Switch to "+ Walk-In / Ad-Hoc Truck" to enter details directly.
+                          {orderFilter !== "ALL" ? `No waiting trucks found for order ${orderFilter}.` : "Queue is empty. Switch to '+ Walk-In / Ad-Hoc Truck' to enter details directly."}
                         </p>
                       )}
                     </div>

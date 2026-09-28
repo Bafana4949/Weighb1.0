@@ -81,6 +81,7 @@ export const orderBaseSchema = z.object({
   varianceThresholdKg: z.number().int().min(0).max(50_000).optional().nullable(),
   ratePerTonZar: z.number().min(0).max(1_000_000).optional().nullable(),
   notes: z.string().max(1000).optional().nullable(),
+  status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "FULFILLED", "CANCELLED"]).optional(),
 });
 export const orderSchema = orderBaseSchema
   .refine((value) => value.type !== "DISPATCH" || !!value.customerName, { message: "Customer is required for a dispatch order", path: ["customerName"] })
