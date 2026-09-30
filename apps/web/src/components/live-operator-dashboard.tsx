@@ -35,6 +35,8 @@ import {
   TrafficCone,
   ShieldCheck,
   Sparkles,
+  ChevronDown,
+  X,
 } from "lucide-react";
 import { WeightGauge } from "@/components/weight-gauge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -130,6 +132,13 @@ export function LiveOperatorDashboard({
     if (orderFilter === "ALL") return activeWeighments;
     return activeWeighments.filter((w) => w.orderNumber === orderFilter);
   }, [activeWeighments, orderFilter]);
+
+  // If filtered order is no longer active in queue or yard, gracefully reset to ALL
+  useEffect(() => {
+    if (orderFilter !== "ALL" && !distinctOrders.some((o) => o.orderNumber === orderFilter)) {
+      setOrderFilter("ALL");
+    }
+  }, [distinctOrders, orderFilter]);
 
   // Manual Weighment Modal States
   const [modalOpen, setModalOpen] = useState(false);
@@ -1337,47 +1346,70 @@ export function LiveOperatorDashboard({
       </Card>
 
       {/* Order Focus Filter Bar */}
-      {distinctOrders.length > 1 && (
-        <div className="flex flex-wrap items-center justify-between gap-2.5 p-3 rounded-lg border border-primary/20 bg-primary/5 shadow-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+      {distinctOrders.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-2.5 sm:p-3 rounded-lg border border-primary/20 bg-primary/5 shadow-xs">
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 flex-1 min-w-0">
+            <label
+              htmlFor="focus-order-select"
+              className="text-xs font-semibold text-foreground flex items-center gap-1.5 shrink-0"
+            >
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
               Focus Order:
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setOrderFilter("ALL")}
-                className={`px-3 py-1 text-xs rounded-xs transition-all font-medium cursor-pointer ${
-                  orderFilter === "ALL"
-                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
-                    : "bg-surface text-muted-foreground hover:text-foreground border border-border"
-                }`}
+            </label>
+
+            <div className="relative min-w-[240px] sm:min-w-[340px] max-w-full">
+              <select
+                id="focus-order-select"
+                aria-label="Filter queue by focus order"
+                value={orderFilter}
+                onChange={(e) => setOrderFilter(e.target.value)}
+                className="w-full appearance-none rounded-md border border-border bg-card py-1.5 pl-3 pr-8 text-xs font-medium text-foreground shadow-xs transition-colors hover:border-primary/50 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer truncate font-mono"
               >
-                All Orders ({queue.length + activeWeighments.length} trucks)
-              </button>
-              {distinctOrders.map((ord) => (
-                <button
-                  key={ord.orderNumber}
-                  type="button"
-                  onClick={() => setOrderFilter(ord.orderNumber)}
-                  className={`px-3 py-1 text-xs rounded-xs transition-all font-mono font-medium cursor-pointer flex items-center gap-1.5 ${
-                    orderFilter === ord.orderNumber
-                      ? "bg-primary text-primary-foreground font-semibold shadow-xs ring-2 ring-primary/30"
-                      : "bg-surface text-muted-foreground hover:text-foreground border border-border"
-                  }`}
-                >
-                  <span>{ord.orderNumber}</span>
-                  <span className="text-2xs opacity-80">
-                    ({ord.waitingCount ? `${ord.waitingCount} waiting` : ""}{ord.waitingCount && ord.inYardCount ? ", " : ""}{ord.inYardCount ? `${ord.inYardCount} in yard` : ""})
-                  </span>
-                </button>
-              ))}
+                <option value="ALL" className="font-sans">
+                  All Orders ({queue.length + activeWeighments.length} total trucks)
+                </option>
+                {distinctOrders.map((ord) => {
+                  const details: string[] = [];
+                  if (ord.waitingCount) details.push(`${ord.waitingCount} waiting`);
+                  if (ord.inYardCount) details.push(`${ord.inYardCount} in yard`);
+                  const detailStr = details.length ? ` (${details.join(", ")})` : "";
+                  const commodityStr = ord.commodity ? ` · ${ord.commodity}` : "";
+                  return (
+                    <option key={ord.orderNumber} value={ord.orderNumber}>
+                      {ord.orderNumber}{commodityStr}{detailStr}
+                    </option>
+                  );
+                })}
+              </select>
+              <ChevronDown
+                size={14}
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
             </div>
+
+            {orderFilter !== "ALL" && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOrderFilter("ALL")}
+                  className="inline-flex items-center gap-1 rounded-sm bg-primary/10 hover:bg-primary/20 px-2 py-1 text-2xs font-medium text-primary transition-colors cursor-pointer shrink-0"
+                  title="Reset to All Orders"
+                >
+                  <span>Clear Filter</span>
+                  <X size={12} />
+                </button>
+                <span className="text-2xs text-muted-foreground hidden md:inline-flex items-center gap-1.5">
+                  <span>Filtered:</span>
+                  <span className="font-semibold text-foreground">{filteredQueue.length}</span> waiting,
+                  <span className="font-semibold text-foreground">{filteredActiveWeighments.length}</span> in yard
+                </span>
+              </div>
+            )}
           </div>
+
           <Link
             href="/admin/orders"
-            className="text-xs text-primary hover:underline font-medium inline-flex items-center gap-1 ml-auto"
+            className="text-xs text-primary hover:underline font-medium inline-flex items-center gap-1 shrink-0 ml-auto"
           >
             Manage / Pause Orders &rarr;
           </Link>
