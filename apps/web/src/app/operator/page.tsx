@@ -109,6 +109,10 @@ export default async function OperatorPage({ searchParams }: { searchParams: Pro
           customerName: item.order?.customerName ?? null,
           stockpile: item.order?.stockpile ?? null,
           status: item.status,
+          presetTareWeightKg: (item.order as any)?.presetTareWeightKg ?? null,
+          presetGrossWeightKg: (item.order as any)?.presetGrossWeightKg ?? null,
+          useConstantTare: (item.order as any)?.useConstantTare ?? false,
+          useConstantGross: (item.order as any)?.useConstantGross ?? false,
         }))}
         stats={{
           trucks: aggregate._count,

@@ -753,6 +753,10 @@ model WeighbridgeOrder {
   stockpile                String?
   varianceThresholdPercent Decimal     @default(5) @db.Decimal(5, 2) @map("variance_threshold_percent")
   varianceThresholdKg      Int?        @map("variance_threshold_kg")
+  presetTareWeightKg       Int?        @map("preset_tare_weight_kg")
+  presetGrossWeightKg      Int?        @map("preset_gross_weight_kg")
+  useConstantTare          Boolean     @default(false) @map("use_constant_tare")
+  useConstantGross         Boolean     @default(false) @map("use_constant_gross")
   ratePerTonZar            Decimal?    @db.Decimal(10, 2) @map("rate_per_ton_zar")
   notes                    String?
   status                   OrderStatus @default(ACTIVE)

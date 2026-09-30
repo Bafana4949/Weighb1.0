@@ -86,6 +86,10 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
       customerName: item.order?.customerName ?? null,
       stockpile: item.order?.stockpile ?? null,
       status: item.status,
+      presetTareWeightKg: (item.order as any)?.presetTareWeightKg ?? null,
+      presetGrossWeightKg: (item.order as any)?.presetGrossWeightKg ?? null,
+      useConstantTare: (item.order as any)?.useConstantTare ?? false,
+      useConstantGross: (item.order as any)?.useConstantGross ?? false,
     }))
   );
   res.headers.set("etag", etag);

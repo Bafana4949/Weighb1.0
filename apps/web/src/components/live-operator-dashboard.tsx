@@ -37,6 +37,7 @@ import {
   Sparkles,
   ChevronDown,
   X,
+  Zap,
 } from "lucide-react";
 import { WeightGauge } from "@/components/weight-gauge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,6 +67,10 @@ type QueueItem = {
   customerName?: string | null;
   stockpile?: string | null;
   status: string;
+  presetTareWeightKg?: number | null;
+  presetGrossWeightKg?: number | null;
+  useConstantTare?: boolean | null;
+  useConstantGross?: boolean | null;
 };
 
 type ActiveWeighment = {
@@ -85,6 +90,10 @@ type ActiveWeighment = {
   firstWeightType: "TARE" | "GROSS";
   firstWeightCapturedAt: string;
   minutesInYard: number;
+  presetTareWeightKg?: number | null;
+  presetGrossWeightKg?: number | null;
+  useConstantTare?: boolean | null;
+  useConstantGross?: boolean | null;
 };
 
 export function LiveOperatorDashboard({
@@ -105,18 +114,49 @@ export function LiveOperatorDashboard({
   const [orderFilter, setOrderFilter] = useState<string>("ALL");
 
   const distinctOrders = useMemo(() => {
-    const map = new Map<string, { orderNumber: string; waitingCount: number; inYardCount: number; commodity?: string }>();
+    const map = new Map<string, {
+      orderNumber: string;
+      waitingCount: number;
+      inYardCount: number;
+      commodity?: string;
+      presetTareWeightKg?: number | null;
+      presetGrossWeightKg?: number | null;
+      useConstantTare?: boolean | null;
+      useConstantGross?: boolean | null;
+    }>();
     for (const q of queue) {
       if (q.orderNumber) {
-        const existing = map.get(q.orderNumber) || { orderNumber: q.orderNumber, waitingCount: 0, inYardCount: 0, commodity: q.commodity };
+        const existing = map.get(q.orderNumber) || {
+          orderNumber: q.orderNumber,
+          waitingCount: 0,
+          inYardCount: 0,
+          commodity: q.commodity,
+          presetTareWeightKg: q.presetTareWeightKg,
+          presetGrossWeightKg: q.presetGrossWeightKg,
+          useConstantTare: q.useConstantTare,
+          useConstantGross: q.useConstantGross,
+        };
         existing.waitingCount++;
+        if (q.presetTareWeightKg && !existing.presetTareWeightKg) existing.presetTareWeightKg = q.presetTareWeightKg;
+        if (q.presetGrossWeightKg && !existing.presetGrossWeightKg) existing.presetGrossWeightKg = q.presetGrossWeightKg;
         map.set(q.orderNumber, existing);
       }
     }
     for (const w of activeWeighments) {
       if (w.orderNumber) {
-        const existing = map.get(w.orderNumber) || { orderNumber: w.orderNumber, waitingCount: 0, inYardCount: 0, commodity: w.commodity };
+        const existing = map.get(w.orderNumber) || {
+          orderNumber: w.orderNumber,
+          waitingCount: 0,
+          inYardCount: 0,
+          commodity: w.commodity,
+          presetTareWeightKg: w.presetTareWeightKg,
+          presetGrossWeightKg: w.presetGrossWeightKg,
+          useConstantTare: w.useConstantTare,
+          useConstantGross: w.useConstantGross,
+        };
         existing.inYardCount++;
+        if (w.presetTareWeightKg && !existing.presetTareWeightKg) existing.presetTareWeightKg = w.presetTareWeightKg;
+        if (w.presetGrossWeightKg && !existing.presetGrossWeightKg) existing.presetGrossWeightKg = w.presetGrossWeightKg;
         map.set(w.orderNumber, existing);
       }
     }
@@ -866,8 +906,16 @@ export function LiveOperatorDashboard({
       setSelectedBookingId(queue[0].id);
       setIsWalkIn(false);
     }
-    // Metrology safety: never pre-fill stale weights if cable dropped or signal lost
-    setFirstWeightInput(isSerialConnected && !signalLost && manualWeightKg > 0 ? String(manualWeightKg) : "");
+    // Metrology safety & Constant Weight default: pre-fill scale if connected, or constant tare if order has preset
+    if (isSerialConnected && !signalLost && manualWeightKg > 0) {
+      setFirstWeightInput(String(manualWeightKg));
+    } else if (booking?.presetTareWeightKg && (booking?.useConstantTare || manualWeightKg <= 0)) {
+      setFirstWeightInput(String(booking.presetTareWeightKg));
+    } else if (queue.length > 0 && queue[0]?.presetTareWeightKg && (queue[0]?.useConstantTare || manualWeightKg <= 0)) {
+      setFirstWeightInput(String(queue[0].presetTareWeightKg));
+    } else {
+      setFirstWeightInput("");
+    }
     setSecondWeightInput("");
     setModalOpen(true);
   }
@@ -877,6 +925,7 @@ export function LiveOperatorDashboard({
     setCompletedResult(null);
     setModalMode("SECOND");
     setIdempotencyKey(typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `IDEM-${Date.now()}`);
+    let activeW = weighment;
     if (weighment) {
       setSelectedWeighmentId(weighment.id);
       setSelectedBookingId(weighment.bookingId);
@@ -884,13 +933,20 @@ export function LiveOperatorDashboard({
       setWeighType(weighment.firstWeightType === "TARE" ? "DISPATCH" : "RECEIPT");
     } else if (activeWeighments.length > 0 && activeWeighments[0]) {
       const w = activeWeighments[0];
+      activeW = w;
       setSelectedWeighmentId(w.id);
       setSelectedBookingId(w.bookingId);
       setFirstWeightInput(String(w.firstWeightKg));
       setWeighType(w.firstWeightType === "TARE" ? "DISPATCH" : "RECEIPT");
     }
-    // Metrology safety: never pre-fill stale weights if cable dropped or signal lost
-    setSecondWeightInput(isSerialConnected && !signalLost && manualWeightKg > 0 ? String(manualWeightKg) : "");
+    // Metrology safety & Constant Weight default: pre-fill scale or preset constant gross
+    if (isSerialConnected && !signalLost && manualWeightKg > 0) {
+      setSecondWeightInput(String(manualWeightKg));
+    } else if (activeW?.presetGrossWeightKg && (activeW?.useConstantGross || manualWeightKg <= 0)) {
+      setSecondWeightInput(String(activeW.presetGrossWeightKg));
+    } else {
+      setSecondWeightInput("");
+    }
     setModalOpen(true);
   }
 
@@ -1388,7 +1444,7 @@ export function LiveOperatorDashboard({
             </div>
 
             {orderFilter !== "ALL" && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setOrderFilter("ALL")}
@@ -1398,6 +1454,26 @@ export function LiveOperatorDashboard({
                   <span>Clear Filter</span>
                   <X size={12} />
                 </button>
+                {(() => {
+                  const ord = distinctOrders.find((o) => o.orderNumber === orderFilter);
+                  if (!ord) return null;
+                  return (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {ord.presetTareWeightKg ? (
+                        <Badge variant="muted" className="text-2xs border-emerald-400 text-emerald-600 bg-emerald-500/10 font-mono gap-1">
+                          <Zap size={10} className="fill-emerald-600" />
+                          Const Tare: {formatKg(ord.presetTareWeightKg)}
+                        </Badge>
+                      ) : null}
+                      {ord.presetGrossWeightKg ? (
+                        <Badge variant="muted" className="text-2xs border-blue-400 text-blue-600 bg-blue-500/10 font-mono gap-1">
+                          <Zap size={10} className="fill-blue-600" />
+                          Const Gross: {formatKg(ord.presetGrossWeightKg)}
+                        </Badge>
+                      ) : null}
+                    </div>
+                  );
+                })()}
                 <span className="text-2xs text-muted-foreground hidden md:inline-flex items-center gap-1.5">
                   <span>Filtered:</span>
                   <span className="font-semibold text-foreground">{filteredQueue.length}</span> waiting,
@@ -1854,19 +1930,35 @@ export function LiveOperatorDashboard({
               {/* Weight Inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-1">
                     <Label className="text-xs">
                       1st Weight (kg) {modalMode === "FIRST" ? "· Scale Reading" : "(Captured)"}:
                     </Label>
-                    {manualWeightKg > 0 && modalMode !== "SECOND" && (
-                      <button
-                        type="button"
-                        onClick={() => setFirstWeightInput(String(manualWeightKg))}
-                        className="text-2xs text-primary font-mono font-medium hover:underline flex items-center gap-1 cursor-pointer"
-                      >
-                        <RefreshCw size={10} /> Insert Scale ({formatKg(manualWeightKg)})
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {modalMode !== "SECOND" && (() => {
+                        const curB = queue.find((q) => q.id === selectedBookingId);
+                        if (!curB?.presetTareWeightKg) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setFirstWeightInput(String(curB.presetTareWeightKg))}
+                            className="text-2xs text-emerald-600 font-mono font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                            title="Click to insert order constant empty tare"
+                          >
+                            <Zap size={10} className="fill-emerald-600" /> Const ({formatKg(curB.presetTareWeightKg)})
+                          </button>
+                        );
+                      })()}
+                      {manualWeightKg > 0 && modalMode !== "SECOND" && (
+                        <button
+                          type="button"
+                          onClick={() => setFirstWeightInput(String(manualWeightKg))}
+                          className="text-2xs text-primary font-mono font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw size={10} /> Insert Scale ({formatKg(manualWeightKg)})
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="relative">
                     <Input
@@ -1885,19 +1977,35 @@ export function LiveOperatorDashboard({
 
                 {(modalMode === "SECOND" || modalMode === "DIRECT") && (
                   <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center justify-between gap-1">
                       <Label className="text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
                         2nd Weight (kg) · Scale Reading:
                       </Label>
-                      {manualWeightKg > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setSecondWeightInput(String(manualWeightKg))}
-                          className="text-2xs text-emerald-600 dark:text-emerald-400 font-mono font-medium hover:underline flex items-center gap-1 cursor-pointer"
-                        >
-                          <RefreshCw size={10} /> Insert Scale ({formatKg(manualWeightKg)})
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const curW = activeWeighments.find((w) => w.id === selectedWeighmentId);
+                          if (!curW?.presetGrossWeightKg) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setSecondWeightInput(String(curW.presetGrossWeightKg))}
+                              className="text-2xs text-blue-600 dark:text-blue-400 font-mono font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                              title="Click to insert order constant loaded gross"
+                            >
+                              <Zap size={10} className="fill-blue-600" /> Const ({formatKg(curW.presetGrossWeightKg)})
+                            </button>
+                          );
+                        })()}
+                        {manualWeightKg > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSecondWeightInput(String(manualWeightKg))}
+                            className="text-2xs text-emerald-600 dark:text-emerald-400 font-mono font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <RefreshCw size={10} /> Insert Scale ({formatKg(manualWeightKg)})
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="relative">
                       <Input
