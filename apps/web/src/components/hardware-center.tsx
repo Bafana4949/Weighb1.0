@@ -223,9 +223,6 @@ function TierCard({ siteId, state, readOnly, onSaved, onError }: { siteId: strin
           <div className="space-y-1.5 text-xs">
             <p className="font-medium">Operator rules at this tier</p>
             <p className="text-muted-foreground">Typed weights: {state.manualEntryPolicy === "PRIMARY" ? "normal method" : state.manualEntryPolicy === "REASON_REQUIRED" ? "backup only, reason required" : "emergency only, supervisor override"}.</p>
-            {tier === "SEMI_AUTOMATIC" && (
-              <label className="flex items-center gap-2"><input type="checkbox" disabled={readOnly} checked={requireCard} onChange={(e) => setRequireCard(e.target.checked)} />Require a card scan before the first weight</label>
-            )}
             {tier !== state.highestSupportedTier && <p className="text-muted-foreground">Installed hardware supports up to <strong>{TIER_LABEL[state.highestSupportedTier]}</strong>.</p>}
           </div>
         </div>

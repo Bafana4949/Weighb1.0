@@ -595,7 +595,9 @@ class Runtime:
             keys = lane.lane_config.device_keys
             for target, device_key in (("ENTRY", keys.entry_gate), ("EXIT", keys.exit_gate)):
                 device = edge_config.device(device_key)
-                delay = (device.configuration or {}).get("autoCloseDelaySeconds") if device else None
+                config = (device.configuration or {}) if device else {}
+                # The hardware centre saves autoCloseSeconds; autoCloseDelaySeconds is the older name.
+                delay = config.get("autoCloseSeconds", config.get("autoCloseDelaySeconds"))
                 if isinstance(delay, (int, float)) and not isinstance(delay, bool) and 1 <= delay <= 600:
                     lane.gate.auto_close_seconds[target] = float(delay)
 

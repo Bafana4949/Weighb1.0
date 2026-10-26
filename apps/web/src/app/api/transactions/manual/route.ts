@@ -403,6 +403,11 @@ export async function POST(request: NextRequest) {
     }
 
     const isDispatch = weighType !== "RECEIPT";
+    // Sites choose which weighing flows they permit (Hardware -> Configuration -> tier card).
+    const siteWorkflows = (await prisma.siteConfig.findUnique({ where: { siteId: resolvedSite.id }, select: { allowedWorkflows: true } }))?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"];
+    if (!siteWorkflows.includes(isDispatch ? "DISPATCH" : "RECEIPT")) {
+      return fail(`${isDispatch ? "Outbound (tare first)" : "Inbound (gross first)"} weighing is not permitted at this site`, 422);
+    }
     const tempEdgeId = idempotencyKey ? `IDEM-${idempotencyKey}` : `MANUAL-INPROG-${resolvedSite.code}-${Date.now()}`;
     const tempWaybill = `WB-INPROG-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 

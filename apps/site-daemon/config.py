@@ -177,7 +177,7 @@ class CloudConfig(BaseModel):
 
 
 class GateConfig(BaseModel):
-    # Overridden per gate by the cloud device's configuration.autoCloseDelaySeconds.
+    # Overridden per gate by the cloud device's configuration.autoCloseSeconds.
     auto_close_seconds: float = 8
     # Auto-close waits while a vehicle is on the beams; alert if that lasts this long.
     max_hold_open_seconds: float = 300

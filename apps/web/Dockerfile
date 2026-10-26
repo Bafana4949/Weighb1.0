@@ -23,6 +23,9 @@ RUN npm run db:generate && npm --workspace @weighbridge/web run build
 FROM base AS runner
 ENV NODE_ENV=production
 COPY --from=builder /workspace ./
+# Service-order attachments live on a volume mounted here; creating the directory in the
+# image lets Docker initialise the volume with the right owner.
+RUN mkdir -p /workspace/.attachments
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs && \
     chown -R nextjs:nodejs /workspace

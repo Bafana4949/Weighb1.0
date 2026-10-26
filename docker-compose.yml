@@ -82,6 +82,11 @@ services:
       SITE_DAEMON_URL: ${SITE_DAEMON_URL:-}
       SITE_DAEMON_SITE_CODE: ${SITE_DAEMON_SITE_CODE:-}
       SITE_DAEMON_TOKEN: ${WB_LOCAL_API_TOKEN:-}
+      # Only during migration from the retired shared edge key; see docs/SECURITY.md.
+      ALLOW_LEGACY_SITE_KEY: ${ALLOW_LEGACY_SITE_KEY:-false}
+      SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-}
+      NFC_BRIDGE_URL: ${NFC_BRIDGE_URL:-}
+      ATTACHMENT_STORAGE_PATH: /workspace/.attachments
       SMTP_HOST: ${SMTP_HOST:-smtp.ethereal.email}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -92,6 +97,8 @@ services:
       TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
     ports:
       - "3010:3000"
+    volumes:
+      - web-attachments:/workspace/.attachments
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null 2>&1 || exit 1"]
       interval: 15s
@@ -191,6 +198,7 @@ services:
         condition: service_started
 
 volumes:
+  web-attachments:
   postgres-data:
   pgadmin-data:
   mosquitto-logs:

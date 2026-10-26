@@ -72,8 +72,8 @@ async function main(): Promise<void> {
   // 3. Seed / Ensure Initial Platform Super Admin Account
   // The initial password comes from SEED_SUPERADMIN_PASSWORD, or is generated once and
   // printed below. Re-running the seed never resets an existing account's password.
-  const superAdminEmail = (process.env.SEED_SUPERADMIN_EMAIL ?? "superadmin@weighbridge.co.za").toLowerCase();
-  const providedPassword = process.env.SEED_SUPERADMIN_PASSWORD;
+  const superAdminEmail = (process.env.SEED_SUPERADMIN_EMAIL?.trim() || "superadmin@weighbridge.co.za").toLowerCase();
+  const providedPassword = process.env.SEED_SUPERADMIN_PASSWORD || undefined; // an empty line counts as unset
   if (providedPassword && providedPassword.length < 12) {
     console.error("❌ SEED_SUPERADMIN_PASSWORD must be at least 12 characters.");
     process.exit(1);
