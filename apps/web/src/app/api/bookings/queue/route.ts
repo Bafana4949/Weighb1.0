@@ -80,6 +80,7 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
       stockpile: item.order?.stockpile ?? null,
       status: item.status,
       presetTareWeightKg: (item.order as any)?.presetTareWeightKg ?? null,
+      storedTareKg: item.vehicle.tareWeightKg > 1 ? item.vehicle.tareWeightKg : null,
       presetGrossWeightKg: (item.order as any)?.presetGrossWeightKg ?? null,
       useConstantTare: (item.order as any)?.useConstantTare ?? false,
       useConstantGross: (item.order as any)?.useConstantGross ?? false,

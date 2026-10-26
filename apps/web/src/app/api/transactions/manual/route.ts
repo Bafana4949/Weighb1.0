@@ -210,6 +210,23 @@ async function weightPolicy(actor: Actor, siteId: string, body: any): Promise<{ 
   return { error: error ? fail(error, 422) : null, source, reason, flagged: source === "MANUAL" && caps.manualEntryPolicy !== "PRIMARY" };
 }
 
+/** Weighing flows the site's administrators have enabled (DISPATCH, RECEIPT, KNOWN_TARE, SINGLE). */
+async function siteWorkflowsFor(siteId: string): Promise<string[]> {
+  return (await prisma.siteConfig.findUnique({ where: { siteId }, select: { allowedWorkflows: true } }))?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"];
+}
+
+/** A vehicle this site's company may weigh: own fleet, contracted hauliers, or on active assignment to them. */
+async function findSiteVehicle(siteOrganisationId: string, plate: string) {
+  const owners = await linkedTransporterIds(siteOrganisationId);
+  return prisma.vehicle.findFirst({
+    where: {
+      plateNormalized: plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, ""),
+      deletedAt: null,
+      OR: [{ organisationId: { in: owners } }, { transporterAssignments: { some: { status: "ACTIVE", transporterOrganisationId: { in: owners } } } }],
+    },
+  });
+}
+
 /** Typed weights at automated sites become reviewable exceptions. */
 async function flagManualWeight(siteId: string, operatorId: string | null, transactionId: string, bookingId: string, reason: string | null, weights: Record<string, number>) {
   await prisma.incident.create({
@@ -404,7 +421,7 @@ export async function POST(request: NextRequest) {
 
     const isDispatch = weighType !== "RECEIPT";
     // Sites choose which weighing flows they permit (Hardware -> Configuration -> tier card).
-    const siteWorkflows = (await prisma.siteConfig.findUnique({ where: { siteId: resolvedSite.id }, select: { allowedWorkflows: true } }))?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"];
+    const siteWorkflows = await siteWorkflowsFor(resolvedSite.id);
     if (!siteWorkflows.includes(isDispatch ? "DISPATCH" : "RECEIPT")) {
       return fail(`${isDispatch ? "Outbound (tare first)" : "Inbound (gross first)"} weighing is not permitted at this site`, 422);
     }
@@ -709,6 +726,61 @@ export async function POST(request: NextRequest) {
   // --------------------------------------------------------------------------
   // ACTION: DIRECT_WEIGH (Enter both 1st & 2nd weights simultaneously)
   // --------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // ACTION: STORE_TARE (weigh an empty truck once and keep its empty weight)
+  // Enabled per site by the "Weigh empty once" option. Updates the vehicle's
+  // stored tare; it is not a transaction and does not appear in tonnage reports.
+  // --------------------------------------------------------------------------
+  if (action === "STORE_TARE") {
+    if (authCheck.actor?.type !== "user") return fail("Empty weights are captured by an operator", 403);
+    if (!(await siteWorkflowsFor(resolvedSite.id)).includes("SINGLE")) {
+      return fail("Weighing empty trucks once is not enabled at this site. An administrator can enable it.", 422);
+    }
+    const weight = Math.round(Number(body.weightKg));
+    if (!weight || weight <= 0) return fail("Valid empty weight (kg) is required", 422);
+    const wp = await weightPolicy(authCheck.actor!, resolvedSite.id, body);
+    if (wp.error) return wp.error;
+
+    let vehicle = null;
+    if (body.bookingId) {
+      const booking = await prisma.booking.findFirst({ where: { id: body.bookingId, siteId: resolvedSite.id }, include: { vehicle: true } });
+      vehicle = booking?.vehicle ?? null;
+    } else if (typeof body.plate === "string" && body.plate.trim()) {
+      vehicle = await findSiteVehicle(resolvedSite.organisationId, body.plate);
+    }
+    if (!vehicle) return fail("Truck not found for this company. Add it under Fleet, or select it from the queue.", 404);
+
+    const config = await prisma.siteConfig.findUnique({ where: { siteId: resolvedSite.id }, select: { emptyVehicleMaxKg: true } });
+    const emptyMax = config?.emptyVehicleMaxKg ?? 18500;
+    if (weight > emptyMax) {
+      return fail(`${weight.toLocaleString()} kg is above this site's empty-truck maximum (${emptyMax.toLocaleString()} kg). Is the truck loaded?`, 422);
+    }
+
+    const previous = vehicle.tareWeightKg > 1 ? vehicle.tareWeightKg : null;
+    await prisma.vehicle.update({ where: { id: vehicle.id }, data: { tareWeightKg: weight, lastTareWeightKg: previous } });
+    await audit({
+      userId: operatorId,
+      siteId: resolvedSite.id,
+      actorRole: authCheck.actor.session.user.role,
+      action: "VEHICLE_EMPTY_WEIGHT_CAPTURED",
+      entityType: "vehicle",
+      entityId: vehicle.id,
+      reason: wp.reason,
+      beforeData: { tareWeightKg: previous },
+      afterData: { plate: vehicle.plate, tareWeightKg: weight, weightSource: wp.source, notes: body.notes ?? null },
+    });
+    if (wp.flagged) {
+      await prisma.incident.create({ data: { siteId: resolvedSite.id, vehicleId: vehicle.id, type: "MANUAL_OVERRIDE", severity: "MEDIUM", title: "Empty weight entered by hand", description: `Stored empty weight for ${vehicle.plate} was typed instead of read from the indicator. Reason: ${wp.reason ?? "—"}`, anomalyScore: 10 } });
+    }
+    return ok({
+      message: `Empty weight stored for ${vehicle.plate}: ${weight.toLocaleString()} kg${previous ? ` (was ${previous.toLocaleString()} kg)` : ""}`,
+      vehicleId: vehicle.id,
+      plate: vehicle.plate,
+      tareWeightKg: weight,
+      previousTareWeightKg: previous,
+    });
+  }
+
   if (action === "DIRECT_WEIGH") {
     // Idempotency check: if this direct weigh was already completed
     if (idempotencyKey) {
@@ -730,10 +802,23 @@ export async function POST(request: NextRequest) {
     }
 
     const { bookingId, weight1Kg, weight2Kg, notes, mineTicketNumber, plate, driverName, transporterName, trailer, commodity, orderId } = body;
+    // "Weigh loaded once": the second weight is the truck's stored empty weight.
+    const useStoredTare = body.useStoredTare === true;
     const w1 = Math.round(Number(weight1Kg));
-    const w2 = Math.round(Number(weight2Kg));
+    let w2 = useStoredTare ? 0 : Math.round(Number(weight2Kg));
 
-    if (!w1 || w1 <= 0 || !w2 || w2 <= 0) return fail("Both 1st and 2nd weights (kg) must be greater than 0", 422);
+    if (useStoredTare) {
+      if (!w1 || w1 <= 0) return fail("Valid loaded weight (kg) is required", 422);
+      if (!(await siteWorkflowsFor(resolvedSite.id)).includes("KNOWN_TARE")) {
+        return fail("Weighing loaded trucks once is not enabled at this site. An administrator can enable it.", 422);
+      }
+      if (!bookingId && typeof plate === "string" && plate.trim()) {
+        const known = await findSiteVehicle(resolvedSite.organisationId, plate);
+        if (!known || known.tareWeightKg <= 1) return fail(`No stored empty weight for ${plate.trim().toUpperCase()}. Weigh it empty once first.`, 422);
+        // Check before a walk-in booking is created, so a refused weighing leaves nothing behind.
+        if (known.tareWeightKg >= w1) return fail(`Loaded weight must be more than the stored empty weight (${known.tareWeightKg.toLocaleString()} kg).`, 422);
+      }
+    } else if (!w1 || w1 <= 0 || !w2 || w2 <= 0) return fail("Both 1st and 2nd weights (kg) must be greater than 0", 422);
     const wp = await weightPolicy(authCheck.actor!, resolvedSite.id, body);
     if (wp.error) return wp.error;
 
@@ -755,10 +840,17 @@ export async function POST(request: NextRequest) {
         commodity,
         orderId,
         operatorId,
-        knownTareKg: Math.min(w1, w2),
+        knownTareKg: useStoredTare ? null : Math.min(w1, w2),
       });
     } else {
       return fail("Either bookingId or vehicle registration plate is required", 422);
+    }
+
+    if (useStoredTare) {
+      const stored = booking.vehicle.tareWeightKg;
+      if (!stored || stored <= 1) return fail(`No stored empty weight for ${booking.vehicle.plate}. Weigh it empty once first.`, 422);
+      if (stored >= w1) return fail(`Loaded weight must be more than the stored empty weight (${stored.toLocaleString()} kg).`, 422);
+      w2 = stored;
     }
 
     const actualGross = Math.max(w1, w2);

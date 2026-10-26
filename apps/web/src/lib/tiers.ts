@@ -247,6 +247,6 @@ export type Workflow = (typeof WORKFLOWS)[number];
 export const WORKFLOW_LABEL: Record<Workflow, string> = {
   DISPATCH: "Outbound: tare, load, gross",
   RECEIPT: "Inbound: gross, unload, tare",
-  KNOWN_TARE: "Known tare: stored tare, one gross weighing",
-  SINGLE: "Single weighing: one measurement",
+  KNOWN_TARE: "Weigh loaded once: use the truck’s stored empty weight",
+  SINGLE: "Weigh empty once: capture and store the truck’s empty weight",
 };

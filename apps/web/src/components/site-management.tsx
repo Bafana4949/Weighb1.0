@@ -28,6 +28,7 @@ import { useToast } from "@/components/providers";
 
 type OrgOption = { id: string; name: string };
 type SiteConfig = {
+  allowedWorkflows?: string[];
   operatingStart: string;
   operatingEnd: string;
   maxCapacityKg: number;
@@ -167,7 +168,9 @@ export function SiteManagement({
         autoApprovalEnabled: form.get("autoApprovalEnabled") === "on",
         requireInsuranceValid: form.get("requireInsuranceValid") === "on",
         requireDriverLicenceValid: form.get("requireDriverLicenceValid") === "on",
+        allowedWorkflows: ["DISPATCH", "RECEIPT", "KNOWN_TARE", "SINGLE"].filter((w) => form.get(`wf_${w}`) === "on"),
       };
+      if (payload.allowedWorkflows.length === 0) throw new Error("Allow at least one weighing workflow");
 
       const configRes = await fetch(`/api/sites/${configuring.id}/config`, {
         method: "PUT",
@@ -469,6 +472,15 @@ export function SiteManagement({
                 </div>
               </div>
 
+              <WeighingOptions
+                key={viewingDetails.id}
+                site={viewingDetails}
+                onSaved={(allowedWorkflows) => {
+                  setSites((current) => current.map((x) => (x.id === viewingDetails.id ? { ...x, config: x.config ? { ...x.config, allowedWorkflows } : x.config } : x)));
+                  setViewingDetails((v) => (v && v.config ? { ...v, config: { ...v.config, allowedWorkflows } } : v));
+                }}
+              />
+
               <div className="rounded-lg border border-border p-3.5 space-y-2.5">
                 <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                   <Scale className="h-3.5 w-3.5 text-primary" />
@@ -684,6 +696,23 @@ export function SiteManagement({
                     <a href={`/admin/hardware?site=${configuring.code}`} className="text-sm font-medium text-primary underline">Open hardware centre</a>
                   </div>
 
+                  {/* Weighing options: which flows operators at this site may use. */}
+                  <fieldset className="md:col-span-2 space-y-2 rounded-xl border border-border p-4">
+                    <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Weighing options</legend>
+                    {([
+                      ["DISPATCH", "Outbound: tare, load, gross (two weighings)"],
+                      ["RECEIPT", "Inbound: gross, unload, tare (two weighings)"],
+                      ["KNOWN_TARE", "Weigh loaded once: use the truck’s stored empty weight"],
+                      ["SINGLE", "Weigh empty once: capture and store the truck’s empty weight"],
+                    ] as [string, string][]).map(([key, label]) => (
+                      <label key={key} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name={`wf_${key}`} defaultChecked={(configuring.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"]).includes(key)} className="rounded" />
+                        {label}
+                      </label>
+                    ))}
+                    <p className="text-2xs text-muted-foreground">Operators see the “weigh once” choices only when they are ticked here.</p>
+                  </fieldset>
+
                   <div className="md:col-span-2 pt-2 border-t border-border">
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Operational & Metrological Thresholds
@@ -839,5 +868,56 @@ export function SiteManagement({
         </>
       )}
     </Card>
+  );
+}
+
+const WEIGHING_OPTIONS: [string, string][] = [
+  ["DISPATCH", "Outbound: tare, load, gross (two weighings)"],
+  ["RECEIPT", "Inbound: gross, unload, tare (two weighings)"],
+  ["KNOWN_TARE", "Weigh loaded once: use the truck’s stored empty weight"],
+  ["SINGLE", "Weigh empty once: capture and store the truck’s empty weight"],
+];
+
+/**
+ * Which weighing flows operators at this site may use. Company and site admins can
+ * change these; the server enforces them and the operator console only offers the
+ * "weigh once" choices when they are ticked here.
+ */
+function WeighingOptions({ site, onSaved }: { site: SiteRow; onSaved: (allowedWorkflows: string[]) => void }) {
+  const [selected, setSelected] = useState<string[]>(site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"]);
+  const [state, setState] = useState<{ busy: boolean; message: string | null; error: boolean }>({ busy: false, message: null, error: false });
+  const initial = (site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"]).join();
+  async function save() {
+    setState({ busy: true, message: null, error: false });
+    try {
+      const res = await fetch(`/api/sites/${site.id}/config`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ allowedWorkflows: selected }) });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Could not save weighing options");
+      onSaved(body.data.allowedWorkflows);
+      setState({ busy: false, message: "Weighing options saved.", error: false });
+    } catch (e) {
+      setState({ busy: false, message: e instanceof Error ? e.message : String(e), error: true });
+    }
+  }
+  return (
+    <div className="rounded-lg border border-border p-3.5 space-y-2.5">
+      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Weighing options</p>
+      <div className="space-y-1.5">
+        {WEIGHING_OPTIONS.map(([key, label]) => (
+          <label key={key} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" className="rounded" checked={selected.includes(key)} onChange={(e) => setSelected(e.target.checked ? [...selected, key] : selected.filter((x) => x !== key))} />
+            {label}
+          </label>
+        ))}
+      </div>
+      <p className="text-2xs text-muted-foreground">Operators see the “weigh once” choices only when they are ticked here.</p>
+      <div className="flex items-center gap-3">
+        <Button size="sm" disabled={state.busy || selected.length === 0 || selected.slice().sort().join() === initial.split(",").sort().join()} onClick={() => void save()}>
+          {state.busy ? "Saving…" : "Save weighing options"}
+        </Button>
+        {selected.length === 0 && <span className="text-xs text-danger">Allow at least one option.</span>}
+        {state.message && <span className={state.error ? "text-xs text-danger" : "text-xs text-success"}>{state.message}</span>}
+      </div>
+    </div>
   );
 }

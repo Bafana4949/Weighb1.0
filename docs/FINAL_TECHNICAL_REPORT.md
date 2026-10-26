@@ -230,7 +230,7 @@ Defects found by the end-to-end runs and then fixed:
 * Gate and light commands from the console reach an edge only when the web server is on that edge's LAN (`SITE_DAEMON_URL`). A cloud-hosted deployment has no command path to edges yet; the planned route is MQTT `gate/command`, which the edge already validates.
 * The edge applies each gate's auto-close time from the cloud configuration. The other recorded gate settings, the controller watchdog and the ANPR settings are documented for commissioning but not applied; the edge uses its own site file. The PIC firmware has its watchdog disabled.
 * The weight source (indicator or typed) is declared by the browser. The server enforces the tier policy on that declaration, but cannot prove that a value said to come from the indicator did.
-* `requireCardIdentification` is modelled but not enforced in the operator console (edge lanes always check the card). Only `DISPATCH`/`RECEIPT` of the permitted workflows are enforced. Fast-track constant weights bypass the typed-weight rule.
+* `requireCardIdentification` is modelled but not enforced in the operator console (edge lanes always check the card). Fast-track constant weights bypass the typed-weight rule.
 * Server-rendered pages trust the 8-hour JWT; the per-request database check covers API routes, which is where data is read and changed.
 * The edge's read-only local endpoints (`/health`, `/edge/live`) need no token; keep the local API bound to loopback (`WB_HTTP_HOST=127.0.0.1`) on edge PCs.
 * The operator console reports only the scale's health, and only while its tab is visible.

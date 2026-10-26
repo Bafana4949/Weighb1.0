@@ -82,7 +82,16 @@ Enforcement today:
 
 ## 5. Permitted weighing workflows
 
-Each site stores `allowedWorkflows` (at least one of `DISPATCH`, `RECEIPT`, `KNOWN_TARE`, `SINGLE`; default the first three). They are edited in the tier card and the site wizard and returned by the capabilities API. The transaction API enforces `DISPATCH` and `RECEIPT` for first weighments (a refused flow returns 422). `KNOWN_TARE` and `SINGLE` are recorded but not yet enforced, and the console still offers both directions.
+Each site stores `allowedWorkflows` (at least one of `DISPATCH`, `RECEIPT`, `KNOWN_TARE`, `SINGLE`; default the first three). They are edited by the Super Admin (tier card, site wizard) and by Company and Site Admins (**Sites → View Details → Weighing options**), and returned by the capabilities API. All four are enforced by the transaction API (a flow that is not enabled returns 422):
+
+| Option | Label | What the operator can do |
+|---|---|---|
+| `DISPATCH` | Outbound | 1st weigh empty (tare), 2nd weigh loaded (gross) |
+| `RECEIPT` | Inbound | 1st weigh loaded (gross), 2nd weigh empty (tare) |
+| `KNOWN_TARE` | Weigh loaded once | Weigh the loaded truck once; net = loaded − the truck's stored empty weight; waybill issued immediately |
+| `SINGLE` | Weigh empty once | Weigh the empty truck once; its empty weight is stored on the vehicle (audited as `VEHICLE_EMPTY_WEIGHT_CAPTURED`). No transaction is created |
+
+An empty weight above the site's *empty vehicle max* is refused, and typed weights follow the tier's manual-entry policy.
 
 ## 6. Licence cap
 

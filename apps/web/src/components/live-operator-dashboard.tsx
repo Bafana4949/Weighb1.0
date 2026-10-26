@@ -68,6 +68,8 @@ type QueueItem = {
   stockpile?: string | null;
   status: string;
   presetTareWeightKg?: number | null;
+  /** The truck's stored empty weight, when one has been captured. */
+  storedTareKg?: number | null;
   presetGrossWeightKg?: number | null;
   useConstantTare?: boolean | null;
   useConstantGross?: boolean | null;
@@ -259,6 +261,7 @@ export function LiveOperatorDashboard({
     operatingTier?: "MANUAL" | "SEMI_AUTOMATIC" | "FULLY_AUTOMATIC";
     manualEntryPolicy?: "PRIMARY" | "REASON_REQUIRED" | "SUPERVISOR_OVERRIDE";
     scaleConnection?: string | null;
+    allowedWorkflows?: string[];
   }>({
     hasScale: true,
     scaleProtocol: "METTLER_TOLEDO_CONTINUOUS",
@@ -273,6 +276,10 @@ export function LiveOperatorDashboard({
   // indicator reading only if it is exactly what was captured; anything typed is MANUAL.
   const liveCaptureRef = useRef<{ first: number | null; second: number | null }>({ first: null, second: null });
   const [manualReason, setManualReason] = useState("");
+  // "Weigh once" options, offered only where an administrator enabled them for the site.
+  const [weighOnce, setWeighOnce] = useState<"" | "EMPTY" | "LOADED">("");
+  const canWeighEmptyOnce = capabilities.allowedWorkflows?.includes("SINGLE") ?? false;
+  const canWeighLoadedOnce = capabilities.allowedWorkflows?.includes("KNOWN_TARE") ?? false;
 
   const [gatePulseActive, setGatePulseActive] = useState<"ENTRY" | "EXIT" | null>(null);
 
@@ -951,6 +958,7 @@ export function LiveOperatorDashboard({
     // Metrology safety & Constant Weight default: pre-fill scale if connected, or constant tare if order has preset
     liveCaptureRef.current = { first: null, second: null };
     setManualReason("");
+    setWeighOnce("");
     if (isSerialConnected && !signalLost && manualWeightKg > 0) {
       setFirstWeightInput(String(manualWeightKg));
       liveCaptureRef.current.first = manualWeightKg;
@@ -1028,11 +1036,41 @@ export function LiveOperatorDashboard({
         const weightKg = Number(firstWeightInput);
         if (isWalkIn) {
           if (!walkInPlate.trim()) throw new Error("Please enter truck registration plate");
-          if (!walkInDriver.trim()) throw new Error("Please enter driver name");
+          // Storing an empty weight identifies the truck only; no trip, so no driver.
+          if (!walkInDriver.trim() && weighOnce !== "EMPTY") throw new Error("Please enter driver name");
         } else {
           if (!selectedBookingId) throw new Error("Please select an approved booking/truck");
         }
         if (!weightKg || weightKg <= 0) throw new Error("Please enter a valid 1st scale reading (kg)");
+
+        if (weighOnce) {
+          const identity = { siteCode, bookingId: isWalkIn ? undefined : selectedBookingId, plate: isWalkIn ? walkInPlate.trim().toUpperCase() : undefined };
+          const payload = weighOnce === "EMPTY"
+            ? { action: "STORE_TARE", ...identity, weightKg, notes: notesInput || undefined }
+            : {
+                action: "DIRECT_WEIGH", ...identity, idempotencyKey: idempotencyKey || undefined, useStoredTare: true, weight1Kg: weightKg,
+                driverName: isWalkIn ? walkInDriver.trim() : undefined, transporterName: isWalkIn ? walkInTransporter.trim() : undefined,
+                trailer: isWalkIn ? walkInTrailer.trim().toUpperCase() : undefined, commodity: isWalkIn ? walkInCommodity : undefined,
+                mineTicketNumber: mineTicketInput || undefined, notes: notesInput || undefined,
+              };
+          const onceRes = await fetch("/api/transactions/manual", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...payload, weightSource: firstSource, manualReason: firstSource === "MANUAL" ? manualReason || undefined : undefined }),
+          });
+          const onceBody = await onceRes.json();
+          if (!onceRes.ok) throw new Error(onceBody.error ?? "Weighing failed");
+          if (weighOnce === "EMPTY") {
+            toast({ title: "Empty weight stored", body: onceBody.data.message });
+            setModalOpen(false);
+          } else {
+            setCompletedResult(onceBody.data);
+            toast({ title: "Waybill Issued", body: onceBody.data.message });
+          }
+          fetchQueue();
+          fetchActiveWeighments();
+          return;
+        }
 
         const res = await fetch("/api/transactions/manual", {
           method: "POST",
@@ -1958,7 +1996,29 @@ export function LiveOperatorDashboard({
                 </div>
               )}
 
+              {modalMode === "FIRST" && (canWeighEmptyOnce || canWeighLoadedOnce) && (
+                <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+                  <p className="text-xs font-semibold">Weigh once (optional)</p>
+                  {canWeighEmptyOnce && (
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" className="mt-0.5" checked={weighOnce === "EMPTY"} onChange={(e) => setWeighOnce(e.target.checked ? "EMPTY" : "")} />
+                      <span><b>Empty truck:</b> capture and store its empty weight. No second weighing; future loads can use it.</span>
+                    </label>
+                  )}
+                  {canWeighLoadedOnce && (
+                    <label className="flex items-start gap-2 text-xs">
+                      <input type="checkbox" className="mt-0.5" checked={weighOnce === "LOADED"} onChange={(e) => setWeighOnce(e.target.checked ? "LOADED" : "")} />
+                      <span>
+                        <b>Loaded truck:</b> use its stored empty weight and complete now.
+                        {!isWalkIn && (() => { const q = queue.find((x) => x.id === selectedBookingId); return q ? (q.storedTareKg ? ` Stored empty weight: ${q.storedTareKg.toLocaleString()} kg.` : " This truck has no stored empty weight yet.") : null; })()}
+                      </span>
+                    </label>
+                  )}
+                </div>
+              )}
+
               {/* Operational Flow Type */}
+              {!weighOnce && (
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -1989,6 +2049,7 @@ export function LiveOperatorDashboard({
                   </div>
                 </button>
               </div>
+              )}
 
               {/* Weight Inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2166,6 +2227,10 @@ export function LiveOperatorDashboard({
                 >
                   {submitting
                     ? "Processing..."
+                    : modalMode === "FIRST" && weighOnce === "EMPTY"
+                    ? "Store Empty Weight"
+                    : modalMode === "FIRST" && weighOnce === "LOADED"
+                    ? "Complete with Stored Empty Weight"
                     : modalMode === "FIRST"
                     ? "Record 1st Weight & Authorize Entry"
                     : "Finalize Weighment & Issue Waybill"}

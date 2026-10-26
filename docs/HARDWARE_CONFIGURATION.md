@@ -30,7 +30,7 @@ The page also accepts `?site=<site code or id>`, which is how the wizard and the
 - Three tier buttons. Tiers above the company licence are disabled and marked "Above company licence".
 - Capability tiles show, per capability: Active, Not in this tier, Required — hardware missing, Recommended — no hardware, or Optional.
 - Blockers (red) and warnings (amber) come from the readiness check described in `docs/TIERS.md`.
-- **Permitted weighing workflows**: Outbound (tare, load, gross), Inbound (gross, unload, tare), Known tare, Single weighing. At least one must stay ticked. These are stored but not yet enforced by the operator console.
+- **Permitted weighing workflows**: Outbound (tare, load, gross), Inbound (gross, unload, tare), Weigh loaded once (stored empty weight), Weigh empty once (store the empty weight). At least one must stay ticked. They are enforced by the server, and Company and Site Admins can also change them under **Sites → View Details → Weighing options**. See `TIERS.md`.
 - **Operator rules at this tier** states the typed-weight policy. Requiring a card scan before the first weight at Semi-Automatic sites is modelled (`featureOverrides.requireCardIdentification`) but has no tick box yet, because the operator console does not enforce it; on edge-controlled lanes the edge always checks the driver's card.
 - "Installed hardware supports up to ..." appears when the installed devices would support a different tier.
 - **Save tier settings** writes the tier, overrides and workflows and records `SITE_TIER_UPDATED` in the audit log. A tier above the licence is refused; missing hardware is not (it blocks activation instead).

@@ -92,7 +92,7 @@ A Company Admin is an ADMIN user of a company with no site assignments. They see
 
 ### 2.2 Sites
 
-**Master Data → Sites** lists the company's sites ([04-site-management.png](screenshots/04-site-management.png)). New sites are created by the platform super admin. **Hardware → Configuration** is read-only for Company Admins; **Hardware → Hardware health** shows their sites ([18-hardware-health-company.png](screenshots/18-hardware-health-company.png)). Device tests (read-only) can be run.
+**Master Data → Sites** lists the company's sites ([04-site-management.png](screenshots/04-site-management.png)). New sites are created by the platform super admin. Open **View Details** on a site to set its **Weighing options**, including the optional *weigh loaded once* and *weigh empty once* modes ([29-site-weighing-options.png](screenshots/29-site-weighing-options.png)); see section 4.7. **Hardware → Configuration** is read-only for Company Admins; **Hardware → Hardware health** shows their sites ([18-hardware-health-company.png](screenshots/18-hardware-health-company.png)). Device tests (read-only) can be run.
 
 ### 2.3 Users and site access
 
@@ -177,6 +177,15 @@ The IT team can remove the port prompt with `scripts/enable-scale-serial-policy.
 ### 4.4 Walk-in trucks
 
 **+ Walk-In Truck** (or **Walk-In / Ad-Hoc Truck** in the weighing dialog) is for trucks without a booking. Enter plate, driver name, optionally trailer and transporter, and choose the product.
+
+### 4.7 Weigh once (when enabled for the site)
+
+If an admin has ticked the options for your site, the 1st-weigh dialog shows **Weigh once (optional)** ([30-operator-weigh-once.png](screenshots/30-operator-weigh-once.png)):
+
+- **Empty truck:** tick it, capture the empty weight and press **Store Empty Weight**. The truck's stored empty weight is updated; there is no second weighing and no waybill. A driver name is not needed.
+- **Loaded truck:** tick it, capture the loaded weight and press **Complete with Stored Empty Weight**. The transaction completes immediately with net = loaded − stored empty weight, and the waybill is issued. The dialog shows the stored empty weight for queued trucks, or warns when the truck has none yet.
+
+Leave both unticked for normal two-pass weighing.
 
 ### 4.5 Constant weights
 
