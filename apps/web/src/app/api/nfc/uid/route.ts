@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { UserRole } from "@prisma/client";
+import { requireRole } from "@/lib/api";
 
 // Server-side proxy to the local NFC bridge (tools/nfc-bridge). The browser
 // calls this same-origin route, and the Next.js server (running on the same
@@ -6,14 +8,15 @@ import { NextResponse } from "next/server";
 // cross-origin / Private Network Access / mixed-content restrictions that
 // block a page from calling 127.0.0.1 directly.
 //
-// Auth is already enforced by middleware.ts (any /api/* route requires a
-// signed-in user).
+// Only staff who issue or verify cards may drive the reader.
 
 const BRIDGE = process.env.NFC_BRIDGE_URL || "http://127.0.0.1:7777";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const a = await requireRole([UserRole.ADMIN, UserRole.OPERATOR, UserRole.SECURITY]);
+  if (a.error) return a.error;
   const url = new URL(request.url);
   const timeout = Math.min(Number(url.searchParams.get("timeout")) || 15000, 60000);
   const debug = url.searchParams.get("debug") === "1";

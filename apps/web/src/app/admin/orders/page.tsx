@@ -8,7 +8,7 @@ import { OrderManagement } from "@/components/order-management";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { safeUserSelect } from "@/lib/utils";
+import { safeDriverSelect, safeUserSelect } from "@/lib/utils";
 export default async function Orders({ searchParams }: { searchParams: Promise<{ page?: string; q?: string }> }) {
   const s = await auth(); if (!s?.user) redirect("/login");
   const params = await searchParams;
@@ -17,13 +17,13 @@ export default async function Orders({ searchParams }: { searchParams: Promise<{
   const scope = userSiteScope(s.user);
   const where = { ...scope, ...(params.q ? { OR: [{ orderNumber: { contains: params.q, mode: "insensitive" as const } }, { product: { contains: params.q, mode: "insensitive" as const } }, { customerName: { contains: params.q, mode: "insensitive" as const } }, { supplierName: { contains: params.q, mode: "insensitive" as const } }] } : {}) };
   const [orders, total, sites, sources, destinations, products, organisations] = await Promise.all([
-    prisma.weighbridgeOrder.findMany({ where, include: { site: true, source: true, destination: true, productRef: true, originSite: true, destinationSite: true, createdBy: { select: safeUserSelect }, bookings: { include: { transactions: true, vehicle: true, driver: true, transporterOrganisation: true } } }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
+    prisma.weighbridgeOrder.findMany({ where, include: { site: true, source: true, destination: true, productRef: true, originSite: true, destinationSite: true, createdBy: { select: safeUserSelect }, bookings: { include: { transactions: true, vehicle: true, driver: { select: safeDriverSelect }, transporterOrganisation: true } } }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
     prisma.weighbridgeOrder.count({ where }),
     prisma.site.findMany({ where: { isActive: true, ...userScope(s.user) }, orderBy: { name: "asc" } }),
     prisma.source.findMany({ where: { isActive: true, ...userScope(s.user) }, orderBy: { name: "asc" } }),
     prisma.destination.findMany({ where: { isActive: true, ...userScope(s.user) }, orderBy: { name: "asc" } }),
     prisma.product.findMany({ where: { isActive: true, ...userScope(s.user) }, orderBy: { name: "asc" } }),
-    prisma.organisation.findMany({ where: { deletedAt: null, isActive: true, type: "HAULIER" }, orderBy: { name: "asc" } })
+    prisma.organisation.findMany({ where: { deletedAt: null, isActive: true, type: "HAULIER", ...(s.user.organisationId ? { clientMiningCompanies: { some: { miningCompanyId: s.user.organisationId, status: "ACTIVE" } } } : {}) }, orderBy: { name: "asc" } })
   ]);
   for (const o of orders) {
     const fKg = o.bookings.reduce((sum, b) => sum + b.transactions.filter(t => t.status === "COMPLETED").reduce((s, t) => s + t.netWeightKg, 0), 0);

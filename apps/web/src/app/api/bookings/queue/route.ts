@@ -1,9 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { NextRequest } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { fail, ok, requireSiteOrRole, withScopeErrors } from "@/lib/api";
-import { isPlatformSuperAdmin } from "@/lib/permissions";
+import { actorCanAccessSite, fail, ok, requireSiteOrRole, withScopeErrors } from "@/lib/api";
 import { siteIdentifierWhere } from "@/lib/utils";
 
 export const GET = withScopeErrors(async function GET(request: NextRequest) {
@@ -14,12 +12,7 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
   const resolvedSite = await prisma.site.findFirst({ where: siteIdentifierWhere(site) });
   if (!resolvedSite) return fail("Site not found", 404);
 
-  if (a.actor?.type === "user") {
-    const session = await auth();
-    if (session?.user && !isPlatformSuperAdmin(session.user) && resolvedSite.organisationId !== session.user.organisationId) {
-      return fail("Site not found", 404);
-    }
-  }
+  if (!(await actorCanAccessSite(a.actor!, resolvedSite))) return fail("Site not found", 404);
 
   const queue = await prisma.booking.findMany({
     where: {

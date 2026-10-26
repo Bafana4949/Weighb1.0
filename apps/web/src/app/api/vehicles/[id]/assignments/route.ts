@@ -33,7 +33,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const parsed = vehicleAssignmentSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid assignment", 422);
   if (parsed.data.transporterOrganisationId === v.organisationId) return fail("This organisation already owns the vehicle", 422);
-  const transporterOrg = await prisma.organisation.findUnique({ where: { id: parsed.data.transporterOrganisationId } });
+  const transporterOrg = await prisma.organisation.findFirst({ where: { id: parsed.data.transporterOrganisationId, type: "HAULIER", deletedAt: null } });
   if (!transporterOrg) return fail("Transporter organisation not found", 404);
   const existing = await prisma.vehicleTransporterAssignment.findFirst({ where: { vehicleId: id, transporterOrganisationId: parsed.data.transporterOrganisationId, status: "ACTIVE" } });
   if (existing) return fail("An active assignment already exists between this vehicle and transporter", 409);

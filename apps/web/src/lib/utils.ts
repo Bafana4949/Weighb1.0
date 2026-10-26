@@ -32,3 +32,14 @@ export function parsePagination(url: URL): { page: number; limit: number; skip: 
 
 /** Use as `select: safeUserSelect` on any User relation include — never spread a full User row (passwordHash) into a client-facing response. */
 export const safeUserSelect = { id: true, firstName: true, lastName: true, email: true } as const;
+
+/** Driver fields safe to send to any client (no ID number ciphertext or hash). */
+export const safeDriverSelect = {
+  id: true, organisationId: true, firstName: true, lastName: true, licenceNumber: true, licenceExpiry: true,
+  blacklistStatus: true, blacklistReason: true, photoUrl: true, rfidTag: true, anomalyScore: true, createdAt: true, updatedAt: true,
+} as const;
+
+/** Deep copy with secret fields removed — for server components passing Prisma rows to client components. */
+export function stripSecrets<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value, (key, v) => (["passwordHash", "idNumberEncrypted", "idNumberHash", "edgeKeyHash", "tokenHash"].includes(key) ? undefined : v)));
+}

@@ -32,7 +32,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const parsed = serviceOrderUpdateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid update", 422);
   if (parsed.data.assignedToId) {
-    const assignee = await prisma.user.findUnique({ where: { id: parsed.data.assignedToId } });
+    const assignee = await prisma.user.findFirst({
+      where: { id: parsed.data.assignedToId, status: "ACTIVE", OR: [{ platformRole: { not: null } }, { organisationId: before.organisationId }] },
+    });
     if (!assignee) return fail("Assignee not found", 404);
   }
   const now = new Date();

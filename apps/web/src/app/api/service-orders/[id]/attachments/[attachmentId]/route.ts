@@ -16,7 +16,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   try {
     const buffer = await getFile(attachment.storageKey);
     return new Response(new Uint8Array(buffer), {
-      headers: { "content-type": attachment.contentType, "content-disposition": `attachment; filename="${attachment.fileName}"` },
+      headers: {
+        "content-type": attachment.contentType,
+        // ASCII fallback plus RFC 5987 UTF-8 name; quotes and control characters stripped.
+        "content-disposition": `attachment; filename="${attachment.fileName.replace(/[^\x20-\x7e]|["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`,
+        "x-content-type-options": "nosniff",
+        "cache-control": "private, no-store",
+      },
     });
   } catch {
     return fail("File is unavailable", 404);

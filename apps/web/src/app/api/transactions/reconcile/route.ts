@@ -1,6 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
-import { fail, ok, requireSiteOrRole } from "@/lib/api";
+import { actorCanAccessSite, fail, ok, requireSiteOrRole } from "@/lib/api";
+import { prisma } from "@/lib/prisma";
 import { reconcileSchema } from "@/lib/validation";
 import { reconcileTransaction } from "@/lib/reconciliation";
 import { routeNotification } from "@/lib/notifications";
@@ -18,6 +19,10 @@ export async function POST(request: NextRequest) {
   if (access.error) return access.error;
   const parsed = reconcileSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail(parsed.error.issues.map((issue) => issue.message).join("; "), 422);
+
+  // An edge key may only write into its own site's chain; users only into sites they can access.
+  const target = await prisma.booking.findUnique({ where: { id: parsed.data.booking_id }, select: { site: { select: { id: true, organisationId: true } } } });
+  if (!target || !(await actorCanAccessSite(access.actor!, target.site))) return fail("Booking not found", 404);
 
   try {
     const result = await reconcileTransaction(parsed.data);

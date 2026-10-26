@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { fail,ok,requireRole } from "@/lib/api";
+import { fail,ok,requireRole, requireCompanyAdmin } from "@/lib/api";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
 
@@ -11,7 +11,7 @@ async function role(id: string) { return prisma.role.findUnique({ where: { id },
 function inScope(row: { organisationId: string | null }, callerOrg: string | null, isSuperAdmin: boolean) { return isSuperAdmin || row.organisationId === callerOrg; }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const a = await requireRole([UserRole.ADMIN]);
+  const a = await requireCompanyAdmin();
   if (a.error) return a.error;
   const { id } = await params;
   const before = await role(id);
@@ -30,7 +30,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
-  const a = await requireRole([UserRole.ADMIN]);
+  const a = await requireCompanyAdmin();
   if (a.error) return a.error;
   const { id } = await params;
   const before = await role(id);

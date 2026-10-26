@@ -2,7 +2,9 @@ import { UserRole } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { fail, ok, requireRole } from "@/lib/api";
-import { audit } from "@/lib/audit";
+import { audit, auditActor } from "@/lib/audit";
+import { canAccessSite } from "@/lib/site-access";
+import { orderReferenceError, productName as lookupProductName } from "@/lib/order-refs";
 import { safeUserSelect } from "@/lib/utils";
 import { orderBaseSchema } from "@/lib/validation";
 import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
@@ -19,28 +21,22 @@ const includeAll = {
   bookings: { include: { transactions: true } },
 } as const;
 
-async function scoped(id: string, user: { role: UserRole; organisationId: string | null; platformRole?: any }) {
+async function scoped(id: string, user: { id: string; role: UserRole; organisationId: string | null; platformRole?: any }) {
   const row = await prisma.weighbridgeOrder.findUnique({
     where: { id },
     include: includeAll,
   });
   if (!row) return null;
 
-  if (isPlatformSuperAdmin(user)) return row;
-
-  // Non-super-admin must have an organisation
-  if (!user.organisationId) return null;
-
-  // Transporter viewing: must be assigned to one of the bookings in this order
+  // Transporter viewing: must have a booking on this order, and sees only its own bookings.
   if (user.role === "TRANSPORTER") {
-    const isAssigned = row.bookings.some((b) => b.transporterOrganisationId === user.organisationId);
-    return isAssigned ? row : null;
+    if (!user.organisationId) return null;
+    const own = row.bookings.filter((b) => b.transporterOrganisationId === user.organisationId);
+    return own.length ? { ...row, bookings: own } : null;
   }
 
-  // Tenant admin/operator: order site must belong to user's organisation
-  if (row.site.organisationId !== user.organisationId) return null;
-
-  return row;
+  // Staff: the order's weighbridge site must be one the user may access.
+  return (await canAccessSite(user, row.site)) ? row : null;
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -70,6 +66,16 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const parsed = orderBaseSchema.partial().safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid order update", 422);
 
+  // Operators may pause and resume orders; everything else is an admin decision.
+  if (a.session!.user.role === "OPERATOR") {
+    const keys = Object.keys(parsed.data);
+    if (keys.some((k) => k !== "status") || !["PAUSED", "ACTIVE"].includes(parsed.data.status ?? "")) {
+      return fail("Operators can only pause or resume orders", 403);
+    }
+  }
+  const refError = await orderReferenceError(parsed.data, before.site.organisationId);
+  if (refError) return fail(refError, 422);
+
   if (parsed.data.orderNumber) {
     const cleanNo = parsed.data.orderNumber.trim();
     const existing = await prisma.weighbridgeOrder.findFirst({
@@ -82,12 +88,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (!isPlatformSuperAdmin(a.session!.user)) {
     delete parsed.data.ratePerTonZar;
   }
-  if (parsed.data.productId) {
-    const prod = await prisma.product.findUnique({ where: { id: parsed.data.productId } });
-    if (prod) {
-      (parsed.data as any).product = prod.name;
-    }
-  }
+  const name = await lookupProductName(parsed.data.productId);
+  if (name) parsed.data.product = name;
   const updated = await prisma.weighbridgeOrder.update({
     where: { id },
     data: parsed.data as Prisma.WeighbridgeOrderUncheckedUpdateInput,
@@ -105,7 +107,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       : "ORDER_UPDATED";
 
   await audit({
-    userId: a.session!.user.id,
+    ...auditActor(a.session!.user),
     siteId: before.siteId,
     action: auditAction,
     entityType: "weighbridge_order",
@@ -128,7 +130,7 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     data: { status: "CANCELLED" },
   });
   await audit({
-    userId: a.session!.user.id,
+    ...auditActor(a.session!.user),
     siteId: before.siteId,
     action: "ORDER_CANCELLED",
     entityType: "weighbridge_order",

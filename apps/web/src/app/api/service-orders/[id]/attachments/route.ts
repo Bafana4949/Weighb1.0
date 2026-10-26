@@ -7,7 +7,15 @@ import { safeUserSelect } from "@/lib/utils";
 import { saveFile } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const uploadSchema = z.object({ fileName: z.string().min(1).max(200), contentType: z.string().min(1).max(120), dataBase64: z.string().min(1) });
+// Evidence files only: documents and images. Anything else (HTML, SVG, scripts) is refused.
+export const ALLOWED_TYPES: Record<string, string[]> = {
+  "application/pdf": [".pdf"], "image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"], "image/webp": [".webp"],
+  "text/plain": [".txt", ".log"], "text/csv": [".csv"],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+};
+// base64 inflates by 4/3; reject oversized payloads before decoding them.
+const uploadSchema = z.object({ fileName: z.string().min(1).max(200), contentType: z.string().min(1).max(120), dataBase64: z.string().min(1).max(Math.ceil((MAX_BYTES * 4) / 3) + 8) });
 
 function inScope(row: { organisationId: string }, callerOrg: string | null) { return !callerOrg || row.organisationId === callerOrg; }
 
@@ -32,7 +40,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const buffer = Buffer.from(parsed.data.dataBase64, "base64");
   if (buffer.byteLength === 0) return fail("File is empty", 422);
   if (buffer.byteLength > MAX_BYTES) return fail("File exceeds the 10 MB limit", 413);
-  const extension = parsed.data.fileName.includes(".") ? `.${parsed.data.fileName.split(".").pop()}` : "";
+  const extension = parsed.data.fileName.includes(".") ? `.${parsed.data.fileName.split(".").pop()!.toLowerCase()}` : "";
+  const allowedExtensions = ALLOWED_TYPES[parsed.data.contentType];
+  if (!allowedExtensions || !allowedExtensions.includes(extension)) return fail("Only PDF, image, text, CSV, XLSX or DOCX files can be attached", 415);
   const storageKey = await saveFile(buffer, extension);
   const attachment = await prisma.serviceOrderAttachment.create({
     data: { serviceOrderId: id, uploadedById: a.session!.user.id, fileName: parsed.data.fileName, contentType: parsed.data.contentType, sizeBytes: buffer.byteLength, storageKey },

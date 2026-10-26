@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { Plus } from "lucide-react";
+import { safeDriverSelect } from "@/lib/utils";
 
 export default async function AdminBookingsPage({
   searchParams,
@@ -44,7 +45,7 @@ export default async function AdminBookingsPage({
       where,
       include: {
         vehicle: true,
-        driver: true,
+        driver: { select: safeDriverSelect },
         site: true,
         transporterOrganisation: true,
         order: true,

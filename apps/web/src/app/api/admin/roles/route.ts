@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { fail,ok,requireRole } from "@/lib/api";
+import { fail,ok,requireRole, requireCompanyAdmin } from "@/lib/api";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
 
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const a = await requireRole([UserRole.ADMIN]);
+  const a = await requireCompanyAdmin();
   if (a.error) return a.error;
   const isSuperAdmin = isPlatformSuperAdmin(a.session!.user);
   const parsed = roleSchema.safeParse(await request.json().catch(() => null));
