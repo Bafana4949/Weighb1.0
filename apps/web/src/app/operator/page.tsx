@@ -28,6 +28,7 @@ export default async function OperatorPage({ searchParams }: { searchParams: Pro
     </AppShell>
   );
   const today = startOfDay(new Date());
+  const products = await prisma.product.findMany({ where: { organisationId: site.organisationId, isActive: true }, select: { name: true }, orderBy: { name: "asc" } });
   const [queue, aggregate, turnaround, allSites] = await Promise.all([
     prisma.booking.findMany({
       where: {
@@ -70,6 +71,7 @@ export default async function OperatorPage({ searchParams }: { searchParams: Pro
     <AppShell role={session.user.role} userName={session.user.name ?? session.user.email ?? "Operator"} isSuperAdmin={isPlatformSuperAdmin(session.user)}>
       <LiveOperatorDashboard
         siteCode={site.code}
+        productOptions={products.map((p) => p.name)}
         availableSites={allSites}
         initialQueue={queue.map((item) => ({
           id: item.id,

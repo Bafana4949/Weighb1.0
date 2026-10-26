@@ -12,6 +12,8 @@ import Link from "next/link";
 import { formatKg, safeUserSelect } from "@/lib/utils";
 import { userScope } from "@/lib/access";
 import { PlatformDashboard } from "@/components/platform-dashboard";
+import { deriveDeviceStatus, deriveEdgeStatus } from "@/lib/hardware-health";
+import { TIER_LABEL } from "@/lib/tiers";
 import { loadAccessContext, siteWhere } from "@/lib/site-access";
 
 async function safeQuery<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -46,15 +48,31 @@ async function loadPlatformDashboard() {
   }));
   clientRows.sort((a, b) => b.tonnageTodayKg - a.tonnageTodayKg);
 
+  // Real platform health: tiers, edge connectivity, hardware faults and sync failures.
+  const now = new Date();
+  const [tierGroups, edgeSites, devices, activeUsers] = await Promise.all([
+    safeQuery(prisma.site.groupBy({ by: ["operatingTier"], where: { isActive: true }, _count: true }), [] as { operatingTier: string; _count: number }[]),
+    safeQuery(prisma.site.findMany({ where: { isActive: true, edgeKeyHash: { not: null } }, select: { edgeKeyHash: true, edgeLastSeenAt: true, edgeFailedSync: true } }), []),
+    safeQuery(prisma.hardwareDevice.findMany({ where: { isActive: true, site: { isActive: true } }, select: { isActive: true, maintenanceMode: true, lastHealth: true, lastSeenAt: true, configuration: true } }), []),
+    safeQuery(prisma.user.count({ where: { status: "ACTIVE", lastLoginAt: { gte: new Date(now.getTime() - 7 * 24 * 3600 * 1000) } } }), 0),
+  ]);
+  const tierCount = (t: string) => tierGroups.find((g) => g.operatingTier === t)?._count ?? 0;
+  const edgesOffline = edgeSites.filter((x) => deriveEdgeStatus(x, now) !== "ONLINE").length;
+  const deviceAlerts = devices.filter((d) => ["OFFLINE", "ERROR"].includes(deriveDeviceStatus(d, now)) && d.lastSeenAt).length;
+  const failedSync = edgeSites.reduce((n, x) => n + (x.edgeFailedSync ?? 0), 0) + syncFailures.length;
+
   const stats = [
     { label: "Total clients", value: clients.length },
     { label: "Active clients", value: clients.filter((c) => c.status === "ACTIVE").length },
     { label: "Suspended clients", value: clients.filter((c) => c.status === "SUSPENDED").length, variant: clients.some((c) => c.status === "SUSPENDED") ? ("warning" as const) : undefined },
     { label: "Operation sites", value: totalSites },
-    { label: "Manual weighbridges", value: totalSites },
+    { label: "Tiers (M / S / F)", value: `${tierCount("MANUAL")} / ${tierCount("SEMI_AUTOMATIC")} / ${tierCount("FULLY_AUTOMATIC")}` },
+    { label: "Edge controllers offline", value: `${edgesOffline} of ${edgeSites.length}`, variant: edgesOffline ? ("warning" as const) : undefined },
+    { label: "Hardware alerts", value: deviceAlerts, variant: deviceAlerts ? ("warning" as const) : undefined },
+    { label: "Failed syncs", value: failedSync, variant: failedSync ? ("warning" as const) : undefined },
+    { label: "Active users (7 days)", value: activeUsers },
     { label: "Transactions today", value: txToday._count },
     { label: "Tonnage today", value: `${((txToday._sum.netWeightKg ?? 0) / 1000).toFixed(1)} t` },
-    { label: "Platform status", value: "Operational" },
   ];
 
   const activity = activityRaw.map((log) => ({ id: log.id, action: log.action, entityType: log.entityType, occurredAt: log.occurredAt, userName: log.user ? `${log.user.firstName} ${log.user.lastName}` : null }));
@@ -84,9 +102,9 @@ export default async function AdminPage(){
   ]);
   return <AppShell role={s.user.role} userName={s.user.name??"Administrator"} orgName={s.user.organisationName} isSuperAdmin={false}>
     <div className="space-y-4">
-      <div><h1 className="text-2xl font-semibold text-foreground">Enterprise overview</h1><p className="text-xs text-muted-foreground">Manual weighbridge operations, sites, and tonnage overview.</p></div>
+      <div><h1 className="text-2xl font-semibold text-foreground">Enterprise overview</h1><p className="text-xs text-muted-foreground">Sites, tiers, throughput and exceptions across your company.</p></div>
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{[{l:"Active sites",v:sites.length},{l:"7-day trucks",v:tx._count},{l:"7-day tonnage",v:`${((tx._sum.netWeightKg??0)/1000).toFixed(1)} t`},{l:"Open incidents",v:openIncidents}].map(x=><Card key={x.l}><CardContent className="p-4"><p className="text-2xs uppercase tracking-wider text-muted-foreground">{x.l}</p><p className="mt-1 font-mono text-2xl font-semibold">{x.v}</p></CardContent></Card>)}</div>
-      <Card><CardHeader><CardTitle>Site performance</CardTitle></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Site</TableHead><TableHead>Location</TableHead><TableHead>Transactions</TableHead><TableHead>Incidents</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow></TableHeader><TableBody>{sites.map(site=><TableRow key={site.id}><TableCell><p className="font-medium">{site.name}</p><p className="font-mono text-xs text-muted-foreground">{site.code}</p></TableCell><TableCell>{site.address}</TableCell><TableCell>{site._count.transactions}</TableCell><TableCell>{site._count.incidents}</TableCell><TableCell><Badge>Operational</Badge></TableCell><TableCell className="text-right"><Link href={`/operator?site=${site.code}`} target="_blank" className="text-xs text-primary underline">Open Console</Link></TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
+      <Card><CardHeader><CardTitle>Site performance</CardTitle></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Site</TableHead><TableHead>Location</TableHead><TableHead>Transactions</TableHead><TableHead>Incidents</TableHead><TableHead>Tier / edge</TableHead><TableHead></TableHead></TableRow></TableHeader><TableBody>{sites.map(site=><TableRow key={site.id}><TableCell><p className="font-medium">{site.name}</p><p className="font-mono text-xs text-muted-foreground">{site.code}</p></TableCell><TableCell>{site.address}</TableCell><TableCell>{site._count.transactions}</TableCell><TableCell>{site._count.incidents}</TableCell><TableCell><div className="flex flex-wrap gap-1"><Badge variant="info">{TIER_LABEL[site.operatingTier]}</Badge>{site.edgeKeyHash ? (deriveEdgeStatus(site) === "ONLINE" ? <Badge>Edge online</Badge> : <Badge variant="warning">Edge offline</Badge>) : null}</div></TableCell><TableCell className="text-right"><Link href={`/operator?site=${site.code}`} target="_blank" className="text-xs text-primary underline">Open Console</Link></TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
     </div>
   </AppShell>;
 }

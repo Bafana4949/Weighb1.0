@@ -101,7 +101,10 @@ export function LiveOperatorDashboard({
   availableSites,
   initialQueue,
   stats,
+  productOptions = [],
 }: {
+  /** Active products of the site's company, offered for walk-in weighments. */
+  productOptions?: string[];
   siteCode: string;
   availableSites: { code: string; name: string }[];
   initialQueue: QueueItem[];
@@ -200,7 +203,7 @@ export function LiveOperatorDashboard({
   const [walkInDriver, setWalkInDriver] = useState("");
   const [walkInTransporter, setWalkInTransporter] = useState("");
   const [walkInTrailer, setWalkInTrailer] = useState("");
-  const [walkInCommodity, setWalkInCommodity] = useState("Coal (ROM)");
+  const [walkInCommodity, setWalkInCommodity] = useState(productOptions.length === 1 ? productOptions[0]! : "");
 
   const toast = useToast();
   const router = useRouter();
@@ -1942,11 +1945,13 @@ export function LiveOperatorDashboard({
                       <div className="space-y-1">
                         <Label className="text-2xs">Cargo / Commodity</Label>
                         <Input
-                          placeholder="e.g. Coal (ROM), Washed Coal, Duff Coal"
+                          list="walkin-products"
+                          placeholder={productOptions.length ? "Choose or type the product" : "Product being weighed"}
                           value={walkInCommodity}
                           onChange={(e) => setWalkInCommodity(e.target.value)}
                           className="h-8 text-xs"
                         />
+                        <datalist id="walkin-products">{productOptions.map((p) => <option key={p} value={p} />)}</datalist>
                       </div>
                     </div>
                   )}

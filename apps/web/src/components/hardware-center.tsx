@@ -114,7 +114,7 @@ export function HardwareCenter({ companies, sites, isSuperAdmin, initialSiteId }
           <TierCard key={`${site.id}-tier`} siteId={site.id} state={tier} readOnly={readOnly} onSaved={(msg) => { flash("ok", msg); void reload(); }} onError={(m) => flash("error", m)} />
           <div className="space-y-4">
             <EdgeCard site={site} readOnly={readOnly} onError={(m) => flash("error", m)} onChanged={(m) => flash("ok", m)} />
-            {!readOnly && <ProfileCard siteId={site.id} profiles={profiles} onApplied={(m) => { flash("ok", m); void reload(); }} onError={(m) => flash("error", m)} />}
+            {!readOnly && <ProfileCard key={`${site.id}-${tier.tier}`} siteId={site.id} tier={tier.tier} profiles={profiles} onApplied={(m) => { flash("ok", m); void reload(); }} onError={(m) => flash("error", m)} />}
           </div>
         </div>
       )}
@@ -286,10 +286,12 @@ function EdgeCard({ site, readOnly, onError, onChanged }: { site: SiteOption; re
   );
 }
 
-function ProfileCard({ siteId, profiles, onApplied, onError }: { siteId: string; profiles: Profile[]; onApplied: (m: string) => void; onError: (m: string) => void }) {
-  const [profileId, setProfileId] = useState(profiles[0]?.id ?? "");
+function ProfileCard({ siteId, tier, profiles, onApplied, onError }: { siteId: string; tier: OperatingTier; profiles: Profile[]; onApplied: (m: string) => void; onError: (m: string) => void }) {
+  // Default to the template that matches the site's tier.
+  const preferred = profiles.find((p) => p.tier === tier) ?? profiles[0];
+  const [profileId, setProfileId] = useState(preferred?.id ?? "");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (!profileId && profiles[0]) setProfileId(profiles[0].id); }, [profiles, profileId]);
+  useEffect(() => { if (!profileId && preferred) setProfileId(preferred.id); }, [preferred, profileId]);
   const selected = profiles.find((p) => p.id === profileId);
   async function apply() {
     setBusy(true);

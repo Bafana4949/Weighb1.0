@@ -86,7 +86,7 @@ export default async function HardwareHealthPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md bg-muted/40 p-2 text-xs sm:grid-cols-4">
-                  <span className="text-muted-foreground">Edge</span><span className={edge === "ONLINE" ? "text-success" : edge === "OFFLINE" ? "text-danger" : "text-muted-foreground"}>{edge === "NOT_REQUIRED" ? "Not used" : edge.replace(/_/g, " ").toLowerCase()}</span>
+                  <span className="text-muted-foreground">Edge</span><span className={edge === "ONLINE" ? "text-success" : edge === "OFFLINE" ? "text-danger" : "text-muted-foreground"}>{edge === "NOT_REQUIRED" ? (devices.some((d) => d.type === "EDGE_DAEMON") ? "Key not issued" : "Not used") : edge.replace(/_/g, " ").toLowerCase()}</span>
                   <span className="text-muted-foreground">Last heartbeat</span><span>{ageLabel(site.edgeLastSeenAt, now)}</span>
                   <span className="text-muted-foreground">MQTT</span><span>{site.edgeMqttConnected == null ? "—" : site.edgeMqttConnected ? "Connected" : "Disconnected"}</span>
                   <span className="text-muted-foreground">Pending sync</span><span className={site.edgePendingSync ? "text-warning" : ""}>{site.edgePendingSync ?? 0}{site.edgeFailedSync ? ` (${site.edgeFailedSync} failed)` : ""}</span>
