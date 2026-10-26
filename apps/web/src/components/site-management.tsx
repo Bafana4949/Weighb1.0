@@ -706,7 +706,7 @@ export function SiteManagement({
                       ["SINGLE", "Weigh empty once: capture and store the truck’s empty weight"],
                     ] as [string, string][]).map(([key, label]) => (
                       <label key={key} className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" name={`wf_${key}`} defaultChecked={(configuring.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"]).includes(key)} className="rounded" />
+                        <input type="checkbox" name={`wf_${key}`} defaultChecked={(configuring.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"]).includes(key)} className="rounded" />
                         {label}
                       </label>
                     ))}
@@ -884,9 +884,9 @@ const WEIGHING_OPTIONS: [string, string][] = [
  * "weigh once" choices when they are ticked here.
  */
 function WeighingOptions({ site, onSaved }: { site: SiteRow; onSaved: (allowedWorkflows: string[]) => void }) {
-  const [selected, setSelected] = useState<string[]>(site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"]);
+  const [selected, setSelected] = useState<string[]>(site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"]);
   const [state, setState] = useState<{ busy: boolean; message: string | null; error: boolean }>({ busy: false, message: null, error: false });
-  const initial = (site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"]).join();
+  const initial = (site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"]).join();
   async function save() {
     setState({ busy: true, message: null, error: false });
     try {

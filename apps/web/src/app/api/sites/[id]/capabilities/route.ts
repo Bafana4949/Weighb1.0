@@ -48,7 +48,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     operatingTier: resolved.effectiveTier,
     manualEntryPolicy: resolved.manualEntryPolicy,
     requireCardIdentification: resolved.requireCardIdentification,
-    allowedWorkflows: site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"],
+    allowedWorkflows: site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"],
   });
 }
 

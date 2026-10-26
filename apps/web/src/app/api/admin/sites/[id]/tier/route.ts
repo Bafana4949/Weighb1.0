@@ -29,7 +29,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     siteId: site.id,
     ...resolved,
     overrides: parseOverrides(site.featureOverrides),
-    allowedWorkflows: site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"],
+    allowedWorkflows: site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"],
     highestSupportedTier: highestSupportedTier(site.hardwareDevices),
   });
 }

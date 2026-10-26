@@ -21,7 +21,7 @@ export function SiteWizard({ companies }: { companies: Company[] }) {
   const [form, setForm] = useState({
     organisationId: companies[0]?.id ?? "", name: "", code: "", type: "MINE", address: "", latitude: "", longitude: "",
     operatingTier: "MANUAL" as OperatingTier, topology: "BIDIRECTIONAL_SINGLE", laneCount: 1, operatingStart: "05:00", operatingEnd: "22:00",
-    profileId: "builtin-manual" as string | null, allowedWorkflows: ["DISPATCH", "RECEIPT", "KNOWN_TARE"] as Workflow[],
+    profileId: "builtin-manual" as string | null, allowedWorkflows: ["DISPATCH", "RECEIPT"] as Workflow[],
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -99,7 +99,7 @@ async function main() {
       const site = await prisma.site.create({
         data: {
           organisationId: company.id, code: s.code, name: s.name, address: s.address, latitude: s.lat, longitude: s.lng, topology: s.topology, operatingTier: s.tier,
-          config: { create: { allowedWorkflows: ["DISPATCH", "RECEIPT", "KNOWN_TARE"] } },
+          config: { create: { allowedWorkflows: ["DISPATCH", "RECEIPT"] } },
           lanes: { create: Array.from({ length: s.lanes }, (_, i) => ({ laneNumber: i + 1, name: s.topology === "DUAL_ENTRY_EXIT" ? (i === 0 ? "Entry lane" : "Exit lane") : "Weighbridge 1", direction: s.topology === "DUAL_ENTRY_EXIT" ? (i === 0 ? "ENTRY" : "EXIT") : null })) },
         },
         include: { lanes: true },

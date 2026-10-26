@@ -535,8 +535,9 @@ model SiteConfig {
   requireDriverLicenceValid Boolean  @default(true) @map("require_driver_licence_valid")
   retentionYears            Int      @default(5) @map("retention_years")
   /// Weighing flows this site permits: DISPATCH (tare then gross), RECEIPT (gross then tare),
-  /// KNOWN_TARE (stored tare), SINGLE (one measurement).
-  allowedWorkflows          String[] @default(["DISPATCH", "RECEIPT", "KNOWN_TARE"]) @map("allowed_workflows")
+  /// KNOWN_TARE (weigh loaded once with the stored empty weight), SINGLE (weigh empty once
+  /// to store it). The two weigh-once options are off until an administrator enables them.
+  allowedWorkflows          String[] @default(["DISPATCH", "RECEIPT"]) @map("allowed_workflows")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @updatedAt @map("updated_at")
   site                      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)

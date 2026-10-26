@@ -82,7 +82,7 @@ Enforcement today:
 
 ## 5. Permitted weighing workflows
 
-Each site stores `allowedWorkflows` (at least one of `DISPATCH`, `RECEIPT`, `KNOWN_TARE`, `SINGLE`; default the first three). They are edited by the Super Admin (tier card, site wizard) and by Company and Site Admins (**Sites → View Details → Weighing options**), and returned by the capabilities API. All four are enforced by the transaction API (a flow that is not enabled returns 422):
+Each site stores `allowedWorkflows` (at least one of `DISPATCH`, `RECEIPT`, `KNOWN_TARE`, `SINGLE`; default `DISPATCH` and `RECEIPT`; the two weigh-once options are off until an administrator enables them). They are edited by the Super Admin (tier card, site wizard) and by Company and Site Admins (**Sites → View Details → Weighing options**), and returned by the capabilities API. All four are enforced by the transaction API (a flow that is not enabled returns 422):
 
 | Option | Label | What the operator can do |
 |---|---|---|

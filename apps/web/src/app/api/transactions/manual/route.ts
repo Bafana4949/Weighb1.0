@@ -212,7 +212,7 @@ async function weightPolicy(actor: Actor, siteId: string, body: any): Promise<{ 
 
 /** Weighing flows the site's administrators have enabled (DISPATCH, RECEIPT, KNOWN_TARE, SINGLE). */
 async function siteWorkflowsFor(siteId: string): Promise<string[]> {
-  return (await prisma.siteConfig.findUnique({ where: { siteId }, select: { allowedWorkflows: true } }))?.allowedWorkflows ?? ["DISPATCH", "RECEIPT", "KNOWN_TARE"];
+  return (await prisma.siteConfig.findUnique({ where: { siteId }, select: { allowedWorkflows: true } }))?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"];
 }
 
 /** A vehicle this site's company may weigh: own fleet, contracted hauliers, or on active assignment to them. */
