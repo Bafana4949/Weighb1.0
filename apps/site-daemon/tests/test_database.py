@@ -46,3 +46,28 @@ def test_transaction_hash_chain_and_queue(tmp_path) -> None:
     assert due[0]["payload"]["edge_transaction_id"] == first.edge_transaction_id
     db.mark_synced(due[0]["id"], first.edge_transaction_id, "cloud-hash")
     assert db.pending_count() == 1
+
+
+def test_chain_verification_detects_tampering_and_accepts_cloud_anchors(tmp_path) -> None:
+    db = EdgeDatabase(str(tmp_path / "edge.db"), str(tmp_path / "backups"))
+    item = booking()
+
+    def record(gross: int):
+        return db.create_transaction(
+            site_code="ALPHA", booking=item, gross_weight_kg=gross,
+            captured_at=datetime.now(timezone.utc), entry_at=None, exit_at=datetime.now(timezone.utc), overload=False,
+            overload_variance_kg=0, anpr_confidence=0.94, entry_photo_url=None, scale_photo_url=None,
+        )
+
+    first = record(52000)
+    db.mark_synced(db.list_due_sync_items()[0]["id"], first.edge_transaction_id, "c")
+    # All synced: the ledger may adopt a newer cloud head (e.g. another lane's transaction).
+    assert db.bootstrap_chain_head("a" * 64) is True
+    second = record(52100)
+    assert second.previous_hash == "a" * 64
+    assert db.verify_chain() == []
+
+    with db._connect() as connection:
+        connection.execute("UPDATE transactions SET net_weight_kg = net_weight_kg + 1000 WHERE edge_transaction_id=?", (first.edge_transaction_id,))
+    problems = db.verify_chain()
+    assert len(problems) == 1 and first.edge_transaction_id in problems[0]

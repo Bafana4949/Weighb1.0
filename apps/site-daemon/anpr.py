@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import logging
 import re
 import time
@@ -11,11 +12,13 @@ from typing import Iterable
 try:
     import cv2
     import numpy as np
-    ANPR_AVAILABLE = True
 except ImportError:
     cv2 = None
     np = None
-    ANPR_AVAILABLE = False
+# easyocr (and the torch it pulls in) is only present in images built with
+# INSTALL_ANPR=true; find_spec checks for it without paying torch's import cost.
+EASYOCR_AVAILABLE = importlib.util.find_spec("easyocr") is not None
+ANPR_AVAILABLE = cv2 is not None and np is not None and EASYOCR_AVAILABLE
 
 from config import AnprConfig
 from models import AnprResult
@@ -37,8 +40,18 @@ class AnprEngine:
     def __init__(self, config: AnprConfig) -> None:
         self.config = config
         self._reader = None
-        if not ANPR_AVAILABLE:
-            LOGGER.warning("ANPR components (cv2/numpy/easyocr) are not installed. ANPR will be disabled.")
+        self.last_error: str | None = None
+        if not config.enabled:
+            self.unavailable_reason: str | None = "ANPR disabled in config"
+        elif not ANPR_AVAILABLE:
+            self.unavailable_reason = "ANPR packages (opencv/numpy/easyocr) not installed"
+        elif config.camera_source is None:
+            self.unavailable_reason = "no ANPR camera_source configured"
+        else:
+            self.unavailable_reason = None
+        self.available = self.unavailable_reason is None
+        if not self.available:
+            LOGGER.info("ANPR unavailable (%s); vehicles are checked in manually", self.unavailable_reason)
 
     @property
     def reader(self):
@@ -121,7 +134,7 @@ class AnprEngine:
         return frames, None
 
     def recognise(self, source: str | int | None = None) -> AnprResult:
-        if not ANPR_AVAILABLE:
+        if not self.available:
             return AnprResult(plate_text=None, confidence=0, timestamp=datetime.now(timezone.utc), image_path=None, bbox_coordinates=None, attempts=0)
             
         camera_source = self.config.camera_source if source is None else source

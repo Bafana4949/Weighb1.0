@@ -1,9 +1,20 @@
+# Runtime dependencies for the default (no-ANPR) image. ANPR extras live in
+# requirements-anpr.txt and are only installed with --build-arg INSTALL_ANPR=true.
+#
+# The Docker image runs Python 3.11 and keeps the exact pins. Three of them have
+# no wheels for Python 3.14 (used for local dev/test), so those interpreters get
+# the nearest compatible release instead via environment markers.
+opencv-python-headless==4.11.0.86
+numpy<2.0.0; python_version < "3.13"
+numpy>=2.3.2,<3; python_version >= "3.13"
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
 pyserial==3.5
 pyserial-asyncio==0.6
 paho-mqtt==2.1.0
 httpx==0.28.1
-PyYAML==6.0.2
-pydantic==2.11.4
+PyYAML==6.0.2; python_version < "3.14"
+PyYAML==6.0.3; python_version >= "3.14"
+pydantic==2.11.4; python_version < "3.14"
+pydantic>=2.12,<3; python_version >= "3.14"
 python-multipart==0.0.20

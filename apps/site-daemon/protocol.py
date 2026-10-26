@@ -81,3 +81,13 @@ def build_command(action: str, target: str | None = None, value: str | None = No
             raise ValueError("invalid command value")
         parts.append(f"VAL:{clean_value}")
     return (";".join(parts) + "$\r\n").encode("ascii")
+
+
+def parse_command(packet: bytes) -> tuple[str, str | None, str | None]:
+    """Inverse of build_command: (action, target, value)."""
+    text = packet.decode("ascii").strip()
+    if not (text.startswith("@CMD:") and text.endswith("$")):
+        raise ValueError(f"malformed command packet: {text!r}")
+    parts = text[5:-1].split(";")
+    fields = dict(part.split(":", 1) for part in parts[1:] if ":" in part)
+    return parts[0], fields.get("TGT"), fields.get("VAL")

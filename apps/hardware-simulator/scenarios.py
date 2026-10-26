@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import socket
 import time
@@ -32,7 +33,10 @@ HOST = "127.0.0.1"
 CONTROL_PORT = 7002
 DAEMON_URL = "http://127.0.0.1:8010"
 WEB_URL = "http://127.0.0.1:3010"
-API_KEY = "3f1fddae9eaa2ce74b118a22b041a70732f1700c6c86430126e380e6189db50d"
+# Per-site key issued from the cloud UI (only needed to read the arrival queue) and
+# the daemon's local operator token. Never hard-code either.
+API_KEY = os.getenv("WB_SITE_API_KEY", "")
+EDGE_TOKEN = os.getenv("WB_LOCAL_API_TOKEN", "")
 
 # Which hardware-simulator instance update()/ramp()/reset() talk to, and which
 # daemon lane check-in/accept target. Set once from CLI args in main() so a
@@ -41,6 +45,14 @@ API_KEY = "3f1fddae9eaa2ce74b118a22b041a70732f1700c6c86430126e380e6189db50d"
 _control_host = HOST
 _control_port = CONTROL_PORT
 _lane: str | None = None
+_edge_token = EDGE_TOKEN
+
+
+def _edge_headers() -> dict[str, str]:
+    headers = {"content-type": "application/json"}
+    if _edge_token:
+        headers["x-edge-token"] = _edge_token
+    return headers
 
 
 def update(**values: object) -> None:
@@ -59,7 +71,7 @@ def _post_check_in(payload: dict[str, object], daemon_url: str, timeout: float) 
     body = json.dumps(payload).encode()
     request = urllib.request.Request(
         f"{daemon_url.rstrip('/')}/edge/check-in", data=body,
-        headers={"content-type": "application/json"}, method="POST",
+        headers=_edge_headers(), method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -99,7 +111,7 @@ def accept_load(daemon_url: str, lane: str | None = None) -> None:
         body["lane"] = resolved_lane
     request = urllib.request.Request(
         f"{daemon_url.rstrip('/')}/edge/driver-decision", data=json.dumps(body).encode(),
-        headers={"content-type": "application/json"}, method="POST",
+        headers=_edge_headers(), method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
@@ -330,13 +342,15 @@ def main() -> None:
     parser.add_argument("--plate", default=None, help="Vehicle plate to check in and weigh. Only affects 'normal'. If omitted, a random truck is auto-picked from the current arrival queue.")
     parser.add_argument("--daemon-url", default=DAEMON_URL, help=f"Site daemon base URL (default {DAEMON_URL}).")
     parser.add_argument("--web-url", default=WEB_URL, help=f"Cloud web app base URL, used to read the live arrival queue (default {WEB_URL}).")
-    parser.add_argument("--api-key", default=API_KEY, help="Site daemon API key (must match SITE_DAEMON_API_KEY on the web container).")
+    parser.add_argument("--api-key", default=API_KEY, help="The site's own edge API key (wbe_...), used to read the arrival queue. Defaults to $WB_SITE_API_KEY.")
+    parser.add_argument("--edge-token", default=EDGE_TOKEN, help="The daemon's local operator token (x-edge-token). Defaults to $WB_LOCAL_API_TOKEN.")
     parser.add_argument("--site", default=None, help="Site code. If omitted, auto-detected from the daemon's own /health endpoint so it always matches whatever daemon --daemon-url points at.")
     parser.add_argument("--control-host", default=HOST, help=f"Hardware-simulator control-socket host (default {HOST}). Use to target one lane's simulator on a DUAL_ENTRY_EXIT site.")
     parser.add_argument("--control-port", type=int, default=CONTROL_PORT, help=f"Hardware-simulator control-socket port (default {CONTROL_PORT}). e.g. 7012 for lane A, 7014 for lane B in the dual-lane demo compose profile.")
     parser.add_argument("--lane", default=None, help="Daemon lane id to check in / accept on (e.g. 'north', 'south'). Required for a DUAL_ENTRY_EXIT daemon; omit for a single-lane BIDIRECTIONAL_SINGLE site.")
     args = parser.parse_args()
-    global _control_host, _control_port, _lane
+    global _control_host, _control_port, _lane, _edge_token
+    _edge_token = args.edge_token
     _control_host = args.control_host
     _control_port = args.control_port
     _lane = args.lane

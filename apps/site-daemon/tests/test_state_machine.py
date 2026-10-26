@@ -124,3 +124,67 @@ async def test_reset_does_not_leave_false_incomplete_session(tmp_path) -> None:
     await machine.reset()
     assert machine.state == WeighingState.IDLE
     assert db.incomplete_sessions() == []
+
+
+@pytest.mark.asyncio
+async def test_refused_entry_open_keeps_lane_waiting_and_light_red(tmp_path) -> None:
+    from gate_safety import GateInterlockError
+
+    config = make_config(tmp_path)
+    db = EdgeDatabase(config.storage.sqlite_path, config.storage.backup_directory)
+    commands: list[bytes] = []
+    refuse = [True]
+
+    async def send(command: bytes) -> None:
+        if b"GATE_OPEN" in command and refuse[0]:
+            raise GateInterlockError("ENTRY gate open refused: obstruction")
+        commands.append(command)
+
+    async def snapshot() -> None:
+        return None
+
+    async def alert(_: Alert) -> None:
+        return None
+
+    machine = WeighingStateMachine(config, db, FakeMqtt(), send, snapshot, alert)  # type: ignore[arg-type]
+    now = datetime.now(timezone.utc)
+    await machine.authorise(make_booking(), AnprResult(plate_text="AB 123 CD GP", confidence=0.95, timestamp=now, image_path=None, bbox_coordinates=None))
+    await machine.process(frame(now, p1=True, rfid="DRV00421"))
+    assert machine.state == WeighingState.VEHICLE_APPROACHING
+    assert not any(b"VAL:GREEN" in command for command in commands), "never green while the barrier is down"
+    refuse[0] = False
+    await machine.process(frame(now + timedelta(seconds=0.1), p1=True, rfid="DRV00421"))
+    assert machine.state == WeighingState.POSITIONING
+    assert commands.index(b"@CMD:GATE_OPEN;TGT:ENTRY$\r\n") < commands.index(b"@CMD:LIGHT;TGT:ENTRY;VAL:GREEN$\r\n")
+
+
+@pytest.mark.asyncio
+async def test_fail_safe_closes_everything_and_operator_reset_recovers(tmp_path) -> None:
+    config = make_config(tmp_path)
+    db = EdgeDatabase(config.storage.sqlite_path, config.storage.backup_directory)
+    commands: list[bytes] = []
+    alerts: list[Alert] = []
+
+    async def send(command: bytes) -> None:
+        commands.append(command)
+
+    async def snapshot() -> None:
+        return None
+
+    async def alert(item: Alert) -> None:
+        alerts.append(item)
+
+    machine = WeighingStateMachine(config, db, FakeMqtt(), send, snapshot, alert)  # type: ignore[arg-type]
+    await machine.authorise(make_booking(), AnprResult(plate_text="AB 123 CD GP", confidence=0.95, timestamp=datetime.now(timezone.utc), image_path=None, bbox_coordinates=None))
+    await machine.fail_safe("boom")
+    assert machine.state == WeighingState.FAULT
+    assert b"@CMD:GATE_CLOSE;TGT:ENTRY$\r\n" in commands and b"@CMD:GATE_CLOSE;TGT:EXIT$\r\n" in commands
+    assert alerts and alerts[0].type == "SYSTEM_FAULT"
+    # With a vehicle in progress the fault is sticky until an operator intervenes.
+    await machine.process(frame(datetime.now(timezone.utc), weight=30000, p1=True, p2=True))
+    assert machine.state == WeighingState.FAULT
+    previous = await machine.operator_reset("scale checked by technician")
+    assert previous == {"state": "FAULT", "booking_id": "b1"}
+    assert machine.state == WeighingState.IDLE and machine.booking is None
+    with pytest.raises(ValueError):
+        await machine.operator_reset("nothing to reset here")

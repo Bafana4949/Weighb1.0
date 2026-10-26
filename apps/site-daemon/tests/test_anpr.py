@@ -14,6 +14,7 @@ def test_plate_normalisation_and_validation() -> None:
 
 def test_multi_read_majority_vote() -> None:
     engine = AnprEngine(AnprConfig(camera_source="unused", confidence_threshold=0.75, max_retries=1, rapid_capture_count=5))
+    engine.available = True  # OCR is mocked below, so easyocr need not be installed
     fake_frames = [np.zeros((40, 120, 3), dtype=np.uint8) for _ in range(5)]
     reads = iter([
         ("AB 123 CD GP", 0.91, (1, 2, 3, 4)),
@@ -26,3 +27,12 @@ def test_multi_read_majority_vote() -> None:
         result = engine.recognise("unused")
     assert result.plate_text == "AB 123 CD GP"
     assert result.confidence == 0.91
+
+
+def test_missing_easyocr_disables_anpr_cleanly() -> None:
+    with patch("anpr.ANPR_AVAILABLE", False):
+        engine = AnprEngine(AnprConfig(camera_source="unused"))
+    assert engine.available is False
+    assert "not installed" in (engine.unavailable_reason or "")
+    result = engine.recognise("unused")
+    assert result.plate_text is None and result.attempts == 0

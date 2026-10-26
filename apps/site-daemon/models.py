@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WeighingState(StrEnum):
@@ -103,3 +103,56 @@ class Alert(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     lane_number: int | None = None
+
+
+class _CloudModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class CloudSite(_CloudModel):
+    id: str
+    code: str
+    name: str
+    organisation_id: str = Field(alias="organisationId")
+    timezone: str | None = None
+    # MANUAL | SEMI_AUTOMATIC | FULLY_AUTOMATIC; kept as str so a new tier doesn't
+    # make the whole config unreadable.
+    operating_tier: str = Field(alias="operatingTier")
+
+
+class CloudLane(_CloudModel):
+    id: str
+    lane_number: int = Field(alias="laneNumber")
+    name: str | None = None
+    direction: str | None = None
+
+
+class CloudDevice(_CloudModel):
+    id: str
+    device_key: str = Field(alias="deviceKey")
+    type: str
+    name: str | None = None
+    lane_number: int | None = Field(default=None, alias="laneNumber")
+    connection_type: str | None = Field(default=None, alias="connectionType")
+    configuration: dict[str, Any] | None = None
+    is_active: bool = Field(default=True, alias="isActive")
+    is_simulated: bool = Field(default=False, alias="isSimulated")
+    maintenance_mode: bool = Field(default=False, alias="maintenanceMode")
+
+
+class CloudMqtt(_CloudModel):
+    topic_prefix: str = Field(alias="topicPrefix")
+
+
+class CloudEdgeConfig(_CloudModel):
+    """`data` of GET /edge/config."""
+
+    site: CloudSite
+    lanes: list[CloudLane] = Field(default_factory=list)
+    devices: list[CloudDevice] = Field(default_factory=list)
+    mqtt: CloudMqtt
+
+    def device(self, device_key: str | None) -> CloudDevice | None:
+        if not device_key:
+            return None
+        return next((device for device in self.devices if device.device_key == device_key), None)

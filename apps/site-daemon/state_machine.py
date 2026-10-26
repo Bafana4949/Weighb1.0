@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from config import AppConfig
 from database import EdgeDatabase
+from gate_safety import GateInterlockError
 from models import ActiveBooking, Alert, AnprResult, EdgeTransaction, TelemetryFrame, WeighingState
 if TYPE_CHECKING:
     from mqtt_client import MqttService
@@ -111,14 +112,50 @@ class WeighingStateMachine:
     async def enter_manual_mode(self, reason: str) -> None:
         self.manual_mode_reason = reason
         await self.transition(WeighingState.MANUAL_MODE, reason)
+        await self._close_everything()
+
+    async def _close_everything(self) -> None:
         for command in (
             build_command("LIGHT", "ENTRY", "RED"),
             build_command("LIGHT", "EXIT", "RED"),
+            build_command("GATE_CLOSE", "ENTRY"),
+            build_command("GATE_CLOSE", "EXIT"),
         ):
             try:
                 await self.send_command(command)
             except ConnectionError:
                 LOGGER.warning("Could not deliver fail-safe command because hardware transport is disconnected")
+            except Exception:
+                LOGGER.exception("Fail-safe command %r failed", command)
+
+    async def _open_gate(self, target: str) -> str | None:
+        """Open through the interlock. Returns the refusal reason (gate left closed) or None."""
+        try:
+            await self.send_command(build_command("GATE_OPEN", target))
+        except GateInterlockError as error:
+            return str(error)
+        return None
+
+    async def fail_safe(self, reason: str) -> None:
+        """Unexpected error while processing: close both gates, show red and enter FAULT.
+        A lane with a vehicle in progress stays there until an operator resets it."""
+        await self._close_everything()
+        try:
+            await self.transition(WeighingState.FAULT, reason)
+        except Exception:
+            self.state = WeighingState.FAULT
+            LOGGER.exception("Could not persist FAULT transition")
+        if not self.scale_fault_alerted:
+            self.scale_fault_alerted = True
+            await self.raise_alert(Alert(lane_number=self.lane_number, type="SYSTEM_FAULT", severity="HIGH", title="Lane halted after an internal error", description=reason))
+
+    async def operator_reset(self, reason: str) -> dict[str, str | None]:
+        if self.state not in {WeighingState.FAULT, WeighingState.MANUAL_MODE}:
+            raise ValueError(f"lane is {self.state}; only FAULT or MANUAL_MODE can be reset")
+        previous = {"state": str(self.state), "booking_id": self.booking.id if self.booking else None}
+        await self._close_everything()
+        await self.reset(f"operator reset: {reason}")
+        return previous
 
     async def process(self, frame: TelemetryFrame) -> None:
         if self.state == WeighingState.MANUAL_MODE:
@@ -137,10 +174,11 @@ class WeighingStateMachine:
             if frame.rfid_tag and frame.rfid_tag != self.booking.driver_rfid:
                 await self._driver_mismatch(frame.rfid_tag)
                 return
-            if frame.rfid_tag == self.booking.driver_rfid:
-                await self.send_command(build_command("BUZZER", value="OFF"))
+            # The light only turns green once the barrier has actually been opened; a
+            # refused open leaves the lane where it is and is retried on the next frame.
+            if frame.rfid_tag == self.booking.driver_rfid and await self._open_gate("ENTRY") is None:
                 await self.send_command(build_command("LIGHT", "ENTRY", "GREEN"))
-                await self.send_command(build_command("GATE_OPEN", "ENTRY"))
+                await self.send_command(build_command("BUZZER", value="OFF"))
                 await self.transition(WeighingState.POSITIONING, "plate and driver RFID verified")
 
             if frame.position_sensor_1 and frame.position_sensor_2:
@@ -321,24 +359,41 @@ class WeighingStateMachine:
             lane_number=self.lane_number,
         )
         self.last_transaction = transaction
-        self.mqtt.publish("transaction", transaction.model_dump(mode="json"), qos=1)
+        self.mqtt.publish("transaction", transaction.model_dump(mode="json"), qos=1, lane_number=self.lane_number)
         self.pending_gross_weight_kg = None
         self.pending_captured_at = None
-        await self.send_command(build_command("LIGHT", "EXIT", "GREEN"))
-        await self.send_command(build_command("GATE_OPEN", "EXIT"))
-        await self.transition(WeighingState.COMPLETE, "driver accepted load; exit released")
+        refusal = await self._open_gate("EXIT")
+        if refusal is None:
+            await self.send_command(build_command("LIGHT", "EXIT", "GREEN"))
+            await self.transition(WeighingState.COMPLETE, "driver accepted load; exit released")
+        else:
+            # The transaction stands; only the release is withheld until an operator
+            # opens the exit once it is safe to do so.
+            await self.transition(WeighingState.COMPLETE, "driver accepted load; exit release refused by gate interlock")
+            await self.raise_alert(Alert(
+                lane_number=self.lane_number,
+                type="GATE_INTERLOCK",
+                severity="MEDIUM",
+                title="Exit release withheld",
+                description=refusal,
+                booking_id=self.booking.id,
+                vehicle_id=self.booking.vehicle_id,
+                driver_id=self.booking.driver_id,
+            ))
         return transaction
 
     async def request_reload(self) -> None:
         if self.state != WeighingState.AWAITING_DRIVER_DECISION or self.booking is None:
             raise ValueError("No captured weight is awaiting a driver decision")
+        refusal = await self._open_gate("ENTRY")
+        if refusal is not None:
+            raise ValueError(f"Cannot release the truck for reload: {refusal}")
+        await self.send_command(build_command("LIGHT", "ENTRY", "GREEN"))
         self.pending_gross_weight_kg = None
         self.pending_captured_at = None
         self.positioning_started_at = None
         self.stabilising_started_at = None
         self.weight_window.clear()
-        await self.send_command(build_command("LIGHT", "ENTRY", "GREEN"))
-        await self.send_command(build_command("GATE_OPEN", "ENTRY"))
         await self.transition(WeighingState.POSITIONING, "driver requested reload; truck returning to loading area")
 
     async def _driver_mismatch(self, actual_rfid: str) -> None:
@@ -371,7 +426,7 @@ class WeighingStateMachine:
             self.scale_fault_alerted = True
             await self.raise_alert(Alert(lane_number=self.lane_number, type="SCALE_FAULT", severity="HIGH", title="Scale fault", description=description))
 
-    async def reset(self) -> None:
+    async def reset(self, reason: str = "cycle complete and scale clear") -> None:
         await asyncio.to_thread(self.database.clear_session, self.session_id)
         self.session_id = str(uuid4())
         self.booking = None
@@ -385,4 +440,4 @@ class WeighingStateMachine:
         self.manual_mode_reason = None
         self.pending_gross_weight_kg = None
         self.pending_captured_at = None
-        await self.transition(WeighingState.IDLE, "cycle complete and scale clear")
+        await self.transition(WeighingState.IDLE, reason)

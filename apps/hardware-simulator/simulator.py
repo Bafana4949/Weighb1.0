@@ -9,7 +9,10 @@ It supports three interchangeable transports:
   * Existing serial port (for com0com or physical loopback)
 
 The site daemon does not know or care whether the bytes originated here or from
-real hardware; only the transport configuration changes.
+real hardware; only the transport configuration changes. That is why a daemon
+pointed at this simulator must say so (`transport.simulated: true` or the lane's
+`simulated: true`): a production daemon then refuses to start unless
+WB_ALLOW_SIMULATION=true, and stamps everything it publishes `simulated: true`.
 """
 from __future__ import annotations
 

@@ -1,0 +1,33 @@
+# DEVELOPMENT ONLY - local daemon against the hardware-simulator on this machine.
+# Run with:  WB_ENV=development WB_ALLOW_SIMULATION=true WB_CONFIG_PATH=config.dev.yaml
+#            WB_LOCAL_API_TOKEN=<anything> [WB_SITE_API_KEY=wbe_...] python daemon.py
+site:
+  id: "WOESTALLEEN"
+  name: "Woestalleen Colliery (dev)"
+  timezone: "Africa/Johannesburg"
+  operating_hours: { start: "05:00", end: "22:00" }
+
+anpr:
+  camera_source: "test_plates/sample_01.png"
+
+transport:
+  mode: "tcp"                  # tcp (simulator) or serial
+  tcp_host: "127.0.0.1"
+  tcp_port: 7001
+  simulated: true
+
+serial:
+  port: "COM11"                # com0com pair when mode=serial
+
+mqtt:
+  broker: "localhost"
+  port: 1883
+  allow_anonymous: true        # development only; refused in production
+
+cloud:
+  api_url: "http://localhost:3010/api"
+
+storage:
+  sqlite_path: "edge.db"
+  backup_directory: "backups"
+  evidence_directory: "evidence"

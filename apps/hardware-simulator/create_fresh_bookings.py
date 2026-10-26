@@ -9,15 +9,16 @@ Usage:
 """
 from __future__ import annotations
 import json
+import os
 import time
 import urllib.request
 import urllib.error
 
 WEB_URL = "http://127.0.0.1:3010"
-API_KEY = "3f1fddae9eaa2ce74b118a22b041a70732f1700c6c86430126e380e6189db50d"
+API_KEY = os.getenv("WB_SITE_API_KEY", "")  # the EX-OO1 site's own edge key (wbe_...)
 DAEMON_URL = "http://127.0.0.1:8020"
-ADMIN_EMAIL = "admin@weighbridge.local"
-ADMIN_PASSWORD = "Password123!"
+ADMIN_EMAIL = os.getenv("WB_DEV_ADMIN_EMAIL", "admin@weighbridge.local")
+ADMIN_PASSWORD = os.getenv("WB_DEV_ADMIN_PASSWORD", "")
 
 
 def get_session_token() -> str:

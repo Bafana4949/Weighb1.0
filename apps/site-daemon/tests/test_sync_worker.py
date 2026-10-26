@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 import httpx
@@ -98,3 +99,102 @@ async def test_non_duplicate_409_is_not_silently_discarded(tmp_path) -> None:
     alerts = [message for message in mqtt.messages if message[0] == "alerts"]
     assert alerts, "operators must be alerted when a sync item is rejected without confirmation"
     assert alerts[0][1]["severity"] == "CRITICAL"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_error_without_confirmation_hash_is_marked_synced(tmp_path) -> None:
+    """The cloud's 409 "Duplicate transaction" means it already holds the record, even when
+    its confirmation hash is null; keeping it queued would re-upload forever."""
+    config = make_config(tmp_path)
+    db = EdgeDatabase(config.storage.sqlite_path, config.storage.backup_directory)
+    queue_one_transaction(db)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"success": False, "data": {"id": "cloud-1", "confirmation_hash": None}, "error": "Duplicate transaction"})
+
+    worker = SyncWorker(config, db, FakeMqtt())
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await worker.sync_once(client)
+    assert db.pending_count() == 0
+    assert db.recent_transactions()[0]["sync_status"] == "synced"
+
+
+@pytest.mark.asyncio
+async def test_retry_after_reconnect_uses_same_idempotency_key_and_never_duplicates(tmp_path) -> None:
+    """First attempt dies mid-flight (row left 'syncing', as after a crash). After restart the
+    row is re-queued, re-sent with the same edge-transaction-id key, and the cloud's duplicate
+    answer settles it: exactly one record ever exists upstream."""
+    config = make_config(tmp_path)
+    db = EdgeDatabase(config.storage.sqlite_path, config.storage.backup_directory)
+    edge_id = queue_one_transaction(db)
+    item = db.list_due_sync_items()[0]
+    db.mark_syncing(item["id"])
+    assert db.list_due_sync_items() == [], "in-flight rows are not picked up twice"
+
+    cloud: dict[str, dict] = {edge_id: {"confirmation_hash": "cloud-hash"}}  # the first upload did land
+    seen_keys: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/transactions/reconcile"):
+            seen_keys.append(request.headers["idempotency-key"])
+            body = json.loads(request.content)
+            if body["edge_transaction_id"] in cloud:
+                return httpx.Response(409, json={"success": False, "data": cloud[body["edge_transaction_id"]], "error": "Duplicate transaction"})
+            cloud[body["edge_transaction_id"]] = {"confirmation_hash": "new"}
+            return httpx.Response(201, json={"success": True, "data": {"confirmation_hash": "new"}})
+        return httpx.Response(404, json={})
+
+    assert db.reset_inflight_sync() == 1
+    worker = SyncWorker(config, db, FakeMqtt())
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await worker.sync_once(client)
+        await worker.sync_once(client)
+    assert seen_keys == [edge_id]
+    assert len(cloud) == 1
+    assert db.pending_count() == 0
+    assert db.recent_transactions()[0]["cloud_confirmation_hash"] == "cloud-hash"
+
+
+@pytest.mark.asyncio
+async def test_unreachable_cloud_stops_the_batch_and_backs_off(tmp_path) -> None:
+    config = make_config(tmp_path)
+    db = EdgeDatabase(config.storage.sqlite_path, config.storage.backup_directory)
+    queue_one_transaction(db)
+    queue_one_transaction(db)
+    posts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            posts.append(request.url.path)
+        raise httpx.ConnectError("connection refused", request=request)
+
+    worker = SyncWorker(config, db, FakeMqtt())
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await worker.sync_once(client)
+    assert len(posts) == 1, "an unreachable cloud must not be hit once per queued item"
+    assert worker.cloud_online is False
+    assert db.pending_count() == 2
+    # The failed item is scheduled for later, so an immediate second cycle doesn't resend it.
+    assert len(db.list_due_sync_items()) == 1
+
+
+def test_backoff_has_jitter_and_a_cap(tmp_path) -> None:
+    config = make_config(tmp_path)
+    db = EdgeDatabase(config.storage.sqlite_path, config.storage.backup_directory)
+    queue_one_transaction(db)
+    item_id = db.list_due_sync_items()[0]["id"]
+    delays = set()
+    for _ in range(5):
+        before = datetime.now(timezone.utc)
+        db.mark_sync_failed(item_id, 30, "boom", base_seconds=5, max_seconds=300)
+        with db._connect() as connection:
+            next_retry = datetime.fromisoformat(connection.execute("SELECT next_retry_at FROM sync_queue WHERE id=?", (item_id,)).fetchone()[0])
+        delay = (next_retry - before).total_seconds()
+        assert 149 <= delay <= 301
+        delays.add(round(delay, 3))
+    assert len(delays) > 1, "retries must be jittered"
+    first = datetime.now(timezone.utc)
+    db.mark_sync_failed(item_id, 0, "boom", base_seconds=5, max_seconds=300)
+    with db._connect() as connection:
+        next_retry = datetime.fromisoformat(connection.execute("SELECT next_retry_at FROM sync_queue WHERE id=?", (item_id,)).fetchone()[0])
+    assert 2.4 <= (next_retry - first).total_seconds() <= 5.1

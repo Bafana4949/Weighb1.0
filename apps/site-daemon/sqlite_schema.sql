@@ -1,4 +1,4 @@
--- SQLite edge mirror schema. The daemon applies this automatically at startup.
+-- SQLite edge mirror schema (reference copy of database.SCHEMA, which the daemon applies at startup).
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=FULL;
 PRAGMA foreign_keys=ON;
@@ -42,9 +42,13 @@ CREATE TABLE IF NOT EXISTS transactions (
     integrity_hash TEXT NOT NULL UNIQUE,
     overload INTEGER NOT NULL DEFAULT 0,
     overload_variance_kg INTEGER NOT NULL DEFAULT 0,
+    underweight_empty_flag INTEGER NOT NULL DEFAULT 0,
+    overweight_loaded_flag INTEGER NOT NULL DEFAULT 0,
     anpr_confidence REAL,
     entry_photo_url TEXT,
     scale_photo_url TEXT,
+    driver_decision TEXT,
+    lane_number INTEGER,
     sync_status TEXT NOT NULL DEFAULT 'pending',
     cloud_confirmation_hash TEXT,
     created_at TEXT NOT NULL,

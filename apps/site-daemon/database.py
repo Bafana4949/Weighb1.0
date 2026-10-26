@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import random
 import shutil
 import sqlite3
 import threading
@@ -123,6 +124,43 @@ def canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
 
+def canonical_timestamp(value: datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def integrity_hash_for(hash_payload: dict[str, Any]) -> str:
+    """SHA-256 over the canonical JSON of the hashed fields. The cloud recomputes this
+    exact value during reconciliation, so the field set and formatting are a contract."""
+    return hashlib.sha256(canonical_json(hash_payload).encode()).hexdigest()
+
+
+def _hash_payload_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "edge_transaction_id": row["edge_transaction_id"],
+        "booking_id": row["booking_id"],
+        "vehicle_id": row["vehicle_id"],
+        "driver_id": row["driver_id"],
+        "site_id": row["site_id"],
+        "gross_weight_kg": row["gross_weight_kg"],
+        "tare_weight_kg": row["tare_weight_kg"],
+        "net_weight_kg": row["net_weight_kg"],
+        "commodity": row["commodity"],
+        "captured_at": canonical_timestamp(row["captured_at"]),
+        "exit_at": canonical_timestamp(row["exit_at"]),
+        "turnaround_seconds": row["turnaround_seconds"],
+        "waybill_number": row["waybill_number"],
+        "previous_hash": row["previous_hash"],
+        "overload": bool(row["overload"]),
+        "overload_variance_kg": row["overload_variance_kg"],
+        "underweight_empty": bool(row["underweight_empty_flag"]),
+        "overweight_loaded": bool(row["overweight_loaded_flag"]),
+    }
+
+
 class EdgeDatabase:
     def __init__(self, path: str, backup_directory: str) -> None:
         self.path = Path(path).resolve()
@@ -192,7 +230,14 @@ class EdgeDatabase:
             current = row[0] if row else GENESIS_HASH
             pending_count = connection.execute("SELECT COUNT(*) FROM sync_queue WHERE status != 'synced'").fetchone()[0]
             if pending_count == 0 or current == GENESIS_HASH:
-                connection.execute("UPDATE metadata SET value=?, updated_at=? WHERE key='last_hash'", (chain_hash.lower(), iso()))
+                now = iso()
+                connection.execute("UPDATE metadata SET value=?, updated_at=? WHERE key='last_hash'", (chain_hash.lower(), now))
+                # Remember adopted cloud heads so verify_chain() accepts the link the next
+                # local transaction makes to them.
+                connection.execute(
+                    "INSERT OR IGNORE INTO metadata(key, value, updated_at) VALUES(?, ?, ?)",
+                    (f"chain_anchor:{chain_hash.lower()}", chain_hash.lower(), now),
+                )
                 return True
             return False
 
@@ -261,8 +306,8 @@ class EdgeDatabase:
             edge_id = str(uuid4())
             waybill_number = self._next_waybill_number(connection, site_code)
             net_weight = gross_weight_kg - booking.tare_weight_kg
-            captured_at_canonical = captured_at.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-            exit_at_canonical = exit_at.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z") if exit_at else None
+            captured_at_canonical = canonical_timestamp(captured_at)
+            exit_at_canonical = canonical_timestamp(exit_at)
             turnaround_seconds = max(0, int((exit_at - entry_at).total_seconds())) if exit_at and entry_at else None
             hash_payload = {
                 "edge_transaction_id": edge_id,
@@ -284,7 +329,7 @@ class EdgeDatabase:
                 "underweight_empty": underweight_empty,
                 "overweight_loaded": overweight_loaded,
             }
-            integrity_hash = hashlib.sha256(canonical_json(hash_payload).encode()).hexdigest()
+            integrity_hash = integrity_hash_for(hash_payload)
             transaction = EdgeTransaction(
                 **hash_payload,
                 trailer_id=booking.trailer_id,
@@ -320,11 +365,13 @@ class EdgeDatabase:
                     transaction.driver_decision, transaction.lane_number, "pending", now, now,
                 ),
             )
+            # The edge transaction id is the idempotency key: the cloud deduplicates
+            # reconcile calls on it, so a retried upload can never create a second row.
             connection.execute(
                 """INSERT INTO sync_queue(operation, aggregate_id, idempotency_key, payload_json, status,
                    retry_count, next_retry_at, created_at, updated_at)
                    VALUES('transaction_reconcile', ?, ?, ?, 'pending', 0, ?, ?, ?)""",
-                (edge_id, integrity_hash, payload_json, now, now, now),
+                (edge_id, edge_id, payload_json, now, now, now),
             )
             connection.execute("UPDATE metadata SET value=?, updated_at=? WHERE key='last_hash'", (integrity_hash, now))
             connection.commit()
@@ -355,14 +402,61 @@ class EdgeDatabase:
             )
             connection.commit()
 
-    def mark_sync_failed(self, item_id: int, retry_count: int, error: str) -> None:
-        delay = min(60, 5 * (2 ** max(0, retry_count)))
+    def mark_sync_failed(self, item_id: int, retry_count: int, error: str, base_seconds: float = 5, max_seconds: float = 300) -> None:
+        delay = min(max_seconds, base_seconds * (2 ** min(max(0, retry_count), 20)))
+        # Equal jitter: keeps most of the backoff but stops every queued item (and every
+        # edge after a cloud outage) retrying in lock-step.
+        delay = random.uniform(delay / 2, delay)
         next_retry = utc_now() + timedelta(seconds=delay)
         with self._write_lock, self._connect() as connection:
             connection.execute(
                 "UPDATE sync_queue SET status='failed', retry_count=?, next_retry_at=?, last_error=?, updated_at=? WHERE id=?",
                 (retry_count + 1, next_retry.isoformat(), error[:1000], iso(), item_id),
             )
+
+    def reset_inflight_sync(self) -> int:
+        """Rows left 'syncing' by a crash or restart go back to the queue. If the cloud did
+        receive them, the retry comes back as a duplicate and is marked synced."""
+        with self._write_lock, self._connect() as connection:
+            cursor = connection.execute("UPDATE sync_queue SET status='pending', updated_at=? WHERE status='syncing'", (iso(),))
+            return cursor.rowcount
+
+    def sync_counts(self) -> dict[str, int]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*), COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0) FROM sync_queue WHERE status != 'synced'"
+            ).fetchone()
+        return {"pending": int(row[0]), "failed": int(row[1])}
+
+    def get_metadata(self, key: str) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_metadata(self, key: str, value: str) -> None:
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "INSERT INTO metadata(key, value, updated_at) VALUES(?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (key, value, iso()),
+            )
+
+    def verify_chain(self) -> list[str]:
+        """Recompute every local transaction's SHA-256 and check each one links to its
+        predecessor (or to a cloud head the ledger was bootstrapped from)."""
+        problems: list[str] = []
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM transactions ORDER BY rowid").fetchall()
+            anchors = {row[0] for row in connection.execute("SELECT value FROM metadata WHERE key LIKE 'chain_anchor:%'")}
+        anchors.add(GENESIS_HASH)
+        previous: str | None = None
+        for row in rows:
+            edge_id = row["edge_transaction_id"]
+            if integrity_hash_for(_hash_payload_from_row(row)) != row["integrity_hash"]:
+                problems.append(f"{edge_id}: stored fields do not match its integrity hash")
+            if previous is not None and row["previous_hash"] != previous and row["previous_hash"] not in anchors:
+                problems.append(f"{edge_id}: previous_hash does not link to the preceding transaction")
+            previous = row["integrity_hash"]
+        return problems
 
     def pending_count(self) -> int:
         with self._connect() as connection:
