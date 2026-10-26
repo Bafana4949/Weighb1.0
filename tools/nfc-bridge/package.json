@@ -1,0 +1,19 @@
+{
+  "name": "weighbridge-nfc-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Localhost bridge that reads card UIDs from the Camelote NFC-X (VID_0483/PID_4343) USB HID device and exposes them to the weighbridge web app.",
+  "bin": {
+    "nfc-bridge": "bridge.js"
+  },
+  "scripts": {
+    "start": "node bridge.js serve",
+    "probe": "node bridge.js probe"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "node-hid": "^3.1.2"
+  }
+}

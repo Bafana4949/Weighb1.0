@@ -17,7 +17,12 @@
     "db:seed": "npm --workspace @weighbridge/database run seed",
     "demo:auto": "bash scripts/run-auto-weighment.sh",
     "test": "npm --workspace @weighbridge/web run test",
-    "preflight": "node preflight.mjs"
+    "preflight": "node preflight.mjs",
+    "nfc-bridge:setup": "npm install --prefix tools/nfc-bridge",
+    "nfc-bridge": "node tools/nfc-bridge/bridge.js serve",
+    "nfc-bridge:probe": "node tools/nfc-bridge/bridge.js probe",
+    "gate": "node scripts/verify-tag.mjs --watch",
+    "verify-tag": "node scripts/verify-tag.mjs"
   },
   "engines": {
     "node": ">=20.0.0"
