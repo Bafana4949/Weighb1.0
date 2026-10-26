@@ -171,12 +171,18 @@ class WeighingStateMachine:
             return
 
         if self.state in {WeighingState.VEHICLE_APPROACHING, WeighingState.POSITIONING}:
+            # Fail closed: without a registered card the identity cannot be verified, and
+            # `None == None` must never open a gate. Hold the lane for an operator.
+            if self.booking.driver_rfid is None:
+                await self._driver_mismatch(frame.rfid_tag or "none")
+                return
             if frame.rfid_tag and frame.rfid_tag != self.booking.driver_rfid:
                 await self._driver_mismatch(frame.rfid_tag)
                 return
             # The light only turns green once the barrier has actually been opened; a
             # refused open leaves the lane where it is and is retried on the next frame.
-            if frame.rfid_tag == self.booking.driver_rfid and await self._open_gate("ENTRY") is None:
+            # Open once, on the approach; POSITIONING frames must not re-send the command.
+            if self.state == WeighingState.VEHICLE_APPROACHING and frame.rfid_tag == self.booking.driver_rfid and await self._open_gate("ENTRY") is None:
                 await self.send_command(build_command("LIGHT", "ENTRY", "GREEN"))
                 await self.send_command(build_command("BUZZER", value="OFF"))
                 await self.transition(WeighingState.POSITIONING, "plate and driver RFID verified")
@@ -408,8 +414,9 @@ class WeighingStateMachine:
             lane_number=self.lane_number,
             type="DRIVER_MISMATCH",
             severity="CRITICAL",
-            title="Driver and plate mismatch",
-            description=f"Booking expects RFID {self.booking.driver_rfid}; hardware read {actual_rfid}.",
+            title="Driver and plate mismatch" if self.booking.driver_rfid else "Driver has no registered card",
+            description=(f"Booking expects RFID {self.booking.driver_rfid}; hardware read {actual_rfid}." if self.booking.driver_rfid
+                         else "No card is registered for this driver; an operator must verify identity before the lane continues."),
             booking_id=self.booking.id,
             vehicle_id=self.booking.vehicle_id,
             driver_id=self.booking.driver_id,

@@ -11,6 +11,7 @@ function csv(value: unknown) {
 }
 
 import { formatSADate, formatSATime } from "@/lib/datetime";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 const isoDate = formatSADate;
 const isoTime = formatSATime;
@@ -53,7 +54,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   if (a.session!.user.role === "TRANSPORTER") {
     andConditions.push({ booking: { transporterOrganisationId: a.session!.user.organisationId! } });
   } else {
-    andConditions.push({ site: userScope(a.session!.user) });
+    andConditions.push(viaSiteWhere(await loadAccessContext(a.session!.user)));
     if (orgFilter) {
       andConditions.push({ booking: { transporterOrganisationId: orgFilter } });
     }

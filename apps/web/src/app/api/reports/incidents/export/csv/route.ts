@@ -4,6 +4,7 @@ import { userScope } from "@/lib/access";
 import { dateRange, incidentsReport } from "@/lib/reports";
 import { rateLimitOrFail } from "@/lib/rate-limit";
 import { formatSADate, formatSADateTime } from "@/lib/datetime";
+import { loadAccessContext, siteWhere } from "@/lib/site-access";
 
 function csv(value: unknown) {
   const text = String(value ?? "");
@@ -17,7 +18,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   if (a.error) return a.error;
 
   const url = new URL(request.url);
-  const report = await incidentsReport(dateRange(url.searchParams), userScope(a.session!.user));
+  const report = await incidentsReport(dateRange(url.searchParams), siteWhere(await loadAccessContext(a.session!.user)));
   const header = ["id", "type", "severity", "status", "site", "description", "created_at", "resolved_at", "resolved_by"];
   const lines = [
     header.map(csv).join(","),

@@ -953,4 +953,6 @@ async def transactions(limit: int = 20) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    uvicorn.run("daemon:app", host="0.0.0.0", port=8000, reload=False)
+    # Containers listen on all interfaces; on an edge PC set WB_HTTP_HOST=127.0.0.1 so the
+    # local operator API is not exposed to the site LAN.
+    uvicorn.run("daemon:app", host=os.environ.get("WB_HTTP_HOST", "0.0.0.0"), port=int(os.environ.get("WB_HTTP_PORT", "8000")), reload=False)

@@ -9,12 +9,13 @@ import { PaginationControls } from "@/components/pagination-controls";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { safeDriverSelect, safeUserSelect } from "@/lib/utils";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 export default async function Orders({ searchParams }: { searchParams: Promise<{ page?: string; q?: string }> }) {
   const s = await auth(); if (!s?.user) redirect("/login");
   const params = await searchParams;
   const page = Math.max(1, Number(params.page ?? 1));
   const limit = 25;
-  const scope = userSiteScope(s.user);
+  const scope = viaSiteWhere(await loadAccessContext(s.user));
   const where = { ...scope, ...(params.q ? { OR: [{ orderNumber: { contains: params.q, mode: "insensitive" as const } }, { product: { contains: params.q, mode: "insensitive" as const } }, { customerName: { contains: params.q, mode: "insensitive" as const } }, { supplierName: { contains: params.q, mode: "insensitive" as const } }] } : {}) };
   const [orders, total, sites, sources, destinations, products, organisations] = await Promise.all([
     prisma.weighbridgeOrder.findMany({ where, include: { site: true, source: true, destination: true, productRef: true, originSite: true, destinationSite: true, createdBy: { select: safeUserSelect }, bookings: { include: { transactions: true, vehicle: true, driver: { select: safeDriverSelect }, transporterOrganisation: true } } }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),

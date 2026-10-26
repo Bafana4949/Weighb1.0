@@ -12,6 +12,7 @@ import Link from "next/link";
 import { formatKg, safeUserSelect } from "@/lib/utils";
 import { userScope } from "@/lib/access";
 import { PlatformDashboard } from "@/components/platform-dashboard";
+import { loadAccessContext, siteWhere } from "@/lib/site-access";
 
 async function safeQuery<T>(promise: Promise<T>, fallback: T): Promise<T> {
   try {
@@ -74,7 +75,7 @@ export default async function AdminPage(){
   }
 
   const since=subDays(new Date(),7);
-  const scope=userScope(s.user);
+  const scope=siteWhere(await loadAccessContext(s.user));
   const [sites,tx,openIncidents,hardware]=await Promise.all([
     safeQuery(prisma.site.findMany({where:{isActive:true,...scope},include:{_count:{select:{transactions:true,incidents:true}}}}), []),
     safeQuery(prisma.weighbridgeTransaction.aggregate({where:{capturedAt:{gte:since},site:scope},_count:true,_sum:{netWeightKg:true},_avg:{turnaroundSeconds:true}}), { _count: 0, _sum: { netWeightKg: null }, _avg: { turnaroundSeconds: null } }),

@@ -32,7 +32,7 @@ export function constantTimeEqual(a: string, b: string): boolean {
  * (ALLOW_LEGACY_SITE_KEY=true) so upgraded installs keep working while their edge
  * controllers are re-keyed; never accepted with a placeholder value.
  */
-export function legacySiteKeyMatches(presented: string | null | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+export function legacySiteKeyMatches(presented: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
   if (env.ALLOW_LEGACY_SITE_KEY !== "true") return false;
   const configured = env.SITE_DAEMON_API_KEY;
   if (!configured || !presented || configured.length < 24 || /change-me|changeme/i.test(configured)) return false;

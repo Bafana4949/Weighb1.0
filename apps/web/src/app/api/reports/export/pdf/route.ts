@@ -8,6 +8,7 @@ import { dateRange,tonnageByGroup,turnaroundBySite } from "@/lib/reports";
 import { rateLimitOrFail } from "@/lib/rate-limit";
 import { ReportDocument } from "./report-document";
 import { formatSADate, formatSADateTime } from "@/lib/datetime";
+import { loadAccessContext, siteWhere } from "@/lib/site-access";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   const group = url.searchParams.get("group") ?? "commodity";
   const material = url.searchParams.get("material");
   const orderNo = url.searchParams.get("orderNo");
-  const scope = userScope(access.session!.user);
+  const scope = siteWhere(await loadAccessContext(access.session!.user));
 
   const extraWhere: any = {};
   if (material) {

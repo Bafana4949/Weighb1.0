@@ -89,7 +89,8 @@ def lane_device_reports(lane: LaneHealthSnapshot, telemetry_stale_seconds: float
             f"lane in {lane.state}; gate held closed" if in_error else None,
             {"position": lane.gates.get(target, "CLOSED")},
         )
-    behind_controller(keys.position_sensor, readings={"p1": lane.position_sensor_1, "p2": lane.position_sensor_2})
+    behind_controller(keys.position_sensor, readings={"p1": lane.position_sensor_1})
+    behind_controller(keys.position_sensor_p2, readings={"p2": lane.position_sensor_2})
     behind_controller(keys.traffic_light, readings={"entry": lane.lights.get("ENTRY"), "exit": lane.lights.get("EXIT")})
     behind_controller(keys.rfid_reader, readings={"tagPresent": lane.rfid_tag is not None})
 

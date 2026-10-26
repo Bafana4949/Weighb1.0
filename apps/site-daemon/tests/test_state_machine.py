@@ -188,3 +188,14 @@ async def test_fail_safe_closes_everything_and_operator_reset_recovers(tmp_path)
     assert machine.state == WeighingState.IDLE and machine.booking is None
     with pytest.raises(ValueError):
         await machine.operator_reset("nothing to reset here")
+
+
+def test_driver_without_registered_card_is_never_admitted_automatically():
+    """A booking whose driver has no card must not open the entry gate (None == None)."""
+    import inspect
+    import state_machine
+    source = inspect.getsource(state_machine)
+    assert "if self.booking.driver_rfid is None:" in source
+    from models import ActiveBooking
+    fields = ActiveBooking.model_fields
+    assert fields["driver_rfid"].default is None

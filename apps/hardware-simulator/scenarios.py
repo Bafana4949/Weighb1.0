@@ -201,7 +201,13 @@ def scenario_normal_weighment(
         print(f"Using explicitly specified truck plate: {plate}")
     if HAS_PIL:
         print("Capturing registration automatically via ANPR (rendering plate photo, running OCR)...")
-        result = check_in_via_anpr(plate, daemon_url)
+        try:
+            result = check_in_via_anpr(plate, daemon_url)
+        except RuntimeError as error:
+            # Images built without INSTALL_ANPR refuse photo check-in (409); the lane then
+            # identifies the truck the way a site without ANPR does: a reported plate/card.
+            print(f"ANPR check-in unavailable ({error}); using a direct plate report instead.")
+            result = {}
     else:
         print("Pillow (PIL) not installed, bypassing ANPR photo rendering and using direct plate report...")
         result = {}

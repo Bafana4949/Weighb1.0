@@ -114,10 +114,10 @@ describe("Edge credentials", () => {
 
   it("refuses the legacy shared key unless explicitly enabled, and never a placeholder", () => {
     const strong = "k".repeat(40);
-    expect(legacySiteKeyMatches(strong, { SITE_DAEMON_API_KEY: strong } as NodeJS.ProcessEnv)).toBe(false);
-    expect(legacySiteKeyMatches(strong, { SITE_DAEMON_API_KEY: strong, ALLOW_LEGACY_SITE_KEY: "true" } as NodeJS.ProcessEnv)).toBe(true);
-    expect(legacySiteKeyMatches("dev-site-key-change-me", { SITE_DAEMON_API_KEY: "dev-site-key-change-me", ALLOW_LEGACY_SITE_KEY: "true" } as NodeJS.ProcessEnv)).toBe(false);
-    expect(legacySiteKeyMatches("wrong".padEnd(40, "x"), { SITE_DAEMON_API_KEY: strong, ALLOW_LEGACY_SITE_KEY: "true" } as NodeJS.ProcessEnv)).toBe(false);
+    expect(legacySiteKeyMatches(strong, { SITE_DAEMON_API_KEY: strong })).toBe(false);
+    expect(legacySiteKeyMatches(strong, { SITE_DAEMON_API_KEY: strong, ALLOW_LEGACY_SITE_KEY: "true" })).toBe(true);
+    expect(legacySiteKeyMatches("dev-site-key-change-me", { SITE_DAEMON_API_KEY: "dev-site-key-change-me", ALLOW_LEGACY_SITE_KEY: "true" })).toBe(false);
+    expect(legacySiteKeyMatches("wrong".padEnd(40, "x"), { SITE_DAEMON_API_KEY: strong, ALLOW_LEGACY_SITE_KEY: "true" })).toBe(false);
   });
 
   it("compares in constant time and handles different lengths", () => {

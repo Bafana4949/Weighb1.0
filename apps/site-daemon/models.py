@@ -39,7 +39,8 @@ class ActiveBooking(BaseModel):
     vehicle_id: str
     trailer_id: str | None = None
     driver_id: str
-    driver_rfid: str
+    # None when the driver has no registered card; such a driver is never admitted automatically.
+    driver_rfid: str | None = None
     site_id: str
     plate: str
     plate_normalized: str

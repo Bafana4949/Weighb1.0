@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download, FileText } from "lucide-react";
 import { formatSADate, formatSATime } from "@/lib/datetime";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 const isoDate = formatSADate;
 const isoTime = formatSATime;
@@ -50,7 +51,7 @@ export default async function RawData({ searchParams }: { searchParams: Promise<
 
   const where: any = {
     capturedAt: { gte: from, lte: new Date(to.getTime() + 24 * 60 * 60 * 1000 - 1) },
-    ...userSiteScope(s.user),
+    ...viaSiteWhere(await loadAccessContext(s.user)),
     ...(transactionNo ? { OR: [{ edgeTransactionId: transactionNo }, { waybillNumber: transactionNo }] } : {}),
     ...(orderNo ? { booking: { order: { orderNumber: orderNo } } } : {}),
     ...(supplier ? { booking: { order: { supplierName: supplier } } } : {}),

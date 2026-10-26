@@ -31,7 +31,11 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
         { order: { status: "ACTIVE" } },
       ],
     },
-    include: { vehicle: true, driver: true, site: true },
+    include: {
+      vehicle: true,
+      site: true,
+      driver: { select: { rfidTag: true, rfidCredentials: { where: { status: "ACTIVE", credentialType: "DRIVER" }, select: { uid: true }, take: 1 } } },
+    },
     orderBy: { windowStart: "asc" },
   });
 
@@ -44,7 +48,8 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
     vehicle_id: booking.vehicleId,
     trailer_id: booking.trailerId,
     driver_id: booking.driverId,
-    driver_rfid: booking.driver.rfidTag,
+    // Legacy driver tag first, then an issued RFID/NFC credential; null means "no card".
+    driver_rfid: booking.driver.rfidTag ?? booking.driver.rfidCredentials[0]?.uid ?? null,
     site_id: booking.site.code,
     plate: booking.vehicle.plate,
     plate_normalized: booking.vehicle.plateNormalized,

@@ -106,8 +106,8 @@ def test_heartbeat_payload_shape_and_device_mapping() -> None:
     json.dumps(payload)  # must be serialisable as-is
     reports = by_key(payload["devices"])
     assert set(reports) == {
-        "EDGE_CONTROLLER", "IO_CONTROLLER_MAIN", "SCALE_PRIMARY", "GATE_ENTRY", "GATE_EXIT",
-        "POSITION_SENSOR_MAIN", "TRAFFIC_LIGHT_MAIN", "ANPR_CAMERA_MAIN", "RFID_READER_MAIN",
+        "EDGE_CONTROLLER", "CTRL_MAIN", "SCALE_PRIMARY", "GATE_ENTRY", "GATE_EXIT",
+        "BEAM_P1", "BEAM_P2", "LIGHT_DECK", "ANPR_ENTRY", "RFID_ENTRY",
     }
     for report in payload["devices"]:
         assert set(report) <= {"deviceKey", "health", "message", "readings"}
@@ -115,15 +115,15 @@ def test_heartbeat_payload_shape_and_device_mapping() -> None:
     assert reports["EDGE_CONTROLLER"]["health"] == "ONLINE"
     assert reports["SCALE_PRIMARY"]["health"] == "ONLINE"
     assert reports["GATE_EXIT"]["readings"] == {"position": "OPEN"}
-    assert reports["ANPR_CAMERA_MAIN"]["health"] == "OFFLINE"
-    assert "not installed" in reports["ANPR_CAMERA_MAIN"]["message"]
+    assert reports["ANPR_ENTRY"]["health"] == "OFFLINE"
+    assert "not installed" in reports["ANPR_ENTRY"]["message"]
 
 
 def test_heartbeat_device_health_follows_controller_link_and_faults() -> None:
     down = by_key(lane_device_reports(snapshot(connected=False, telemetry_age_seconds=None)))
-    assert {down[key]["health"] for key in ("IO_CONTROLLER_MAIN", "SCALE_PRIMARY", "GATE_ENTRY", "POSITION_SENSOR_MAIN")} == {"OFFLINE"}
+    assert {down[key]["health"] for key in ("CTRL_MAIN", "SCALE_PRIMARY", "GATE_ENTRY", "BEAM_P1")} == {"OFFLINE"}
     stale = by_key(lane_device_reports(snapshot(telemetry_age_seconds=9)))
-    assert stale["IO_CONTROLLER_MAIN"]["health"] == "DEGRADED"
+    assert stale["CTRL_MAIN"]["health"] == "DEGRADED"
     fault = by_key(lane_device_reports(snapshot(scale_status="FAULT", state="FAULT")))
     assert fault["SCALE_PRIMARY"]["health"] == "FAULT"
     assert fault["GATE_ENTRY"]["health"] == "DEGRADED"
@@ -136,7 +136,7 @@ def test_heartbeat_respects_custom_keys_and_null_devices() -> None:
     keys = LaneDeviceKeys(scale="SCALE_LANE_2", anpr_camera=None, rfid_reader=None, controller=None, printer="PRINTER_MAIN")
     reports = by_key(lane_device_reports(snapshot(lane_number=2, device_keys=keys, printer_reachable=False)))
     assert "SCALE_LANE_2" in reports and "SCALE_PRIMARY" not in reports
-    assert "ANPR_CAMERA_MAIN" not in reports and "IO_CONTROLLER_MAIN" not in reports
+    assert "ANPR_ENTRY" not in reports and "CTRL_MAIN" not in reports
     assert reports["PRINTER_MAIN"]["health"] == "OFFLINE"
 
 
@@ -144,7 +144,7 @@ def test_simulated_heartbeat_is_stamped_and_unregistered_keys_filtered() -> None
     devices = lane_device_reports(snapshot()) + [{"deviceKey": "EDGE_CONTROLLER", "health": "ONLINE"}]
     kept, dropped = filter_registered(devices, {"SCALE_PRIMARY", "GATE_ENTRY"}, always=["EDGE_CONTROLLER"])
     assert {device["deviceKey"] for device in kept} == {"SCALE_PRIMARY", "GATE_ENTRY", "EDGE_CONTROLLER"}
-    assert "RFID_READER_MAIN" in dropped
+    assert "RFID_ENTRY" in dropped
     assert filter_registered(devices, None) == (devices, [])
     payload = build_heartbeat(edge_version="1", pending_sync=0, failed_sync=0, mqtt_connected=False, uptime_seconds=0, devices=kept, simulated=True)
     assert payload["simulated"] is True

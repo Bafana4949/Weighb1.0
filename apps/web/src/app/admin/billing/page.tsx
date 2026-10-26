@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { formatSADate, parseSAEndOfDay, parseSAStartOfDay } from "@/lib/datetime";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 function isoDate(d: Date) { return formatSADate(d); }
 
@@ -20,7 +21,7 @@ export default async function Billing({ searchParams }: { searchParams: Promise<
   const from = params.from ? parseSAStartOfDay(params.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   const transactions = await prisma.weighbridgeTransaction.findMany({
-    where: { status: "COMPLETED", capturedAt: { gte: from, lte: to }, ...userSiteScope(s.user) },
+    where: { status: "COMPLETED", capturedAt: { gte: from, lte: to }, ...viaSiteWhere(await loadAccessContext(s.user)) },
     include: { booking: { include: { transporterOrganisation: true } } },
   });
 

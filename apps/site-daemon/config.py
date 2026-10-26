@@ -46,15 +46,19 @@ class LaneDeviceKeys(BaseModel):
     """Cloud HardwareDevice.deviceKey for each physical device on a lane. A key set to
     null is not reported in heartbeats. Dual-lane sites must give each lane its own keys."""
 
+    # Defaults match the device keys created by the platform's built-in hardware
+    # templates (apps/web/src/lib/hardware-profiles.ts), so a templated site works
+    # without editing this mapping.
     model_config = ConfigDict(extra="forbid")
-    controller: str | None = "IO_CONTROLLER_MAIN"
+    controller: str | None = "CTRL_MAIN"
     scale: str | None = "SCALE_PRIMARY"
     entry_gate: str | None = "GATE_ENTRY"
     exit_gate: str | None = "GATE_EXIT"
-    position_sensor: str | None = "POSITION_SENSOR_MAIN"
-    traffic_light: str | None = "TRAFFIC_LIGHT_MAIN"
-    anpr_camera: str | None = "ANPR_CAMERA_MAIN"
-    rfid_reader: str | None = "RFID_READER_MAIN"
+    position_sensor: str | None = "BEAM_P1"
+    position_sensor_p2: str | None = "BEAM_P2"
+    traffic_light: str | None = "LIGHT_DECK"
+    anpr_camera: str | None = "ANPR_ENTRY"
+    rfid_reader: str | None = "RFID_ENTRY"
     printer: str | None = None
 
     def assigned(self) -> dict[str, str]:

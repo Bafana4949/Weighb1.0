@@ -9,6 +9,7 @@ import { safeDriverSelect } from "@/lib/utils";
 import { userScope } from "@/lib/access";
 import { parsePagination, siteIdentifierWhere } from "@/lib/utils";
 import { routeNotification } from "@/lib/notifications";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 const schema = z.object({
   type: z.nativeEnum(IncidentType),
@@ -37,7 +38,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
     ...(type ? { type } : {}),
     ...(severity ? { severity } : {}),
     ...(resolved === "true" ? { status: "RESOLVED" as const } : resolved === "false" ? { status: { not: "RESOLVED" as const } } : {}),
-    site: userScope(a.session!.user),
+    ...viaSiteWhere(await loadAccessContext(a.session!.user)),
   };
 
   const [rows, total] = await Promise.all([

@@ -11,6 +11,7 @@ import { TransactionDocument } from "./transaction-document";
 export const runtime = "nodejs";
 
 import { formatSADate, formatSATime, formatSADateTime } from "@/lib/datetime";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 const isoDate = formatSADate;
 const isoTime = formatSATime;
@@ -46,7 +47,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   if (access.session!.user.role === "TRANSPORTER") {
     andConditions.push({ booking: { transporterOrganisationId: access.session!.user.organisationId! } });
   } else {
-    andConditions.push({ site: userScope(access.session!.user) });
+    andConditions.push(viaSiteWhere(await loadAccessContext(access.session!.user)));
     if (orgFilter) {
       andConditions.push({ booking: { transporterOrganisationId: orgFilter } });
     }

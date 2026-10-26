@@ -55,7 +55,9 @@ async function resolveOrCreateWalkInBooking({
   commodity,
   orderId,
   operatorId,
+  knownTareKg,
 }: {
+  knownTareKg?: number | null;
   siteId: string;
   siteOrganisationId: string;
   plate: string;
@@ -114,7 +116,9 @@ async function resolveOrCreateWalkInBooking({
         plateNormalized: plateNorm,
         make: "Walk-in",
         model: "Details to be completed",
-        tareWeightKg: 0,
+        // Measured tare when this weighment reveals it; otherwise 1 kg marks "unknown"
+        // and is replaced by the measured tare at the second weighment.
+        tareWeightKg: knownTareKg && knownTareKg > 0 ? knownTareKg : 1,
         legalMaxGvwKg: 56000,
         insuranceExpiry: new Date(Date.now() + 30 * 24 * 3600 * 1000),
         status: "ACTIVE",
@@ -164,7 +168,7 @@ async function resolveOrCreateWalkInBooking({
 
   const ref = `WALK-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
   const token = `JT-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-  const payloadKg = vehicle.tareWeightKg > 0 ? Math.max(0, vehicle.legalMaxGvwKg - vehicle.tareWeightKg) : 0;
+  const payloadKg = vehicle.tareWeightKg > 1 ? Math.max(0, vehicle.legalMaxGvwKg - vehicle.tareWeightKg) : 0;
 
   return await prisma.booking.create({
     data: {
@@ -384,6 +388,7 @@ export async function POST(request: NextRequest) {
         commodity,
         orderId,
         operatorId,
+        knownTareKg: weighType !== "RECEIPT" ? parsedWeight : null,
       });
     } else {
       return fail("Either bookingId or vehicle registration plate is required for 1st weighment", 422);
@@ -682,6 +687,8 @@ export async function POST(request: NextRequest) {
       },
     });
     if (wp.flagged) await flagManualWeight(resolvedSite.id, operatorId, completed.id, completed.bookingId, wp.reason, { grossWeightKg: actualGross, tareWeightKg: actualTare });
+    // Walk-in vehicles registered without a known tare learn it from this weighment.
+    await prisma.vehicle.updateMany({ where: { id: completed.vehicleId, model: "Details to be completed", tareWeightKg: 1 }, data: { tareWeightKg: actualTare } });
 
     return ok({
       message: `Weighment finalized for ${plate}! Net Cargo: ${netWeightKg.toLocaleString()} kg`,
@@ -743,6 +750,7 @@ export async function POST(request: NextRequest) {
         commodity,
         orderId,
         operatorId,
+        knownTareKg: Math.min(w1, w2),
       });
     } else {
       return fail("Either bookingId or vehicle registration plate is required", 422);
