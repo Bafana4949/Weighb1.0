@@ -58,7 +58,7 @@ export function DriverKiosk({ siteCode }: { siteCode: string }) {
       <Badge variant="warning">Check your load</Badge>
       <p className="mt-4 font-mono text-6xl font-bold text-foreground">{formatKg(pending.gross_weight_kg)}</p>
       {pending.net_weight_kg !== null && <p className="mt-2 text-sm text-muted-foreground">Net load: {formatKg(pending.net_weight_kg)}</p>}
-      <p className="mt-3 max-w-md text-sm text-muted-foreground">If this looks right, accept and exit. If you're not happy with the load, send the truck back to reload.</p>
+      <p className="mt-3 max-w-md text-sm text-muted-foreground">If this looks right, accept and exit. If you’re not happy with the load, send the truck back to reload.</p>
     </div>
     <div className="grid w-full max-w-md grid-cols-1 gap-3 sm:grid-cols-2">
       <Button size="lg" className="h-16 text-lg" disabled={busy} onClick={() => decide("ACCEPT")}><CheckCircle2 size={22} className="mr-2" />Accept &amp; exit</Button>

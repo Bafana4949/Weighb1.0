@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
 import { resolve, dirname } from "node:path";
@@ -69,8 +70,16 @@ async function main(): Promise<void> {
   console.log("✅ Built-in roles configured (ADMIN, OPERATOR, TRANSPORTER, SECURITY).");
 
   // 3. Seed / Ensure Initial Platform Super Admin Account
-  const superAdminEmail = "superadmin@weighbridge.co.za";
-  const superAdminPassword = "SuperAdmin2026!";
+  // The initial password comes from SEED_SUPERADMIN_PASSWORD, or is generated once and
+  // printed below. Re-running the seed never resets an existing account's password.
+  const superAdminEmail = (process.env.SEED_SUPERADMIN_EMAIL ?? "superadmin@weighbridge.co.za").toLowerCase();
+  const providedPassword = process.env.SEED_SUPERADMIN_PASSWORD;
+  if (providedPassword && providedPassword.length < 12) {
+    console.error("❌ SEED_SUPERADMIN_PASSWORD must be at least 12 characters.");
+    process.exit(1);
+  }
+  const superAdminPassword = providedPassword ?? randomBytes(15).toString("base64url");
+  const existing = await prisma.user.findUnique({ where: { email: superAdminEmail }, select: { id: true } });
   const passwordHash = await bcrypt.hash(superAdminPassword, 12);
 
   const superAdmin = await prisma.user.upsert({
@@ -96,7 +105,9 @@ async function main(): Promise<void> {
   console.log("\n=======================================================");
   console.log("✅ Clean Platform Super Admin Ready:");
   console.log(`   Email:    ${superAdmin.email}`);
-  console.log(`   Password: ${superAdminPassword}`);
+  if (existing) console.log("   Password: unchanged (account already existed)");
+  else if (providedPassword) console.log("   Password: as set in SEED_SUPERADMIN_PASSWORD");
+  else console.log(`   Password: ${superAdminPassword}   <- generated now; shown once, change it after first sign-in`);
   console.log(`   Role:     ${superAdmin.role}`);
   console.log(`   Platform: ${superAdmin.platformRole}`);
   console.log("=======================================================\n");

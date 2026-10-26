@@ -159,7 +159,7 @@ export function FleetRoster({ currentRoster }: { currentRoster: RosterEntry[] })
 
       <Card>
         <CardHeader>
-          <CardTitle>Today's Available Fleet</CardTitle>
+          <CardTitle>Today’s Available Fleet</CardTitle>
           <CardDescription>
             {new Date().toLocaleDateString("en-ZA", { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </CardDescription>
@@ -187,7 +187,7 @@ export function FleetRoster({ currentRoster }: { currentRoster: RosterEntry[] })
               )) : (
                 <TableRow>
                   <TableCell colSpan={5} className="p-8 text-center text-sm text-muted-foreground">
-                    You haven't uploaded a fleet roster for today.
+                    You haven’t uploaded a fleet roster for today.
                   </TableCell>
                 </TableRow>
               )}

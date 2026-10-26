@@ -20,7 +20,7 @@ export default async function TransporterReports() {
       <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Reports & Data Exports</h1>
-          <p className="text-xs text-muted-foreground">Download raw CSV data for your fleet's operations.</p>
+          <p className="text-xs text-muted-foreground">Download raw CSV data for your fleet’s operations.</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
