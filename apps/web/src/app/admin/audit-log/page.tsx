@@ -3,6 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/app-shell";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
+import { loadAccessContext } from "@/lib/site-access";
+import { safeUserSelect } from "@/lib/utils";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,17 +15,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export default async function AuditLog({ searchParams }: { searchParams: Promise<{ page?: string; entityType?: string; action?: string; from?: string; to?: string }> }) {
   const s = await auth();
   if (!s?.user) redirect("/login");
-  if (s.user.organisationId) redirect("/admin");
+  // Platform: everything. Company admin: their company's entries. Site admin: their sites' entries.
+  const ctx = await loadAccessContext(s.user).catch(() => null);
+  if (!ctx || s.user.role !== "ADMIN") redirect("/admin");
+  const scope = ctx.kind === "platform" ? {} : ctx.kind === "company" ? { organisationId: ctx.organisationId } : { siteId: { in: ctx.siteIds } };
   const params = await searchParams;
   const page = Math.max(1, Number(params.page ?? 1));
   const limit = 40;
   const where = {
+    ...scope,
     ...(params.entityType ? { entityType: params.entityType } : {}),
     ...(params.action ? { action: { contains: params.action, mode: "insensitive" as const } } : {}),
     ...((params.from || params.to) ? { occurredAt: { ...(params.from ? { gte: new Date(params.from) } : {}), ...(params.to ? { lte: new Date(params.to) } : {}) } } : {}),
   };
   const [rows, total] = await Promise.all([
-    prisma.systemLog.findMany({ where, include: { user: true, site: true }, orderBy: { occurredAt: "desc" }, skip: (page - 1) * limit, take: limit }),
+    prisma.systemLog.findMany({ where, include: { user: { select: safeUserSelect }, site: true }, orderBy: { occurredAt: "desc" }, skip: (page - 1) * limit, take: limit }),
     prisma.systemLog.count({ where }),
   ]);
 

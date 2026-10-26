@@ -14,6 +14,10 @@ const authSecret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
 if (!authSecret && process.env.NODE_ENV === "production") {
   throw new Error("Missing AUTH_SECRET environment variable. Set AUTH_SECRET in your environment or Vercel settings.");
 }
+// A placeholder secret in production would make every session token forgeable.
+if (process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !== "phase-production-build" && authSecret && /change-before-production|change-me|replace-with/i.test(authSecret)) {
+  throw new Error("AUTH_SECRET is still a placeholder. Generate one with `openssl rand -base64 48`.");
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,

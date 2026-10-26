@@ -8,7 +8,7 @@ import { saveFile } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 // Evidence files only: documents and images. Anything else (HTML, SVG, scripts) is refused.
-export const ALLOWED_TYPES: Record<string, string[]> = {
+const ALLOWED_TYPES: Record<string, string[]> = {
   "application/pdf": [".pdf"], "image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"], "image/webp": [".webp"],
   "text/plain": [".txt", ".log"], "text/csv": [".csv"],
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],

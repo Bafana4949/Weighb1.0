@@ -1,4 +1,5 @@
 import type { ClientOrganisationStatus,PlatformRole,UserRole } from "@prisma/client";
+import { BUILT_IN_ROLE_PERMISSIONS } from "@weighbridge/database/src/rbac-catalogue";
 
 /**
  * Pure predicate, kept free of Next.js/Auth imports (mirrors lib/access.ts)
@@ -24,4 +25,17 @@ export function assertOrganisationActive(organisation: { status: ClientOrganisat
   if (organisation.status === "SUSPENDED") return "This client organisation is suspended and cannot transact. Contact the platform administrator.";
   if (organisation.status === "ARCHIVED") return "This client organisation is archived and cannot transact.";
   return null;
+}
+
+/** Built-in permission set used when a user has no custom role assignments. */
+const BASE_ROLE_PERMISSIONS: Record<UserRole, readonly string[] | null> = {
+  ADMIN: BUILT_IN_ROLE_PERMISSIONS.CLIENT_ADMIN ?? null,
+  OPERATOR: BUILT_IN_ROLE_PERMISSIONS.OPERATOR ?? [],
+  SECURITY: [...(BUILT_IN_ROLE_PERMISSIONS.VIEWER ?? []), "incident.create", "transaction.print", "hardware.view"],
+  TRANSPORTER: ["booking.view", "booking.create", "vehicle.view", "driver.view", "transaction.view", "transaction.print", "report.view"],
+};
+
+export function basePermissionAllows(role: UserRole, permissionKey: string): boolean {
+  const granted = BASE_ROLE_PERMISSIONS[role];
+  return granted === null || granted.includes(permissionKey);
 }

@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Session } from "next-auth";
 import type { UserRole } from "@prisma/client";
-import { BUILT_IN_ROLE_PERMISSIONS } from "@weighbridge/database/src/rbac-catalogue";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { roleAllowed } from "@/lib/access";
-import { isPlatformSuperAdmin } from "@/lib/permissions";
+import { basePermissionAllows, isPlatformSuperAdmin } from "@/lib/permissions";
 import { hashEdgeKey, legacySiteKeyMatches, looksLikeEdgeKey } from "@/lib/edge-auth";
 
 /** Never serialised to a client, whatever a route happens to include. */
@@ -70,19 +69,6 @@ export async function requirePlatformSuperAdmin() {
     return { error: fail("Only the platform administrator can perform this action", 403), session: null };
   }
   return result;
-}
-
-/** Built-in permission set used when a user has no custom role assignments. */
-const BASE_ROLE_PERMISSIONS: Record<UserRole, readonly string[] | null> = {
-  ADMIN: BUILT_IN_ROLE_PERMISSIONS.CLIENT_ADMIN ?? null,
-  OPERATOR: BUILT_IN_ROLE_PERMISSIONS.OPERATOR ?? [],
-  SECURITY: [...(BUILT_IN_ROLE_PERMISSIONS.VIEWER ?? []), "incident.create", "transaction.print", "hardware.view"],
-  TRANSPORTER: ["booking.view", "booking.create", "vehicle.view", "driver.view", "transaction.view", "transaction.print", "report.view"],
-};
-
-export function basePermissionAllows(role: UserRole, permissionKey: string): boolean {
-  const granted = BASE_ROLE_PERMISSIONS[role];
-  return granted === null || granted.includes(permissionKey);
 }
 
 /**

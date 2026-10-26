@@ -2,7 +2,7 @@ import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { fail, ok, requireRole, withScopeErrors } from "@/lib/api";
 import { audit } from "@/lib/audit";
-import { userScope } from "@/lib/access";
+import { loadAccessContext, siteWhere } from "@/lib/site-access";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { siteSchema } from "@/lib/validation";
 
@@ -17,7 +17,7 @@ export const GET = withScopeErrors(async function GET() {
     ? { isActive: true }
     : isTransporter
       ? { isActive: true, bookings: { some: { transporterOrganisationId: a.session!.user.organisationId! } } }
-      : { isActive: true, ...userScope(a.session!.user) };
+      : { isActive: true, ...siteWhere(await loadAccessContext(a.session!.user)) };
 
   return ok(await prisma.site.findMany({
     where,

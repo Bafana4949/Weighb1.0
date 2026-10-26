@@ -253,6 +253,9 @@ export function LiveOperatorDashboard({
     hasGates: boolean;
     hasTrafficLights: boolean;
     hasPositionSensors: boolean;
+    operatingTier?: "MANUAL" | "SEMI_AUTOMATIC" | "FULLY_AUTOMATIC";
+    manualEntryPolicy?: "PRIMARY" | "REASON_REQUIRED" | "SUPERVISOR_OVERRIDE";
+    scaleConnection?: string | null;
   }>({
     hasScale: true,
     scaleProtocol: "METTLER_TOLEDO_CONTINUOUS",
@@ -260,7 +263,13 @@ export function LiveOperatorDashboard({
     hasGates: false,
     hasTrafficLights: false,
     hasPositionSensors: false,
+    operatingTier: "MANUAL",
+    manualEntryPolicy: "PRIMARY",
   });
+  // Weights captured from the live indicator feed. A submitted value counts as an
+  // indicator reading only if it is exactly what was captured; anything typed is MANUAL.
+  const liveCaptureRef = useRef<{ first: number | null; second: number | null }>({ first: null, second: null });
+  const [manualReason, setManualReason] = useState("");
 
   const [gatePulseActive, setGatePulseActive] = useState<"ENTRY" | "EXIT" | null>(null);
 
@@ -279,15 +288,45 @@ export function LiveOperatorDashboard({
       .catch(() => {});
   }, [siteCode]);
 
-  function triggerGate(direction: "ENTRY" | "EXIT") {
+  // Report the browser-driven indicator's health so Manual sites (no edge controller)
+  // still show honest hardware status on the health dashboard.
+  const scaleHealthRef = useRef<string>("OFFLINE");
+  scaleHealthRef.current = !isSerialConnected ? "OFFLINE" : signalLost ? "DEGRADED" : "ONLINE";
+  useEffect(() => {
+    if (!siteCode || capabilities.scaleConnection !== "WEB_SERIAL") return;
+    const report = () => {
+      if (document.visibilityState !== "visible") return;
+      const health = scaleHealthRef.current;
+      void fetch(`/api/sites/${siteCode}/hardware/status`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reports: [{ type: "SCALE", health, message: health === "ONLINE" ? "Indicator streaming to operator console" : health === "DEGRADED" ? "Indicator connected, signal lost" : "Indicator not connected to operator console" }] }),
+      }).catch(() => undefined);
+    };
+    report();
+    const timer = setInterval(report, 30_000);
+    return () => clearInterval(timer);
+  }, [siteCode, capabilities.scaleConnection]);
+
+  // Manual gate opening is an override: it needs a reason, is audited, and is executed by
+  // the edge controller, which applies its own safety interlocks. Nothing moves otherwise.
+  async function triggerGate(direction: "ENTRY" | "EXIT") {
+    const reason = window.prompt(`Reason for opening the ${direction.toLowerCase()} gate manually (min. 10 characters):`);
+    if (!reason || reason.trim().length < 10) {
+      if (reason !== null) toast({ title: "Gate not opened", body: "A reason of at least 10 characters is required.", severity: "MEDIUM" });
+      return;
+    }
     setGatePulseActive(direction);
-    toast({
-      title: `${direction} Boom Gate Opened`,
-      body: `Relay pulse sent. Barrier will auto-close in 8 seconds.`,
-    });
-    setTimeout(() => {
-      setGatePulseActive(null);
-    }, 8000);
+    try {
+      const res = await fetch("/api/edge/command", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "GATE_OPEN", target: direction, reason: reason.trim() }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? "Edge controller refused the command");
+      toast({ title: `${direction} gate command sent`, body: "The edge controller will open the barrier if its safety checks pass." });
+    } catch (err: any) {
+      toast({ title: "Gate not opened", body: err.message || String(err), severity: "HIGH" });
+    } finally {
+      setTimeout(() => setGatePulseActive(null), 3000);
+    }
   }
 
   useEffect(() => {
@@ -907,8 +946,11 @@ export function LiveOperatorDashboard({
       setIsWalkIn(false);
     }
     // Metrology safety & Constant Weight default: pre-fill scale if connected, or constant tare if order has preset
+    liveCaptureRef.current = { first: null, second: null };
+    setManualReason("");
     if (isSerialConnected && !signalLost && manualWeightKg > 0) {
       setFirstWeightInput(String(manualWeightKg));
+      liveCaptureRef.current.first = manualWeightKg;
     } else if (booking?.presetTareWeightKg && (booking?.useConstantTare || manualWeightKg <= 0)) {
       setFirstWeightInput(String(booking.presetTareWeightKg));
     } else if (queue.length > 0 && queue[0]?.presetTareWeightKg && (queue[0]?.useConstantTare || manualWeightKg <= 0)) {
@@ -940,8 +982,11 @@ export function LiveOperatorDashboard({
       setWeighType(w.firstWeightType === "TARE" ? "DISPATCH" : "RECEIPT");
     }
     // Metrology safety & Constant Weight default: pre-fill scale or preset constant gross
+    liveCaptureRef.current = { first: null, second: null };
+    setManualReason("");
     if (isSerialConnected && !signalLost && manualWeightKg > 0) {
       setSecondWeightInput(String(manualWeightKg));
+      liveCaptureRef.current.second = manualWeightKg;
     } else if (activeW?.presetGrossWeightKg && (activeW?.useConstantGross || manualWeightKg <= 0)) {
       setSecondWeightInput(String(activeW.presetGrossWeightKg));
     } else {
@@ -966,6 +1011,8 @@ export function LiveOperatorDashboard({
       setIsWalkIn(false);
     }
     setFirstWeightInput(isSerialConnected && !signalLost && manualWeightKg > 0 ? String(manualWeightKg) : "");
+    liveCaptureRef.current = { first: isSerialConnected && !signalLost && manualWeightKg > 0 ? manualWeightKg : null, second: null };
+    setManualReason("");
     setSecondWeightInput("");
     setModalOpen(true);
   }
@@ -999,6 +1046,8 @@ export function LiveOperatorDashboard({
             commodity: isWalkIn ? walkInCommodity : undefined,
             weightKg,
             weighType,
+            weightSource: firstSource,
+            manualReason: firstSource === "MANUAL" ? manualReason || undefined : undefined,
             notes: notesInput || undefined,
           }),
         });
@@ -1026,6 +1075,8 @@ export function LiveOperatorDashboard({
             transactionId: selectedWeighmentId || undefined,
             bookingId: selectedBookingId || undefined,
             weightKg,
+            weightSource: secondSource,
+            manualReason: secondSource === "MANUAL" ? manualReason || undefined : undefined,
             mineTicketNumber: mineTicketInput || undefined,
             notes: notesInput || undefined,
           }),
@@ -1065,6 +1116,8 @@ export function LiveOperatorDashboard({
             commodity: isWalkIn ? walkInCommodity : undefined,
             weight1Kg,
             weight2Kg,
+            weightSource: "MANUAL",
+            manualReason: manualReason || undefined,
             mineTicketNumber: mineTicketInput || undefined,
             notes: notesInput || undefined,
           }),
@@ -1083,6 +1136,11 @@ export function LiveOperatorDashboard({
       setSubmitting(false);
     }
   }
+
+  const firstSource: "INDICATOR" | "MANUAL" = liveCaptureRef.current.first !== null && Number(firstWeightInput) === liveCaptureRef.current.first ? "INDICATOR" : "MANUAL";
+  const secondSource: "INDICATOR" | "MANUAL" = liveCaptureRef.current.second !== null && Number(secondWeightInput) === liveCaptureRef.current.second ? "INDICATOR" : "MANUAL";
+  const typedWeight = modalMode === "FIRST" ? firstSource === "MANUAL" : modalMode === "SECOND" ? secondSource === "MANUAL" : true;
+  const needsManualReason = typedWeight && (capabilities.manualEntryPolicy ?? "PRIMARY") !== "PRIMARY";
 
   // Live scale calculations for modal preview
   const w1Num = Math.round(Number(firstWeightInput) || 0);
@@ -1952,7 +2010,7 @@ export function LiveOperatorDashboard({
                       {manualWeightKg > 0 && modalMode !== "SECOND" && (
                         <button
                           type="button"
-                          onClick={() => setFirstWeightInput(String(manualWeightKg))}
+                          onClick={() => { setFirstWeightInput(String(manualWeightKg)); liveCaptureRef.current.first = manualWeightKg; }}
                           className="text-2xs text-primary font-mono font-medium hover:underline flex items-center gap-1 cursor-pointer"
                         >
                           <RefreshCw size={10} /> Insert Scale ({formatKg(manualWeightKg)})
@@ -2068,6 +2126,20 @@ export function LiveOperatorDashboard({
                     className="h-8 text-xs"
                   />
                 </div>
+                {needsManualReason && (
+                  <div className="space-y-1.5 rounded-md border border-warning/40 bg-warning/5 p-2 md:col-span-2">
+                    <Label htmlFor="manual-reason" className="text-warning">
+                      Typed weight — reason required{capabilities.manualEntryPolicy === "SUPERVISOR_OVERRIDE" ? " (supervisor only)" : ""}
+                    </Label>
+                    <Input id="manual-reason" value={manualReason} onChange={(e) => setManualReason(e.target.value)} placeholder="Why is this weight not read from the indicator?" className="h-8 text-xs" />
+                    <div className="flex flex-wrap gap-1">
+                      {["Indicator offline — reading taken from display", "Order constant weight", "Indicator fault logged with technician"].map((r) => (
+                        <button key={r} type="button" onClick={() => setManualReason(r)} className="rounded-sm border border-border px-1.5 py-0.5 text-2xs hover:bg-muted">{r}</button>
+                      ))}
+                    </div>
+                    <p className="text-2xs text-muted-foreground">Recorded in the audit trail and raised as an exception for review.</p>
+                  </div>
+                )}
               </div>
 
               {/* Modal Action Buttons */}
