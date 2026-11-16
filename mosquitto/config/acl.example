@@ -1,0 +1,17 @@
+# Mosquitto ACL. Topic tree: tenant/{organisationId}/site/{siteId}/...
+#
+# Edge controllers authenticate with username = their site id (UUID). The pattern
+# below substitutes %u, so an edge can only publish/subscribe under its own site and
+# can never read or write another site's or tenant's topics.
+pattern readwrite tenant/+/site/%u/#
+
+# The cloud platform service account reads all telemetry and publishes commands.
+user weighbridge-cloud
+topic read tenant/#
+topic write tenant/+/site/+/lane/+/gate/command
+
+# Read-only monitoring account (dashboards, alerting).
+user weighbridge-monitor
+topic read tenant/+/site/+/edge/heartbeat
+topic read tenant/+/site/+/hardware/status
+topic read $SYS/#

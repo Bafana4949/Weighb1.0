@@ -31,7 +31,7 @@ export function TransporterApplyForm() {
   if (submitted) {
     return <div className="space-y-3">
       <p className="rounded-sm border border-success/30 bg-success/10 p-3 text-sm text-success">{submitted}</p>
-      <p className="text-xs text-muted-foreground">You'll be able to sign in once an administrator approves your company.</p>
+      <p className="text-xs text-muted-foreground">You’ll be able to sign in once an administrator approves your company.</p>
     </div>;
   }
 

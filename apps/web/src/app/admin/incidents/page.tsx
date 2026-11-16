@@ -7,6 +7,8 @@ import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { IncidentManagement } from "@/components/incident-management";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Button } from "@/components/ui/button";
+import { safeDriverSelect } from "@/lib/utils";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 const INCIDENT_TYPES = ["UNAUTHORISED_ACCESS","OVERLOAD","FRAUD_ALERT","SENSOR_FAULT","DRIVER_MISMATCH","ANPR_FAILURE","CLOUD_SYNC_FAILURE","SCALE_FAULT","ROUTE_DEVIATION","CLONE_DETECTION","TARE_DRIFT","CALIBRATION_EXPIRY","POWER_RECOVERY","MANUAL_OVERRIDE","UNDERWEIGHT_EMPTY"];
 const SEVERITIES = ["LOW","MEDIUM","HIGH","CRITICAL"];
@@ -19,13 +21,13 @@ export default async function AdminIncidents({ searchParams }: { searchParams: P
   const page = Math.max(1, Number(params.page ?? 1));
   const limit = 25;
   const where = {
-    ...userSiteScope(s.user),
+    ...viaSiteWhere(await loadAccessContext(s.user)),
     ...(params.type ? { type: params.type as never } : {}),
     ...(params.severity ? { severity: params.severity as never } : {}),
     ...(params.resolved === "true" ? { status: "RESOLVED" as const } : params.resolved === "false" ? { status: { not: "RESOLVED" as const } } : {}),
   };
   const [incidents, total] = await Promise.all([
-    prisma.incident.findMany({ where, include: { site: true, vehicle: true, driver: true }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
+    prisma.incident.findMany({ where, include: { site: true, vehicle: true, driver: { select: safeDriverSelect } }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
     prisma.incident.count({ where }),
   ]);
 

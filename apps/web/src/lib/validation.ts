@@ -28,6 +28,7 @@ export const companySchema = transporterSchema;
 // to evolve independently.
 export const companyUpdateSchema = z.object({
   companyName: z.string().min(2).max(120).optional(),
+  licensedTier: z.enum(["MANUAL", "SEMI_AUTOMATIC", "FULLY_AUTOMATIC"]).optional(),
   registrationNo: z.string().max(60).optional().nullable(),
   contactEmail: z.string().email().optional().nullable(),
   contactPhone: z.string().max(30).optional().nullable(),

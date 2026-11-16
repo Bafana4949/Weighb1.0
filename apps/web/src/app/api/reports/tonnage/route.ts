@@ -2,6 +2,7 @@ import { UserRole } from "@prisma/client";
 import { ok, requireRole, withScopeErrors } from "@/lib/api";
 import { userScope } from "@/lib/access";
 import { dateRange, tonnageByGroup } from "@/lib/reports";
+import { loadAccessContext, siteWhere } from "@/lib/site-access";
 
 export const GET = withScopeErrors(async function GET(request: Request) {
   const a = await requireRole([UserRole.TRANSPORTER, UserRole.OPERATOR, UserRole.ADMIN]);
@@ -15,7 +16,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   const { rows } = await tonnageByGroup(
     range,
     group,
-    isTransporter ? {} : userScope(a.session!.user),
+    isTransporter ? {} : siteWhere(await loadAccessContext(a.session!.user)),
     isTransporter ? { booking: { transporterOrganisationId: a.session!.user.organisationId! } } : {}
   );
 

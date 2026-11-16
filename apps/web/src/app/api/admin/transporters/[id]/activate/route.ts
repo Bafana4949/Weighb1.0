@@ -2,6 +2,7 @@ import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { fail, ok, requireRole } from "@/lib/api";
 import { audit } from "@/lib/audit";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const a = await requireRole([UserRole.ADMIN]);
@@ -16,6 +17,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   });
   
   if (!before) return fail("Transporter not found", 404);
+  if (!isPlatformSuperAdmin(a.session!.user) && (await prisma.miningCompanyTransporter.count({ where: { transporterId: id, miningCompanyId: { not: a.session!.user.organisationId! } } })) > 0) {
+    return fail("This transporter also serves other companies; ask the platform administrator", 403);
+  }
   if (before.isActive) return fail("This transporter is already active", 409);
 
   const [organisation] = await prisma.$transaction([

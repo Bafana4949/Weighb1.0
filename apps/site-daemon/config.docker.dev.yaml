@@ -1,0 +1,30 @@
+# DEVELOPMENT ONLY - docker compose "edge" profile (daemon + hardware-simulator).
+# Needs WB_ENV=development, WB_ALLOW_SIMULATION=true, WB_LOCAL_API_TOKEN and the
+# site's own WB_SITE_API_KEY in the container environment.
+site:
+  id: "WOESTALLEEN"
+  name: "Woestalleen Colliery (dev)"
+  timezone: "Africa/Johannesburg"
+  operating_hours: { start: "05:00", end: "22:00" }
+
+anpr:
+  camera_source: "test_plates/sample_01.png"
+
+transport:
+  mode: "tcp"
+  tcp_host: "hardware-simulator"
+  tcp_port: 7001
+  simulated: true
+
+mqtt:
+  broker: "mosquitto"
+  port: 1883
+  allow_anonymous: true        # development only; refused in production
+
+cloud:
+  api_url: "http://web:3000/api"
+
+storage:
+  sqlite_path: "/data/edge.db"
+  backup_directory: "/data/backups"
+  evidence_directory: "/data/evidence"

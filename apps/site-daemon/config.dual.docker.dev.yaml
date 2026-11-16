@@ -1,0 +1,59 @@
+# DEVELOPMENT ONLY - docker compose "edge-dual" profile: one daemon, two simulated lanes.
+# Needs WB_ENV=development, WB_ALLOW_SIMULATION=true, WB_LOCAL_API_TOKEN and the
+# site's own WB_SITE_API_KEY in the container environment.
+site:
+  id: "EX-OO1"
+  name: "Exxaro (dev)"
+  timezone: "Africa/Johannesburg"
+  operating_hours: { start: "05:00", end: "22:00" }
+  topology: "DUAL_ENTRY_EXIT"
+
+anpr:
+  camera_source: "test_plates/sample_01.png"
+
+mqtt:
+  broker: "mosquitto"
+  port: 1883
+  allow_anonymous: true        # development only; refused in production
+
+cloud:
+  api_url: "http://web:3000/api"
+
+storage:
+  sqlite_path: "/data/edge.db"
+  backup_directory: "/data/backups"
+  evidence_directory: "/data/evidence"
+
+lanes:
+  # laneNumber must match the seeded Lane.laneNumber rows for EX-OO1
+  # (packages/database/seed.ts: North gate=1, South gate=2).
+  - id: "north"
+    lane_number: 1
+    mode: "tcp"
+    tcp_host: "hardware-simulator-lane-a"
+    tcp_port: 7001
+    simulated: true
+    device_keys:
+      controller: "IO_CONTROLLER_LANE_1"
+      scale: "SCALE_LANE_1"
+      entry_gate: "GATE_ENTRY_LANE_1"
+      exit_gate: "GATE_EXIT_LANE_1"
+      position_sensor: "POSITION_SENSOR_LANE_1"
+      traffic_light: "TRAFFIC_LIGHT_LANE_1"
+      anpr_camera: "ANPR_CAMERA_LANE_1"
+      rfid_reader: "RFID_READER_LANE_1"
+  - id: "south"
+    lane_number: 2
+    mode: "tcp"
+    tcp_host: "hardware-simulator-lane-b"
+    tcp_port: 7001
+    simulated: true
+    device_keys:
+      controller: "IO_CONTROLLER_LANE_2"
+      scale: "SCALE_LANE_2"
+      entry_gate: "GATE_ENTRY_LANE_2"
+      exit_gate: "GATE_EXIT_LANE_2"
+      position_sensor: "POSITION_SENSOR_LANE_2"
+      traffic_light: "TRAFFIC_LIGHT_LANE_2"
+      anpr_camera: "ANPR_CAMERA_LANE_2"
+      rfid_reader: "RFID_READER_LANE_2"

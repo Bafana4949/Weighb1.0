@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { fail,ok,requireRole } from "@/lib/api";
+import { fail,ok,requireRole, requireCompanyAdmin } from "@/lib/api";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
 
@@ -18,7 +18,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const a = await requireRole([UserRole.ADMIN]);
+  const a = await requireCompanyAdmin();
   if (a.error) return a.error;
   const { id } = await params;
   const target = await prisma.user.findUnique({ where: { id } });

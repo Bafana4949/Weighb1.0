@@ -1,8 +1,9 @@
 import { OrderStatus, UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { fail, ok, requireRole, withScopeErrors } from "@/lib/api";
-import { audit } from "@/lib/audit";
-import { userScope } from "@/lib/access";
+import { audit, auditActor } from "@/lib/audit";
+import { canAccessSite, loadAccessContext, viaSiteWhere } from "@/lib/site-access";
+import { orderReferenceError, productName as lookupProductName } from "@/lib/order-refs";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { safeUserSelect } from "@/lib/utils";
 import { orderSchema } from "@/lib/validation";
@@ -22,17 +23,17 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   const isSuperAdmin = isPlatformSuperAdmin(a.session!.user);
   const isTransporter = a.session!.user.role === "TRANSPORTER";
 
-  const scope = isSuperAdmin
-    ? {}
-    : isTransporter
-      ? { bookings: { some: { transporterOrganisationId: a.session!.user.organisationId! } } }
-      : { site: userScope(a.session!.user) };
+  const transporterOrgId = isTransporter ? a.session!.user.organisationId : null;
+  if (isTransporter && !transporterOrgId) return fail("Tenant organisation scope required", 403);
+  const scope = isTransporter
+    ? { bookings: { some: { transporterOrganisationId: transporterOrgId! } } }
+    : viaSiteWhere(await loadAccessContext(a.session!.user));
+  const take = Math.min(Math.max(Number(url.searchParams.get("limit")) || 200, 1), 500);
 
   const orders = await prisma.weighbridgeOrder.findMany({
     where: {
+      AND: [scope, site ? { siteId: site } : {}],
       ...(status ? { status } : {}),
-      ...(site ? { siteId: site } : {}),
-      ...scope,
     },
     include: {
       site: true,
@@ -42,12 +43,16 @@ export const GET = withScopeErrors(async function GET(request: Request) {
       destination: true,
       productRef: true,
       createdBy: { select: safeUserSelect },
-      bookings: { include: { transactions: true } },
+      // Transporters only ever see their own trucks on a shared order.
+      bookings: { where: transporterOrgId ? { transporterOrganisationId: transporterOrgId } : undefined, include: { transactions: true } },
     },
     orderBy: { createdAt: "desc" },
+    take,
   });
 
-  return ok(orders);
+  // The commercial rate is visible to the platform and the owning company's admins only.
+  const showRate = isSuperAdmin || a.session!.user.role === "ADMIN";
+  return ok(showRate ? orders : orders.map((o) => ({ ...o, ratePerTonZar: null })));
 });
 
 export const POST = withScopeErrors(async function POST(request: Request) {
@@ -60,22 +65,13 @@ export const POST = withScopeErrors(async function POST(request: Request) {
   }
   const site = await prisma.site.findUnique({ where: { id: parsed.data.siteId } });
   if (!site || !site.isActive) return fail("Weighbridge site is unavailable", 422);
-  const callerOrg = a.session!.user.organisationId;
-  if (!isPlatformSuperAdmin(a.session!.user) && callerOrg && site.organisationId !== callerOrg) {
-    return fail("Weighbridge site is unavailable", 422);
-  }
+  if (!(await canAccessSite(a.session!.user, site))) return fail("Weighbridge site is unavailable", 422);
+  const refError = await orderReferenceError(parsed.data, site.organisationId);
+  if (refError) return fail(refError, 422);
 
-  // Look up product name from Product record if productId is provided
-  let productName = parsed.data.product;
-  if (parsed.data.productId) {
-    const prod = await prisma.product.findUnique({ where: { id: parsed.data.productId } });
-    if (prod) {
-      productName = prod.name;
-    }
-  }
-  if (!productName || productName.toUpperCase() === "UNKNOWN") {
-    productName = "High-Grade Export Coal (RB1 6000 kcal/kg)";
-  }
+  // Products are company master data; free text is accepted only when no product record is chosen.
+  const productName = (await lookupProductName(parsed.data.productId)) ?? parsed.data.product?.trim();
+  if (!productName) return fail("Choose a product for this order", 422);
 
   const customOrderNumber = parsed.data.orderNumber?.trim();
   if (customOrderNumber) {
@@ -104,7 +100,7 @@ export const POST = withScopeErrors(async function POST(request: Request) {
         },
       });
       await audit({
-        userId: a.session!.user.id,
+        ...auditActor(a.session!.user),
         siteId: site.id,
         action: "ORDER_CREATED",
         entityType: "weighbridge_order",

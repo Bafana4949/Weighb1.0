@@ -6,6 +6,7 @@ import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { transactionStats } from "@/lib/reports";
 import { prisma } from "@/lib/prisma";
 import { siteIdentifierWhere } from "@/lib/utils";
+import { loadAccessContext, siteWhere } from "@/lib/site-access";
 
 export const GET = withScopeErrors(async function GET(request: Request) {
   const a = await requireRole([UserRole.OPERATOR, UserRole.ADMIN, UserRole.TRANSPORTER]);
@@ -18,7 +19,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   const isSuper = isPlatformSuperAdmin(a.session!.user);
   const isTransporter = a.session!.user.role === "TRANSPORTER";
 
-  const siteScope = isSuper || isTransporter ? {} : userScope(a.session!.user);
+  const siteScope = isSuper || isTransporter ? {} : siteWhere(await loadAccessContext(a.session!.user));
   const extraTxWhere = isTransporter ? transporterScope(a.session!.user) : {};
 
   const stats = await transactionStats({ gte: startOfDay(date), lte: endOfDay(date) }, site, siteScope, extraTxWhere);

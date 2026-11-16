@@ -15,6 +15,8 @@ export default auth((request) => {
     path === "/api/transactions/reconcile" ||
     path === "/api/transactions/chain-head" ||
     path === "/api/transactions/manual" ||
+    path === "/api/edge/config" ||
+    path === "/api/edge/heartbeat" ||
     (path === "/api/incidents" && request.method === "POST");
 
 

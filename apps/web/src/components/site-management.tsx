@@ -28,6 +28,7 @@ import { useToast } from "@/components/providers";
 
 type OrgOption = { id: string; name: string };
 type SiteConfig = {
+  allowedWorkflows?: string[];
   operatingStart: string;
   operatingEnd: string;
   maxCapacityKg: number;
@@ -167,35 +168,19 @@ export function SiteManagement({
         autoApprovalEnabled: form.get("autoApprovalEnabled") === "on",
         requireInsuranceValid: form.get("requireInsuranceValid") === "on",
         requireDriverLicenceValid: form.get("requireDriverLicenceValid") === "on",
+        allowedWorkflows: ["DISPATCH", "RECEIPT", "KNOWN_TARE", "SINGLE"].filter((w) => form.get(`wf_${w}`) === "on"),
       };
+      if (payload.allowedWorkflows.length === 0) throw new Error("Allow at least one weighing workflow");
 
-      const hwPayload = {
-        hasScale: form.get("hw_hasScale") === "on",
-        scaleProtocol: form.get("hw_scaleProtocol") || "METTLER_TOLEDO_CONTINUOUS",
-        hasAnpr: form.get("hw_hasAnpr") === "on",
-        hasGates: form.get("hw_hasGates") === "on",
-        hasTrafficLights: form.get("hw_hasTrafficLights") === "on",
-        hasPositionSensors: form.get("hw_hasPositionSensors") === "on",
-      };
-
-      const [configRes, hwRes] = await Promise.all([
-        fetch(`/api/sites/${configuring.id}/config`, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        }),
-        fetch(`/api/sites/${configuring.id}/capabilities`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(hwPayload),
-        }),
-      ]);
+      const configRes = await fetch(`/api/sites/${configuring.id}/config`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
       const body = await configRes.json();
       if (!configRes.ok) throw new Error(body.error ?? "Could not update site configuration");
 
-      const hwBody = await hwRes.json();
-      if (!hwRes.ok) throw new Error(hwBody.error ?? "Could not update hardware devices");
 
       // Refresh site with full hardware details
       const siteRefreshRes = await fetch(`/api/sites/${configuring.id}`);
@@ -487,6 +472,15 @@ export function SiteManagement({
                 </div>
               </div>
 
+              <WeighingOptions
+                key={viewingDetails.id}
+                site={viewingDetails}
+                onSaved={(allowedWorkflows) => {
+                  setSites((current) => current.map((x) => (x.id === viewingDetails.id ? { ...x, config: x.config ? { ...x.config, allowedWorkflows } : x.config } : x)));
+                  setViewingDetails((v) => (v && v.config ? { ...v, config: { ...v.config, allowedWorkflows } } : v));
+                }}
+              />
+
               <div className="rounded-lg border border-border p-3.5 space-y-2.5">
                 <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                   <Scale className="h-3.5 w-3.5 text-primary" />
@@ -693,145 +687,31 @@ export function SiteManagement({
               </DialogHeader>
               {configuring && (
                 <form onSubmit={saveConfig} className="grid gap-4 md:grid-cols-2">
-                  {/* Hardware & Peripherals Checkboxes Section */}
-                  <div className="md:col-span-2 rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Cpu className="h-4 w-4 text-primary" />
-                        <h4 className="text-sm font-bold text-foreground">Hardware & Automation Peripherals</h4>
-                      </div>
-                      <p className="text-2xs text-muted-foreground mt-0.5">
-                        Select the physical hardware devices active at this weighbridge. You can choose scale only, scale + camera, or full automation.
-                      </p>
+                  {/* Hardware lives in one place: the hardware centre (catalogue-driven, per lane). */}
+                  <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 p-4">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Cpu className="h-4 w-4 text-primary" />
+                      Tier, hardware and edge controller are configured in the hardware centre.
                     </div>
-
-                    <div className="grid gap-2.5 sm:grid-cols-2">
-                      {/* 1. Digital Scale Indicator */}
-                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition">
-                        <input
-                          type="checkbox"
-                          name="hw_hasScale"
-                          defaultChecked={
-                            configuring.hardwareDevices?.length
-                              ? configuring.hardwareDevices.some((d) => d.type === "SCALE" && d.isActive)
-                              : true
-                          }
-                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
-                        />
-                        <div className="space-y-1 w-full">
-                          <div className="flex items-center gap-1.5">
-                            <Scale className="h-3.5 w-3.5 text-primary" />
-                            <span className="text-xs font-semibold text-foreground">Digital Scale Indicator</span>
-                          </div>
-                          <p className="text-2xs text-muted-foreground leading-snug">
-                            Captures gross/tare weights via continuous serial stream.
-                          </p>
-                          <div className="pt-1">
-                            <select
-                              name="hw_scaleProtocol"
-                              defaultValue={
-                                configuring.hardwareDevices?.find((d) => d.type === "SCALE")?.configuration?.protocol ??
-                                "METTLER_TOLEDO_CONTINUOUS"
-                              }
-                              className="text-[11px] h-7 w-full rounded border border-border bg-surface px-2 focus:ring-1 focus:ring-primary"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <option value="METTLER_TOLEDO_CONTINUOUS">Mettler Toledo Continuous (Standard)</option>
-                              <option value="AVERY_WEIGHTRONIX">Avery Weigh-Tronix Protocol</option>
-                              <option value="RICELAKE_IQ355">Rice Lake IQ Series</option>
-                              <option value="GENERIC_ASCII">Generic Continuous ASCII</option>
-                            </select>
-                          </div>
-                        </div>
-                      </label>
-
-                      {/* 2. ANPR Camera */}
-                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition">
-                        <input
-                          type="checkbox"
-                          name="hw_hasAnpr"
-                          defaultChecked={
-                            configuring.hardwareDevices?.some((d) => d.type === "ANPR_CAMERA" && d.isActive) ?? false
-                          }
-                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
-                        />
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5">
-                            <Camera className="h-3.5 w-3.5 text-blue-500" />
-                            <span className="text-xs font-semibold text-foreground">ANPR Camera</span>
-                          </div>
-                          <p className="text-2xs text-muted-foreground leading-snug">
-                            Automatic front & rear vehicle license plate photo capture.
-                          </p>
-                        </div>
-                      </label>
-
-                      {/* 3. Boom Barrier Gates */}
-                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition">
-                        <input
-                          type="checkbox"
-                          name="hw_hasGates"
-                          defaultChecked={
-                            configuring.hardwareDevices?.some(
-                              (d) => (d.type === "ENTRY_GATE" || d.type === "EXIT_GATE") && d.isActive
-                            ) ?? false
-                          }
-                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
-                        />
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5">
-                            <ShieldAlert className="h-3.5 w-3.5 text-amber-500" />
-                            <span className="text-xs font-semibold text-foreground">Automated Boom Gates</span>
-                          </div>
-                          <p className="text-2xs text-muted-foreground leading-snug">
-                            Controls entry and exit physical boom barriers via relay.
-                          </p>
-                        </div>
-                      </label>
-
-                      {/* 4. Traffic Signal Lights */}
-                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition">
-                        <input
-                          type="checkbox"
-                          name="hw_hasTrafficLights"
-                          defaultChecked={
-                            configuring.hardwareDevices?.some((d) => d.type === "TRAFFIC_LIGHT" && d.isActive) ?? false
-                          }
-                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
-                        />
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5">
-                            <TrafficCone className="h-3.5 w-3.5 text-rose-500" />
-                            <span className="text-xs font-semibold text-foreground">Traffic Signal Lights</span>
-                          </div>
-                          <p className="text-2xs text-muted-foreground leading-snug">
-                            Red / Green directional deck signals for driver navigation.
-                          </p>
-                        </div>
-                      </label>
-
-                      {/* 5. Optical Positioning Straddle Sensors */}
-                      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer hover:border-primary/50 transition sm:col-span-2">
-                        <input
-                          type="checkbox"
-                          name="hw_hasPositionSensors"
-                          defaultChecked={
-                            configuring.hardwareDevices?.some((d) => d.type === "POSITION_SENSOR" && d.isActive) ?? false
-                          }
-                          className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
-                        />
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5">
-                            <Radio className="h-3.5 w-3.5 text-emerald-500" />
-                            <span className="text-xs font-semibold text-foreground">Optical Positioning Straddle Sensors</span>
-                          </div>
-                          <p className="text-2xs text-muted-foreground leading-snug">
-                            Infrared deck-end beams to block weight capture if a truck straddles off the scale deck.
-                          </p>
-                        </div>
-                      </label>
-                    </div>
+                    <a href={`/admin/hardware?site=${configuring.code}`} className="text-sm font-medium text-primary underline">Open hardware centre</a>
                   </div>
+
+                  {/* Weighing options: which flows operators at this site may use. */}
+                  <fieldset className="md:col-span-2 space-y-2 rounded-xl border border-border p-4">
+                    <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Weighing options</legend>
+                    {([
+                      ["DISPATCH", "Outbound: tare, load, gross (two weighings)"],
+                      ["RECEIPT", "Inbound: gross, unload, tare (two weighings)"],
+                      ["KNOWN_TARE", "Weigh loaded once: use the truck’s stored empty weight"],
+                      ["SINGLE", "Weigh empty once: capture and store the truck’s empty weight"],
+                    ] as [string, string][]).map(([key, label]) => (
+                      <label key={key} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name={`wf_${key}`} defaultChecked={(configuring.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"]).includes(key)} className="rounded" />
+                        {label}
+                      </label>
+                    ))}
+                    <p className="text-2xs text-muted-foreground">Operators see the “weigh once” choices only when they are ticked here.</p>
+                  </fieldset>
 
                   <div className="md:col-span-2 pt-2 border-t border-border">
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -988,5 +868,56 @@ export function SiteManagement({
         </>
       )}
     </Card>
+  );
+}
+
+const WEIGHING_OPTIONS: [string, string][] = [
+  ["DISPATCH", "Outbound: tare, load, gross (two weighings)"],
+  ["RECEIPT", "Inbound: gross, unload, tare (two weighings)"],
+  ["KNOWN_TARE", "Weigh loaded once: use the truck’s stored empty weight"],
+  ["SINGLE", "Weigh empty once: capture and store the truck’s empty weight"],
+];
+
+/**
+ * Which weighing flows operators at this site may use. Company and site admins can
+ * change these; the server enforces them and the operator console only offers the
+ * "weigh once" choices when they are ticked here.
+ */
+function WeighingOptions({ site, onSaved }: { site: SiteRow; onSaved: (allowedWorkflows: string[]) => void }) {
+  const [selected, setSelected] = useState<string[]>(site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"]);
+  const [state, setState] = useState<{ busy: boolean; message: string | null; error: boolean }>({ busy: false, message: null, error: false });
+  const initial = (site.config?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"]).join();
+  async function save() {
+    setState({ busy: true, message: null, error: false });
+    try {
+      const res = await fetch(`/api/sites/${site.id}/config`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ allowedWorkflows: selected }) });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Could not save weighing options");
+      onSaved(body.data.allowedWorkflows);
+      setState({ busy: false, message: "Weighing options saved.", error: false });
+    } catch (e) {
+      setState({ busy: false, message: e instanceof Error ? e.message : String(e), error: true });
+    }
+  }
+  return (
+    <div className="rounded-lg border border-border p-3.5 space-y-2.5">
+      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Weighing options</p>
+      <div className="space-y-1.5">
+        {WEIGHING_OPTIONS.map(([key, label]) => (
+          <label key={key} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" className="rounded" checked={selected.includes(key)} onChange={(e) => setSelected(e.target.checked ? [...selected, key] : selected.filter((x) => x !== key))} />
+            {label}
+          </label>
+        ))}
+      </div>
+      <p className="text-2xs text-muted-foreground">Operators see the “weigh once” choices only when they are ticked here.</p>
+      <div className="flex items-center gap-3">
+        <Button size="sm" disabled={state.busy || selected.length === 0 || selected.slice().sort().join() === initial.split(",").sort().join()} onClick={() => void save()}>
+          {state.busy ? "Saving…" : "Save weighing options"}
+        </Button>
+        {selected.length === 0 && <span className="text-xs text-danger">Allow at least one option.</span>}
+        {state.message && <span className={state.error ? "text-xs text-danger" : "text-xs text-success"}>{state.message}</span>}
+      </div>
+    </div>
   );
 }

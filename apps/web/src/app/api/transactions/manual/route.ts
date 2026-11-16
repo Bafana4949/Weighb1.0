@@ -2,7 +2,10 @@ import { createHash } from "crypto";
 import { UserRole } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { fail, ok, requireSiteOrRole } from "@/lib/api";
+import { actorCanAccessSite, fail, ok, requirePermission, requireSiteOrRole, type Actor } from "@/lib/api";
+import { linkedTransporterIds } from "@/lib/transporter-links";
+import { loadSiteCapabilities, manualEntryError, type WeightSource } from "@/lib/site-capabilities";
+import { logger } from "@/lib/logger";
 import { audit } from "@/lib/audit";
 import { siteIdentifierWhere } from "@/lib/utils";
 import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
@@ -34,6 +37,14 @@ async function generateNextWaybillNumber(siteCode: string, siteId: string, clien
   return `${prefix}${nextVal.toString().padStart(6, "0")}`;
 }
 
+/** Raised for walk-in problems whose message is safe to show the operator. */
+class WalkInError extends Error {}
+
+/**
+ * Walk-in weighing: a truck without a pre-booking. Everything is resolved inside the
+ * site's company — its own fleet plus hauliers it is contracted to — so a typed
+ * plate can never attach a load to another tenant's vehicle or transporter.
+ */
 async function resolveOrCreateWalkInBooking({
   siteId,
   siteOrganisationId,
@@ -44,7 +55,9 @@ async function resolveOrCreateWalkInBooking({
   commodity,
   orderId,
   operatorId,
+  knownTareKg,
 }: {
+  knownTareKg?: number | null;
   siteId: string;
   siteOrganisationId: string;
   plate: string;
@@ -55,139 +68,180 @@ async function resolveOrCreateWalkInBooking({
   orderId?: string;
   operatorId?: string | null;
 }) {
+  if (!operatorId) throw new WalkInError("Walk-in weighments must be recorded by a signed-in operator");
   const plateClean = plate.trim().toUpperCase();
   const plateNorm = plateClean.replace(/[^A-Z0-9]/g, "");
+  if (plateNorm.length < 3) throw new WalkInError("Enter a valid registration plate");
 
-  // 1. Resolve or Create Transporter Organisation
-  let transporterOrg = null;
-  if (transporterName && transporterName.trim()) {
-    const tName = transporterName.trim();
+  const order = orderId
+    ? await prisma.weighbridgeOrder.findFirst({ where: { id: orderId, siteId, status: "ACTIVE" }, include: { productRef: true } })
+    : null;
+  if (orderId && !order) throw new WalkInError("Selected order is not active at this site");
+  const commodityName = order?.productRef?.name ?? order?.product ?? commodity?.trim();
+  if (!commodityName) throw new WalkInError("Select an order or enter the product being weighed");
+
+  const allowedOwners = await linkedTransporterIds(siteOrganisationId);
+
+  // 1. Transporter: a haulier contracted to this company, the company itself, or a new
+  //    haulier registered and linked on the spot (audited).
+  let transporterOrg: { id: string; name: string } | null = null;
+  const tName = transporterName?.trim();
+  if (tName) {
     transporterOrg = await prisma.organisation.findFirst({
-      where: { name: { equals: tName, mode: "insensitive" }, type: "HAULIER" },
+      where: { id: { in: allowedOwners }, name: { equals: tName, mode: "insensitive" } },
+      select: { id: true, name: true },
     });
     if (!transporterOrg) {
-      transporterOrg = await prisma.organisation.create({
-        data: {
-          name: tName,
-          type: "HAULIER",
-          status: "ACTIVE",
-          isActive: true,
-          contactEmail: `dispatch@${tName.toLowerCase().replace(/[^a-z0-9]/g, "")}.co.za`,
-        },
-      });
-    }
-  } else {
-    transporterOrg = await prisma.organisation.findFirst({
-      where: { type: "HAULIER", isActive: true },
-    });
-    if (!transporterOrg) {
-      transporterOrg = await prisma.organisation.findUnique({
-        where: { id: siteOrganisationId },
-      });
+      transporterOrg = await prisma.organisation.create({ data: { name: tName, type: "HAULIER", status: "ACTIVE", isActive: true }, select: { id: true, name: true } });
+      await prisma.miningCompanyTransporter.create({ data: { miningCompanyId: siteOrganisationId, transporterId: transporterOrg.id, status: "ACTIVE" } });
+      await audit({ userId: operatorId, siteId, organisationId: siteOrganisationId, action: "WALK_IN_TRANSPORTER_REGISTERED", entityType: "organisation", entityId: transporterOrg.id, afterData: { name: tName } });
+      allowedOwners.push(transporterOrg.id);
     }
   }
 
-  if (!transporterOrg) {
-    throw new Error("Unable to resolve an organisation for this weighment");
-  }
-
-  // 2. Resolve or Create Vehicle
+  // 2. Vehicle: only vehicles of permitted owners match the plate.
   let vehicle = await prisma.vehicle.findFirst({
-    where: { plateNormalized: plateNorm, deletedAt: null },
+    where: {
+      plateNormalized: plateNorm,
+      deletedAt: null,
+      OR: [{ organisationId: { in: allowedOwners } }, { transporterAssignments: { some: { status: "ACTIVE", transporterOrganisationId: { in: allowedOwners } } } }],
+    },
   });
+  const ownerId = transporterOrg?.id ?? vehicle?.organisationId ?? siteOrganisationId;
   if (!vehicle) {
     vehicle = await prisma.vehicle.create({
       data: {
-        organisationId: transporterOrg.id,
+        organisationId: ownerId,
         plate: plateClean,
         plateNormalized: plateNorm,
-        make: "Standard",
-        model: "Commercial Haulier",
-        tareWeightKg: 14500,
+        make: "Walk-in",
+        model: "Details to be completed",
+        // Measured tare when this weighment reveals it; otherwise 1 kg marks "unknown"
+        // and is replaced by the measured tare at the second weighment.
+        tareWeightKg: knownTareKg && knownTareKg > 0 ? knownTareKg : 1,
         legalMaxGvwKg: 56000,
-        insuranceExpiry: new Date(Date.now() + 365 * 24 * 3600 * 1000),
+        insuranceExpiry: new Date(Date.now() + 30 * 24 * 3600 * 1000),
         status: "ACTIVE",
       },
     });
+    await audit({ userId: operatorId, siteId, organisationId: siteOrganisationId, action: "WALK_IN_VEHICLE_REGISTERED", entityType: "vehicle", entityId: vehicle.id, afterData: { plate: plateClean, organisationId: ownerId } });
   }
+  const bookingOwnerId = transporterOrg?.id ?? vehicle.organisationId;
 
-  // 3. Resolve or Create Driver
-  let driver = null;
-  const dParts = (driverName || "Driver Unknown").trim().split(" ");
-  const firstName = dParts[0] || "Driver";
-  const lastName = dParts.slice(1).join(" ") || "Haulier";
-
-  driver = await prisma.driver.findFirst({
-    where: {
-      organisationId: transporterOrg.id,
-      firstName: { equals: firstName, mode: "insensitive" },
-      lastName: { equals: lastName, mode: "insensitive" },
-      deletedAt: null,
-    },
+  // 3. Driver within the transporter.
+  const dParts = (driverName || "").trim().split(/\s+/).filter(Boolean);
+  const firstName = dParts[0] || "Unnamed";
+  const lastName = dParts.slice(1).join(" ") || "Driver";
+  let driver = await prisma.driver.findFirst({
+    where: { organisationId: bookingOwnerId, firstName: { equals: firstName, mode: "insensitive" }, lastName: { equals: lastName, mode: "insensitive" }, deletedAt: null },
   });
-
+  if (driver?.blacklistStatus) throw new WalkInError(`${driver.firstName} ${driver.lastName} is blacklisted and cannot be weighed`);
   if (!driver) {
-    const rand = Math.random().toString(36).substring(2, 8);
+    const rand = Math.random().toString(36).substring(2, 10).toUpperCase();
     driver = await prisma.driver.create({
       data: {
-        organisationId: transporterOrg.id,
+        organisationId: bookingOwnerId,
         firstName,
         lastName,
         idNumberEncrypted: "N/A",
-        idNumberHash: `id_${Date.now()}_${rand}`,
-        rfidTag: `rfid_${Date.now()}_${rand}`,
-        licenceNumber: `LIC-${rand.toUpperCase()}`,
-        licenceExpiry: new Date(Date.now() + 365 * 24 * 3600 * 1000),
+        idNumberHash: `walkin_${Date.now()}_${rand}`,
+        licenceNumber: `WALKIN-${rand}`,
+        licenceExpiry: new Date(Date.now() + 30 * 24 * 3600 * 1000),
         consentCapturedAt: new Date(),
       },
     });
   }
 
-  // 4. Resolve or Create Trailer
+  // 4. Trailer: reuse only if it is on this vehicle or a permitted owner's vehicle.
   let trailerRecord = null;
-  if (trailer && trailer.trim()) {
-    const tClean = trailer.trim().toUpperCase();
-    trailerRecord = await prisma.trailer.findFirst({
-      where: { trailerId: tClean },
-    });
-    if (!trailerRecord) {
-      trailerRecord = await prisma.trailer.create({
-        data: {
-          trailerId: tClean,
-          registrationNo: tClean,
-          tareWeightKg: 4200,
-          vehicleId: vehicle.id,
-        },
-      });
+  const tClean = trailer?.trim().toUpperCase();
+  if (tClean) {
+    const existing = await prisma.trailer.findFirst({ where: { trailerId: tClean }, include: { vehicle: { select: { organisationId: true } } } });
+    if (!existing) {
+      trailerRecord = await prisma.trailer.create({ data: { trailerId: tClean, registrationNo: null, vehicleId: vehicle.id } });
+    } else if (existing.vehicleId === vehicle.id || (existing.vehicle && allowedOwners.includes(existing.vehicle.organisationId))) {
+      trailerRecord = existing;
+    } else {
+      logger.warn("walk_in_trailer_conflict", { site_id: siteId, trailer: tClean });
     }
   }
 
-  // 5. Create Instant Booking
   const ref = `WALK-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
   const token = `JT-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-  const fallbackUser = operatorId || (await prisma.user.findFirst())?.id || vehicle.organisationId;
+  const payloadKg = vehicle.tareWeightKg > 1 ? Math.max(0, vehicle.legalMaxGvwKg - vehicle.tareWeightKg) : 0;
 
   return await prisma.booking.create({
     data: {
       reference: ref,
       journeyToken: token,
-      transporterOrganisationId: transporterOrg.id,
+      transporterOrganisationId: bookingOwnerId,
       siteId,
       vehicleId: vehicle.id,
       driverId: driver.id,
       trailerId: trailerRecord?.id ?? null,
-      orderId: orderId ?? null,
-      commodity: commodity?.trim() || "Coal (ROM)",
-      targetTonnageKg: 34000,
+      orderId: order?.id ?? null,
+      commodity: commodityName,
+      targetTonnageKg: payloadKg,
       windowStart: new Date(),
       windowEnd: new Date(Date.now() + 24 * 3600 * 1000),
       status: "APPROVED",
       approvedAt: new Date(),
-      approvalReason: "Manual walk-in weighment authorized by operator",
-      createdById: fallbackUser,
+      approvedById: operatorId,
+      approvalReason: "Manual walk-in weighment authorised by operator",
+      createdById: operatorId,
     },
     include: { vehicle: true, driver: true, trailer: true, order: true },
   });
+}
+
+/**
+ * Applies the site tier's manual-entry policy. Edge controllers read the indicator,
+ * so their weights are INDICATOR by definition; browser clients state the source.
+ */
+async function weightPolicy(actor: Actor, siteId: string, body: any): Promise<{ error: Response | null; source: WeightSource; reason: string | null; flagged: boolean }> {
+  if (actor.type !== "user") return { error: null, source: "INDICATOR", reason: null, flagged: false };
+  const source: WeightSource = body?.weightSource === "INDICATOR" ? "INDICATOR" : "MANUAL";
+  const reason = typeof body?.manualReason === "string" ? body.manualReason.trim().slice(0, 500) : null;
+  const caps = await loadSiteCapabilities(siteId);
+  if (!caps) return { error: fail("Site not found", 404), source, reason, flagged: false };
+  const needsOverride = source === "MANUAL" && caps.manualEntryPolicy === "SUPERVISOR_OVERRIDE";
+  const hasOverride = needsOverride ? !(await requirePermission("transaction.override")).error : false;
+  const error = manualEntryError(caps, source, reason, hasOverride);
+  return { error: error ? fail(error, 422) : null, source, reason, flagged: source === "MANUAL" && caps.manualEntryPolicy !== "PRIMARY" };
+}
+
+/** Weighing flows the site's administrators have enabled (DISPATCH, RECEIPT, KNOWN_TARE, SINGLE). */
+async function siteWorkflowsFor(siteId: string): Promise<string[]> {
+  return (await prisma.siteConfig.findUnique({ where: { siteId }, select: { allowedWorkflows: true } }))?.allowedWorkflows ?? ["DISPATCH", "RECEIPT"];
+}
+
+/** A vehicle this site's company may weigh: own fleet, contracted hauliers, or on active assignment to them. */
+async function findSiteVehicle(siteOrganisationId: string, plate: string) {
+  const owners = await linkedTransporterIds(siteOrganisationId);
+  return prisma.vehicle.findFirst({
+    where: {
+      plateNormalized: plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, ""),
+      deletedAt: null,
+      OR: [{ organisationId: { in: owners } }, { transporterAssignments: { some: { status: "ACTIVE", transporterOrganisationId: { in: owners } } } }],
+    },
+  });
+}
+
+/** Typed weights at automated sites become reviewable exceptions. */
+async function flagManualWeight(siteId: string, operatorId: string | null, transactionId: string, bookingId: string, reason: string | null, weights: Record<string, number>) {
+  await prisma.incident.create({
+    data: {
+      siteId,
+      transactionId,
+      bookingId,
+      type: "MANUAL_OVERRIDE",
+      severity: "MEDIUM",
+      title: "Weight entered by hand",
+      description: `Operator typed the weight instead of reading the indicator. Reason: ${reason ?? "—"}`,
+      anomalyScore: 10,
+    },
+  });
+  await audit({ userId: operatorId, siteId, action: "MANUAL_WEIGHT_OVERRIDE", entityType: "weighbridge_transaction", entityId: transactionId, reason, afterData: weights });
 }
 
 export async function GET(request: NextRequest) {
@@ -200,13 +254,8 @@ export async function GET(request: NextRequest) {
   const resolvedSite = await prisma.site.findFirst({ where: siteIdentifierWhere(site) });
   if (!resolvedSite) return fail("Site not found", 404);
 
-  if (authCheck.actor?.type === "user") {
-    const callerUser = await prisma.user.findUnique({ where: { id: authCheck.actor.id } });
-    if (callerUser && callerUser.platformRole !== "PLATFORM_SUPER_ADMIN" && callerUser.organisationId) {
-      if (resolvedSite.organisationId !== callerUser.organisationId) {
-        return fail("Forbidden: You do not have access to this site's weighments", 403);
-      }
-    }
+  if (!(await actorCanAccessSite(authCheck.actor!, resolvedSite))) {
+    return fail("Forbidden: You do not have access to this site's weighments", 403);
   }
 
   // 1. Fetch transactions currently in progress (captured 1st weight, awaiting 2nd weight)
@@ -300,14 +349,10 @@ export async function POST(request: NextRequest) {
     const resolvedSite = await prisma.site.findFirst({ where: siteIdentifierWhere(siteCode) });
     if (!resolvedSite) return fail("Site not found", 404);
 
-    if (authCheck.actor?.type === "user") {
-      const callerUser = await prisma.user.findUnique({ where: { id: authCheck.actor.id } });
-      if (callerUser && callerUser.platformRole !== "PLATFORM_SUPER_ADMIN" && callerUser.organisationId) {
-        if (resolvedSite.organisationId !== callerUser.organisationId) {
-          return fail("Forbidden: You do not have operator permissions for this site's organisation", 403);
-        }
-      }
+    if (!(await actorCanAccessSite(authCheck.actor!, resolvedSite))) {
+      return fail("Forbidden: You do not have operator permissions for this site", 403);
     }
+    if (!resolvedSite.isActive) return fail("This site is not active", 409);
 
     const now = new Date();
     const operatorId = authCheck.actor?.type === "user" ? authCheck.actor.id : null;
@@ -339,14 +384,16 @@ export async function POST(request: NextRequest) {
     const parsedWeight = Math.round(Number(weightKg));
 
     if (!parsedWeight || parsedWeight <= 0) return fail("Valid scale weight (kg) is required", 422);
+    const wp = await weightPolicy(authCheck.actor!, resolvedSite.id, body);
+    if (wp.error) return wp.error;
 
     let booking;
     if (bookingId) {
-      booking = await prisma.booking.findUnique({
-        where: { id: bookingId },
+      booking = await prisma.booking.findFirst({
+        where: { id: bookingId, siteId: resolvedSite.id, status: { in: ["APPROVED", "ACTIVE"] } },
         include: { vehicle: true, driver: true, trailer: true, order: true },
       });
-      if (!booking) return fail("Booking not found", 404);
+      if (!booking) return fail("Booking not found or not approved for this site", 404);
     } else if (plate && plate.trim()) {
       booking = await resolveOrCreateWalkInBooking({
         siteId: resolvedSite.id,
@@ -358,6 +405,7 @@ export async function POST(request: NextRequest) {
         commodity,
         orderId,
         operatorId,
+        knownTareKg: weighType !== "RECEIPT" ? parsedWeight : null,
       });
     } else {
       return fail("Either bookingId or vehicle registration plate is required for 1st weighment", 422);
@@ -372,6 +420,11 @@ export async function POST(request: NextRequest) {
     }
 
     const isDispatch = weighType !== "RECEIPT";
+    // Sites choose which weighing flows they permit (Hardware -> Configuration -> tier card).
+    const siteWorkflows = await siteWorkflowsFor(resolvedSite.id);
+    if (!siteWorkflows.includes(isDispatch ? "DISPATCH" : "RECEIPT")) {
+      return fail(`${isDispatch ? "Outbound (tare first)" : "Inbound (gross first)"} weighing is not permitted at this site`, 422);
+    }
     const tempEdgeId = idempotencyKey ? `IDEM-${idempotencyKey}` : `MANUAL-INPROG-${resolvedSite.code}-${Date.now()}`;
     const tempWaybill = `WB-INPROG-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -450,9 +503,11 @@ export async function POST(request: NextRequest) {
         plate: booking.vehicle.plate,
         weighType: isDispatch ? "DISPATCH_TARE" : "RECEIPT_GROSS",
         weightKg: parsedWeight,
+        weightSource: wp.source,
         notes: notes ?? null,
       },
     });
+    if (wp.flagged) await flagManualWeight(resolvedSite.id, operatorId, transaction.id, booking.id, wp.reason, { firstWeightKg: parsedWeight });
 
     return ok({
       message: `1st Weighment captured successfully for ${booking.vehicle.plate}: ${parsedWeight.toLocaleString()} kg`,
@@ -490,6 +545,8 @@ export async function POST(request: NextRequest) {
     const parsedWeight = Math.round(Number(weightKg));
 
     if (!parsedWeight || parsedWeight <= 0) return fail("Valid scale weight (kg) is required", 422);
+    const wp = await weightPolicy(authCheck.actor!, resolvedSite.id, body);
+    if (wp.error) return wp.error;
 
     const edgeTransactionId = idempotencyKey ? `IDEM-${idempotencyKey}` : `MANUAL-${resolvedSite.code}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -647,9 +704,13 @@ export async function POST(request: NextRequest) {
         grossWeightKg: actualGross,
         tareWeightKg: actualTare,
         netWeightKg,
+        weightSource: wp.source,
         notes: notes ?? null,
       },
     });
+    if (wp.flagged) await flagManualWeight(resolvedSite.id, operatorId, completed.id, completed.bookingId, wp.reason, { grossWeightKg: actualGross, tareWeightKg: actualTare });
+    // Walk-in vehicles registered without a known tare learn it from this weighment.
+    await prisma.vehicle.updateMany({ where: { id: completed.vehicleId, model: "Details to be completed", tareWeightKg: 1 }, data: { tareWeightKg: actualTare } });
 
     return ok({
       message: `Weighment finalized for ${plate}! Net Cargo: ${netWeightKg.toLocaleString()} kg`,
@@ -665,6 +726,61 @@ export async function POST(request: NextRequest) {
   // --------------------------------------------------------------------------
   // ACTION: DIRECT_WEIGH (Enter both 1st & 2nd weights simultaneously)
   // --------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // ACTION: STORE_TARE (weigh an empty truck once and keep its empty weight)
+  // Enabled per site by the "Weigh empty once" option. Updates the vehicle's
+  // stored tare; it is not a transaction and does not appear in tonnage reports.
+  // --------------------------------------------------------------------------
+  if (action === "STORE_TARE") {
+    if (authCheck.actor?.type !== "user") return fail("Empty weights are captured by an operator", 403);
+    if (!(await siteWorkflowsFor(resolvedSite.id)).includes("SINGLE")) {
+      return fail("Weighing empty trucks once is not enabled at this site. An administrator can enable it.", 422);
+    }
+    const weight = Math.round(Number(body.weightKg));
+    if (!weight || weight <= 0) return fail("Valid empty weight (kg) is required", 422);
+    const wp = await weightPolicy(authCheck.actor!, resolvedSite.id, body);
+    if (wp.error) return wp.error;
+
+    let vehicle = null;
+    if (body.bookingId) {
+      const booking = await prisma.booking.findFirst({ where: { id: body.bookingId, siteId: resolvedSite.id }, include: { vehicle: true } });
+      vehicle = booking?.vehicle ?? null;
+    } else if (typeof body.plate === "string" && body.plate.trim()) {
+      vehicle = await findSiteVehicle(resolvedSite.organisationId, body.plate);
+    }
+    if (!vehicle) return fail("Truck not found for this company. Add it under Fleet, or select it from the queue.", 404);
+
+    const config = await prisma.siteConfig.findUnique({ where: { siteId: resolvedSite.id }, select: { emptyVehicleMaxKg: true } });
+    const emptyMax = config?.emptyVehicleMaxKg ?? 18500;
+    if (weight > emptyMax) {
+      return fail(`${weight.toLocaleString()} kg is above this site's empty-truck maximum (${emptyMax.toLocaleString()} kg). Is the truck loaded?`, 422);
+    }
+
+    const previous = vehicle.tareWeightKg > 1 ? vehicle.tareWeightKg : null;
+    await prisma.vehicle.update({ where: { id: vehicle.id }, data: { tareWeightKg: weight, lastTareWeightKg: previous } });
+    await audit({
+      userId: operatorId,
+      siteId: resolvedSite.id,
+      actorRole: authCheck.actor.session.user.role,
+      action: "VEHICLE_EMPTY_WEIGHT_CAPTURED",
+      entityType: "vehicle",
+      entityId: vehicle.id,
+      reason: wp.reason,
+      beforeData: { tareWeightKg: previous },
+      afterData: { plate: vehicle.plate, tareWeightKg: weight, weightSource: wp.source, notes: body.notes ?? null },
+    });
+    if (wp.flagged) {
+      await prisma.incident.create({ data: { siteId: resolvedSite.id, vehicleId: vehicle.id, type: "MANUAL_OVERRIDE", severity: "MEDIUM", title: "Empty weight entered by hand", description: `Stored empty weight for ${vehicle.plate} was typed instead of read from the indicator. Reason: ${wp.reason ?? "—"}`, anomalyScore: 10 } });
+    }
+    return ok({
+      message: `Empty weight stored for ${vehicle.plate}: ${weight.toLocaleString()} kg${previous ? ` (was ${previous.toLocaleString()} kg)` : ""}`,
+      vehicleId: vehicle.id,
+      plate: vehicle.plate,
+      tareWeightKg: weight,
+      previousTareWeightKg: previous,
+    });
+  }
+
   if (action === "DIRECT_WEIGH") {
     // Idempotency check: if this direct weigh was already completed
     if (idempotencyKey) {
@@ -686,18 +802,33 @@ export async function POST(request: NextRequest) {
     }
 
     const { bookingId, weight1Kg, weight2Kg, notes, mineTicketNumber, plate, driverName, transporterName, trailer, commodity, orderId } = body;
+    // "Weigh loaded once": the second weight is the truck's stored empty weight.
+    const useStoredTare = body.useStoredTare === true;
     const w1 = Math.round(Number(weight1Kg));
-    const w2 = Math.round(Number(weight2Kg));
+    let w2 = useStoredTare ? 0 : Math.round(Number(weight2Kg));
 
-    if (!w1 || w1 <= 0 || !w2 || w2 <= 0) return fail("Both 1st and 2nd weights (kg) must be greater than 0", 422);
+    if (useStoredTare) {
+      if (!w1 || w1 <= 0) return fail("Valid loaded weight (kg) is required", 422);
+      if (!(await siteWorkflowsFor(resolvedSite.id)).includes("KNOWN_TARE")) {
+        return fail("Weighing loaded trucks once is not enabled at this site. An administrator can enable it.", 422);
+      }
+      if (!bookingId && typeof plate === "string" && plate.trim()) {
+        const known = await findSiteVehicle(resolvedSite.organisationId, plate);
+        if (!known || known.tareWeightKg <= 1) return fail(`No stored empty weight for ${plate.trim().toUpperCase()}. Weigh it empty once first.`, 422);
+        // Check before a walk-in booking is created, so a refused weighing leaves nothing behind.
+        if (known.tareWeightKg >= w1) return fail(`Loaded weight must be more than the stored empty weight (${known.tareWeightKg.toLocaleString()} kg).`, 422);
+      }
+    } else if (!w1 || w1 <= 0 || !w2 || w2 <= 0) return fail("Both 1st and 2nd weights (kg) must be greater than 0", 422);
+    const wp = await weightPolicy(authCheck.actor!, resolvedSite.id, body);
+    if (wp.error) return wp.error;
 
     let booking;
     if (bookingId) {
-      booking = await prisma.booking.findUnique({
-        where: { id: bookingId },
+      booking = await prisma.booking.findFirst({
+        where: { id: bookingId, siteId: resolvedSite.id, status: { in: ["APPROVED", "ACTIVE"] } },
         include: { vehicle: true, driver: true, trailer: true, order: true },
       });
-      if (!booking) return fail("Booking not found", 404);
+      if (!booking) return fail("Booking not found or not approved for this site", 404);
     } else if (plate && plate.trim()) {
       booking = await resolveOrCreateWalkInBooking({
         siteId: resolvedSite.id,
@@ -709,9 +840,17 @@ export async function POST(request: NextRequest) {
         commodity,
         orderId,
         operatorId,
+        knownTareKg: useStoredTare ? null : Math.min(w1, w2),
       });
     } else {
       return fail("Either bookingId or vehicle registration plate is required", 422);
+    }
+
+    if (useStoredTare) {
+      const stored = booking.vehicle.tareWeightKg;
+      if (!stored || stored <= 1) return fail(`No stored empty weight for ${booking.vehicle.plate}. Weigh it empty once first.`, 422);
+      if (stored >= w1) return fail(`Loaded weight must be more than the stored empty weight (${stored.toLocaleString()} kg).`, 422);
+      w2 = stored;
     }
 
     const actualGross = Math.max(w1, w2);
@@ -826,9 +965,11 @@ export async function POST(request: NextRequest) {
         grossWeightKg: actualGross,
         tareWeightKg: actualTare,
         netWeightKg,
+        weightSource: wp.source,
         notes: notes ?? null,
       },
     });
+    if (wp.flagged) await flagManualWeight(resolvedSite.id, operatorId, completed.id, booking.id, wp.reason, { grossWeightKg: actualGross, tareWeightKg: actualTare });
 
     return ok({
       message: `Transaction recorded for ${booking.vehicle.plate}! Net Cargo: ${netWeightKg.toLocaleString()} kg`,
@@ -843,7 +984,8 @@ export async function POST(request: NextRequest) {
 
     return fail(`Unsupported action: ${action}`, 400);
   } catch (err: any) {
-    console.error("MANUAL_WEIGH_ERROR:", err);
-    return fail(err.message || String(err), 500);
+    if (err instanceof WalkInError) return fail(err.message, 422);
+    logger.error("manual_weigh_error", { message: err instanceof Error ? err.message : String(err) });
+    return fail("The weighment could not be recorded. Please try again.", 500);
   }
 }

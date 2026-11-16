@@ -8,13 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatSADateTime } from "@/lib/datetime";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 export default async function Incidents() {
   const s = await auth();
   if (!s?.user) redirect("/login");
 
   const rows = await prisma.incident.findMany({
-    where: { site: userScope(s.user) },
+    where: viaSiteWhere(await loadAccessContext(s.user)),
     include: { site: true, vehicle: true },
     orderBy: { createdAt: "desc" },
     take: 100,

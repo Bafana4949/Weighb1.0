@@ -33,6 +33,7 @@ import { useToast } from "@/components/providers";
 type LoginUser = { id: string; firstName: string; lastName: string; email: string; status: string };
 type CompanyStatus = "PENDING_SETUP" | "ACTIVE" | "SUSPENDED" | "ARCHIVED";
 type CompanyRow = {
+  licensedTier?: "MANUAL" | "SEMI_AUTOMATIC" | "FULLY_AUTOMATIC";
   id: string;
   name: string;
   registrationNo: string | null;
@@ -156,6 +157,22 @@ export function CompanyManagement({ initialCompanies }: { initialCompanies: Comp
       toast({ title: "Company activated", body: company.name });
     } catch (error) {
       toast({ title: "Could not activate company", body: String(error), severity: "HIGH" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Subscription tier: the highest operating tier any of the company's sites may use.
+  async function setLicence(company: CompanyRow, licensedTier: NonNullable<CompanyRow["licensedTier"]>) {
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/admin/companies/${company.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ licensedTier }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not change licence");
+      setCompanies((current) => current.map((c) => (c.id === company.id ? { ...c, licensedTier } : c)));
+      toast({ title: "Licence updated", body: `${company.name}: ${licensedTier.replace("_", "-").toLowerCase()}` });
+    } catch (error) {
+      toast({ title: "Could not change licence", body: error instanceof Error ? error.message : String(error), severity: "HIGH" });
     } finally {
       setBusy(false);
     }
@@ -290,7 +307,7 @@ Instructions:
               <TableHead>Registration</TableHead>
               <TableHead>Contact</TableHead>
               <TableHead>Client Admin Logins</TableHead>
-              <TableHead>Sites</TableHead>
+              <TableHead>Sites / licence</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
@@ -332,7 +349,16 @@ Instructions:
                       </div>
                     ))}
                   </TableCell>
-                  <TableCell className="text-xs">{c._count.sites}</TableCell>
+                  <TableCell className="text-xs">
+                    <div className="flex flex-col gap-1">
+                      <span>{c._count.sites} site{c._count.sites === 1 ? "" : "s"}</span>
+                      <select aria-label={`Licence tier for ${c.name}`} value={c.licensedTier ?? "MANUAL"} disabled={busy} onChange={(e) => void setLicence(c, e.target.value as NonNullable<CompanyRow["licensedTier"]>)} className="h-7 rounded-sm border border-border bg-surface px-1 text-2xs">
+                        <option value="MANUAL">Licence: Manual</option>
+                        <option value="SEMI_AUTOMATIC">Licence: Semi-Automatic</option>
+                        <option value="FULLY_AUTOMATIC">Licence: Fully Automatic</option>
+                      </select>
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={STATUS_BADGE[c.status]}>{c.status.replace("_", " ")}</Badge>
                   </TableCell>

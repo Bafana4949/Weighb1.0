@@ -5,6 +5,7 @@ import { parsePagination, siteIdentifierWhere } from "@/lib/utils";
 import { userScope } from "@/lib/access";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { formatSADateNullable, formatSATimeNullable, parseSAEndOfDay, parseSAStartOfDay } from "@/lib/datetime";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 const isoDate = formatSADateNullable;
 const isoTime = formatSATimeNullable;
@@ -49,7 +50,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   } else if (a.session!.user.role === "TRANSPORTER") {
     andConditions.push({ booking: { transporterOrganisationId: a.session!.user.organisationId! } });
   } else {
-    andConditions.push({ site: userScope(a.session!.user) });
+    andConditions.push(viaSiteWhere(await loadAccessContext(a.session!.user)));
   }
   if (site) {
     andConditions.push({ site: siteIdentifierWhere(site) });
@@ -138,6 +139,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   ]);
 
   const mappedRows = rows.map(r => ({
+    id: r.id,
     transactionNo: r.waybillNumber || r.edgeTransactionId,
     transactionDate: isoDate(r.capturedAt),
     transactionTime: isoTime(r.capturedAt),

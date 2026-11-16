@@ -3,7 +3,8 @@ import { UserRole } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fail, ok, requireRole } from "@/lib/api";
-import { audit } from "@/lib/audit";
+import { audit, auditActor } from "@/lib/audit";
+import { canAccessSite } from "@/lib/site-access";
 import { syncOrderFulfillmentStatus } from "@/lib/order-fulfillment";
 import { computeIntegrityHash, getChainHead } from "@/lib/chain";
 import { assertWeightInvariant } from "@/lib/weights";
@@ -58,7 +59,8 @@ export async function POST(
     },
   });
 
-  if (!order) return fail("Order not found", 404);
+  // Tenant + site isolation: the order's weighbridge site must be one the caller may operate.
+  if (!order || !(await canAccessSite(a.session!.user, order.site))) return fail("Order not found", 404);
 
   const siteId = order.siteId;
   const siteCode = order.site.code;
@@ -305,20 +307,13 @@ export async function POST(
     const enableTare = Boolean(useConstantTare);
     const enableGross = Boolean(useConstantGross);
 
-    await prisma.$executeRawUnsafe(
-      `UPDATE weighbridge_orders 
-       SET preset_tare_weight_kg = $1,
-           preset_gross_weight_kg = $2,
-           use_constant_tare = $3,
-           use_constant_gross = $4,
-           updated_at = NOW()
-       WHERE id = $5::uuid`,
-      tare,
-      gross,
-      enableTare,
-      enableGross,
-      id
-    );
+    if ((tare !== null && (tare <= 0 || tare > 200000)) || (gross !== null && (gross <= 0 || gross > 200000))) {
+      return fail("Constant weights must be between 1 and 200 000 kg", 422);
+    }
+    const before = { presetTareWeightKg: order.presetTareWeightKg, presetGrossWeightKg: order.presetGrossWeightKg, useConstantTare: order.useConstantTare, useConstantGross: order.useConstantGross };
+    const after = { presetTareWeightKg: tare, presetGrossWeightKg: gross, useConstantTare: enableTare, useConstantGross: enableGross };
+    await prisma.weighbridgeOrder.update({ where: { id: order.id }, data: after });
+    await audit({ ...auditActor(a.session!.user), siteId: order.siteId, action: "ORDER_CONSTANT_WEIGHTS_UPDATED", entityType: "weighbridge_order", entityId: order.id, beforeData: before, afterData: after });
 
     return ok({
       action: "SAVE_PRESETS",

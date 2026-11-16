@@ -1,5 +1,14 @@
 name: weighbridge-system
 
+# Profiles
+#   (default)   postgres + mosquitto for local development
+#   cloud       + web (Next.js) — the central platform
+#   edge        + site-daemon + hardware-simulator — a simulated single-lane site
+#   edge-dual   + one daemon serving two simulated lanes (entry/exit topology)
+#   admin-tools + pgAdmin
+# Production sites run the site-daemon image on the edge PC with real hardware and
+# WB_ENV=production; see docs/DEPLOYMENT_GUIDE.md and docs/EDGE_DEPLOYMENT.md.
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,9 +17,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-weighbridge}
       POSTGRES_USER: ${POSTGRES_USER:-weighbridge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-weighbridge_dev_change_me}
-    # Host port binding removed — accessible via Docker internal network (postgres:5432).
+    # Bound to loopback only. POSTGRES_HOST_PORT is configurable because Windows
+    # Hyper-V reserves dynamic port ranges (check with
+    # `netsh interface ipv4 show excludedportrange protocol=tcp`).
     ports:
-      - "127.0.0.1:15432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -19,12 +30,14 @@ services:
       timeout: 5s
       retries: 20
 
+  # Development broker: anonymous, loopback-only. Production uses
+  # mosquitto/config/mosquitto.prod.conf (TLS, passwords, per-site ACLs).
   mosquitto:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "127.0.0.1:1883:1883"
+      - "127.0.0.1:9001:9001"
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./mosquitto/data:/mosquitto/data
@@ -40,10 +53,10 @@ services:
     restart: unless-stopped
     profiles: ["admin-tools"]
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@weighbridge.local
-      PGADMIN_DEFAULT_PASSWORD: admin-change-me
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@weighbridge.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin-change-me}
     ports:
-      - "5050:80"
+      - "127.0.0.1:5050:80"
     volumes:
       - pgadmin-data:/var/lib/pgadmin
     depends_on:
@@ -59,13 +72,21 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-weighbridge}:${POSTGRES_PASSWORD:-weighbridge_dev_change_me}@postgres:5432/${POSTGRES_DB:-weighbridge}?schema=public
       DIRECT_URL: postgresql://${POSTGRES_USER:-weighbridge}:${POSTGRES_PASSWORD:-weighbridge_dev_change_me}@postgres:5432/${POSTGRES_DB:-weighbridge}?schema=public
+      # The app refuses to start in production with a placeholder secret.
       AUTH_SECRET: ${AUTH_SECRET:-development-secret-change-before-production}
       AUTH_TRUST_HOST: "true"
-      NEXT_PUBLIC_APP_URL: http://localhost:3010
-      NEXT_PUBLIC_SOCKET_URL: http://localhost:3010
-      SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-dev-site-key-change-me}
+      PASSWORD_PEPPER: ${PASSWORD_PEPPER:-}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3010}
       MQTT_URL: mqtt://mosquitto:1883
-      SITE_DAEMON_URL: http://site-daemon:8000
+      # Optional co-located edge controller (one site) for live telemetry / commands.
+      SITE_DAEMON_URL: ${SITE_DAEMON_URL:-}
+      SITE_DAEMON_SITE_CODE: ${SITE_DAEMON_SITE_CODE:-}
+      SITE_DAEMON_TOKEN: ${WB_LOCAL_API_TOKEN:-}
+      # Only during migration from the retired shared edge key; see docs/SECURITY.md.
+      ALLOW_LEGACY_SITE_KEY: ${ALLOW_LEGACY_SITE_KEY:-false}
+      SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-}
+      NFC_BRIDGE_URL: ${NFC_BRIDGE_URL:-}
+      ATTACHMENT_STORAGE_PATH: /workspace/.attachments
       SMTP_HOST: ${SMTP_HOST:-smtp.ethereal.email}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -76,27 +97,44 @@ services:
       TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
     ports:
       - "3010:3000"
+    volumes:
+      - web-attachments:/workspace/.attachments
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
       mosquitto:
         condition: service_started
 
+  # Simulated single-lane site. Issue the site's key in Hardware → Configuration →
+  # Edge controller, then export WB_SITE_API_KEY before `docker compose --profile edge up`.
   site-daemon:
     build:
       context: ./apps/site-daemon
+      args:
+        INSTALL_ANPR: ${INSTALL_ANPR:-false}
     restart: unless-stopped
     profiles: ["edge"]
     environment:
-      WB_CONFIG_PATH: /app/config.docker.yaml
+      WB_ENV: development
+      WB_ALLOW_SIMULATION: "true"
+      WB_CONFIG_PATH: /app/config.docker.dev.yaml
       WB_EDGE_DB_PATH: /data/edge.db
-      SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-dev-site-key-change-me}
+      WB_SITE_API_KEY: ${WB_SITE_API_KEY:-}
+      WB_CLOUD_API_URL: ${WB_CLOUD_API_URL:-http://web:3000/api}
+      WB_MQTT_URL: mqtt://mosquitto:1883
+      WB_LOCAL_API_TOKEN: ${WB_LOCAL_API_TOKEN:-}
     volumes:
       - edge-data:/data
-      - ./apps/site-daemon/config.docker.yaml:/app/config.docker.yaml:ro
+      - ./apps/site-daemon/config.docker.dev.yaml:/app/config.docker.dev.yaml:ro
       - ./apps/site-daemon/test_plates:/app/test_plates:ro
     ports:
-      - "8010:8000"
+      - "127.0.0.1:8010:8000"
     depends_on:
       mosquitto:
         condition: service_started
@@ -107,20 +145,18 @@ services:
     profiles: ["edge"]
     command: ["python", "simulator.py", "--headless", "--tcp-host", "0.0.0.0", "--tcp-port", "7001"]
     ports:
-      - "7001:7001"
-      - "7002:7002"
+      - "127.0.0.1:7001:7001"
+      - "127.0.0.1:7002:7002"
 
-  # --- DUAL_ENTRY_EXIT demo site (EX-OO1): one site-daemon running two
-  # independent lanes, each with its own hardware-simulator instance, proving
-  # live dual-lane operation without touching the single-lane services above.
+  # --- DUAL_ENTRY_EXIT demo site: one daemon, two independent simulated lanes.
   hardware-simulator-lane-a:
     build:
       context: ./apps/hardware-simulator
     profiles: ["edge-dual"]
     command: ["python", "simulator.py", "--headless", "--tcp-host", "0.0.0.0", "--tcp-port", "7001", "--control-port", "7002"]
     ports:
-      - "7011:7001"
-      - "7012:7002"
+      - "127.0.0.1:7011:7001"
+      - "127.0.0.1:7012:7002"
 
   hardware-simulator-lane-b:
     build:
@@ -128,24 +164,31 @@ services:
     profiles: ["edge-dual"]
     command: ["python", "simulator.py", "--headless", "--tcp-host", "0.0.0.0", "--tcp-port", "7001", "--control-port", "7002"]
     ports:
-      - "7013:7001"
-      - "7014:7002"
+      - "127.0.0.1:7013:7001"
+      - "127.0.0.1:7014:7002"
 
   site-daemon-dual:
     build:
       context: ./apps/site-daemon
+      args:
+        INSTALL_ANPR: ${INSTALL_ANPR:-false}
     restart: unless-stopped
     profiles: ["edge-dual"]
     environment:
-      WB_CONFIG_PATH: /app/config.dual.docker.yaml
+      WB_ENV: development
+      WB_ALLOW_SIMULATION: "true"
+      WB_CONFIG_PATH: /app/config.dual.docker.dev.yaml
       WB_EDGE_DB_PATH: /data/edge.db
-      SITE_DAEMON_API_KEY: ${SITE_DAEMON_API_KEY:-dev-site-key-change-me}
+      WB_SITE_API_KEY: ${WB_SITE_API_KEY_DUAL:-}
+      WB_CLOUD_API_URL: ${WB_CLOUD_API_URL:-http://web:3000/api}
+      WB_MQTT_URL: mqtt://mosquitto:1883
+      WB_LOCAL_API_TOKEN: ${WB_LOCAL_API_TOKEN:-}
     volumes:
       - edge-data-dual:/data
-      - ./apps/site-daemon/config.dual.docker.yaml:/app/config.dual.docker.yaml:ro
+      - ./apps/site-daemon/config.dual.docker.dev.yaml:/app/config.dual.docker.dev.yaml:ro
       - ./apps/site-daemon/test_plates:/app/test_plates:ro
     ports:
-      - "8020:8000"
+      - "127.0.0.1:8020:8000"
     depends_on:
       mosquitto:
         condition: service_started
@@ -155,6 +198,7 @@ services:
         condition: service_started
 
 volumes:
+  web-attachments:
   postgres-data:
   pgadmin-data:
   mosquitto-logs:

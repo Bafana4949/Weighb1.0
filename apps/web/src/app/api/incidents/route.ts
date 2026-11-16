@@ -2,10 +2,14 @@ import { IncidentType, Severity, UserRole } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { fail, ok, requireRole, requireSiteOrRole, withScopeErrors } from "@/lib/api";
+import { actorCanAccessSite, fail, ok, requireRole, requireSiteOrRole, withScopeErrors } from "@/lib/api";
+import { audit } from "@/lib/audit";
+import { transporterServesCompany, vehicleUsableByCompany } from "@/lib/transporter-links";
+import { safeDriverSelect } from "@/lib/utils";
 import { userScope } from "@/lib/access";
 import { parsePagination, siteIdentifierWhere } from "@/lib/utils";
 import { routeNotification } from "@/lib/notifications";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 const schema = z.object({
   type: z.nativeEnum(IncidentType),
@@ -34,11 +38,11 @@ export const GET = withScopeErrors(async function GET(request: Request) {
     ...(type ? { type } : {}),
     ...(severity ? { severity } : {}),
     ...(resolved === "true" ? { status: "RESOLVED" as const } : resolved === "false" ? { status: { not: "RESOLVED" as const } } : {}),
-    site: userScope(a.session!.user),
+    ...viaSiteWhere(await loadAccessContext(a.session!.user)),
   };
 
   const [rows, total] = await Promise.all([
-    prisma.incident.findMany({ where, include: { site: true, vehicle: true, driver: true }, orderBy: { createdAt: "desc" }, skip, take: limit }),
+    prisma.incident.findMany({ where, include: { site: true, vehicle: true, driver: { select: safeDriverSelect } }, orderBy: { createdAt: "desc" }, skip, take: limit }),
     prisma.incident.count({ where }),
   ]);
   return ok(rows, 200, { page, total, limit });
@@ -52,7 +56,15 @@ export const POST = withScopeErrors(async function POST(request: NextRequest) {
   const site = parsed.data.siteId
     ? await prisma.site.findUnique({ where: { id: parsed.data.siteId } })
     : await prisma.site.findFirst({ where: siteIdentifierWhere(parsed.data.site_id ?? "") });
-  if (!site) return fail("Site not found", 404);
+  if (!site || !(await actorCanAccessSite(a.actor!, site))) return fail("Site not found", 404);
+  const [booking, vehicle, driver] = await Promise.all([
+    parsed.data.booking_id ? prisma.booking.findUnique({ where: { id: parsed.data.booking_id }, select: { siteId: true } }) : null,
+    parsed.data.vehicle_id ? prisma.vehicle.findUnique({ where: { id: parsed.data.vehicle_id }, select: { id: true, organisationId: true } }) : null,
+    parsed.data.driver_id ? prisma.driver.findUnique({ where: { id: parsed.data.driver_id }, select: { organisationId: true } }) : null,
+  ]);
+  if (parsed.data.booking_id && booking?.siteId !== site.id) return fail("Booking does not belong to this site", 422);
+  if (parsed.data.vehicle_id && (!vehicle || !(await vehicleUsableByCompany(vehicle, site.organisationId)))) return fail("Vehicle is not known at this site", 422);
+  if (parsed.data.driver_id && (!driver || !(await transporterServesCompany(driver.organisationId, site.organisationId)))) return fail("Driver is not known at this site", 422);
   const row = await prisma.incident.create({
     data: {
       siteId: site.id,
@@ -67,6 +79,7 @@ export const POST = withScopeErrors(async function POST(request: NextRequest) {
       anomalyScore: parsed.data.severity === "CRITICAL" ? 50 : parsed.data.severity === "HIGH" ? 25 : parsed.data.severity === "MEDIUM" ? 10 : 0,
     },
   });
+  await audit({ userId: a.actor!.type === "user" ? a.actor!.id : null, actorRole: a.actor!.type === "user" ? a.actor!.session.user.role : "EDGE", siteId: site.id, organisationId: site.organisationId, action: "INCIDENT_RAISED", entityType: "incident", entityId: row.id, afterData: { type: row.type, severity: row.severity, title: row.title } });
   await routeNotification({
     event: parsed.data.type,
     severity: parsed.data.severity,

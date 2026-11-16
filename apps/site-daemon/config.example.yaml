@@ -1,0 +1,120 @@
+# Site edge controller configuration - TEMPLATE.
+#
+# Copy to a site-specific file (e.g. /etc/weighbridge/edge.yaml), fill in the
+# placeholders and point WB_CONFIG_PATH at it. This file describes the physical
+# wiring and stays authoritative when the cloud is unreachable; identity and
+# device inventory are refreshed from GET /edge/config when it is reachable.
+#
+# Secrets never go in this file. Provide them through the environment:
+#   WB_ENV=production            (default; development relaxes credential checks)
+#   WB_SITE_API_KEY=wbe_...      per-site key issued from the cloud UI
+#   WB_CLOUD_API_URL=https://<cloud host>/api
+#   WB_MQTT_URL=mqtts://<broker>:8883
+#   WB_MQTT_USERNAME / WB_MQTT_PASSWORD / WB_MQTT_TLS_CA (optional WB_MQTT_TLS_CERT / WB_MQTT_TLS_KEY)
+#   WB_LOCAL_API_TOKEN=<random>  required by /edge/command, /edge/manual-override,
+#                                /edge/check-in, /edge/driver-decision, /edge/lane-reset
+#   WB_EDGE_DB_PATH=/data/edge.db
+#   WB_ALLOW_SIMULATION=true     only to drive the hardware-simulator deliberately
+
+site:
+  id: "<SITE_CODE>"                 # cloud Site.code
+  name: "<Site name>"
+  cloud_id: "<site uuid>"           # offline fallback for the MQTT prefix tenant/{organisation_id}/site/{cloud_id}
+  organisation_id: "<organisation uuid>"
+  timezone: "Africa/Johannesburg"
+  operating_hours: { start: "05:00", end: "22:00" }
+  topology: "BIDIRECTIONAL_SINGLE"  # or DUAL_ENTRY_EXIT with a `lanes:` list (see below)
+
+weighbridge:
+  max_capacity_kg: 80000
+  stability_threshold_kg: 20
+  stability_duration_seconds: 3
+  overload_tolerance_percent: 5
+  positioning_hold_seconds: 2
+  reading_interval_ms: 100
+  unstable_timeout_seconds: 60
+  empty_scale_threshold_kg: 500
+  empty_vehicle_max_kg: 18500
+  loaded_vehicle_max_kg: 70000
+
+anpr:
+  enabled: true                     # ignored (reported OFFLINE) when the image has no easyocr
+  confidence_threshold: 0.75
+  max_retries: 3
+  retry_interval_ms: 500
+  camera_source: "rtsp://<camera>/stream"
+  rapid_capture_count: 5
+
+# Single-lane wiring. For DUAL_ENTRY_EXIT use `lanes:` instead.
+transport:
+  mode: "serial"                    # serial (PIC18 I/O controller) or tcp
+  tcp_host: null
+  tcp_port: 7001
+  simulated: false                  # true only for the hardware-simulator
+
+serial:
+  port: "/dev/ttyUSB0"
+  baud_rate: 115200
+  timeout_seconds: 1
+  reconnect_seconds: 5
+  manual_mode_after_seconds: 30
+
+# Cloud HardwareDevice.deviceKey for each device on the single lane. Set a key to
+# null for hardware the site does not have.
+device_keys:
+  controller: "CTRL_MAIN"
+  scale: "SCALE_PRIMARY"
+  entry_gate: "GATE_ENTRY"
+  exit_gate: "GATE_EXIT"
+  position_sensor: "BEAM_P1"
+  position_sensor_p2: "BEAM_P2"
+  traffic_light: "LIGHT_DECK"
+  anpr_camera: "ANPR_ENTRY"
+  rfid_reader: "RFID_ENTRY"
+  printer: null
+
+# lanes:                            # DUAL_ENTRY_EXIT only; keys must differ per lane
+#   - id: "north"
+#     lane_number: 1
+#     mode: "serial"
+#     serial_port: "/dev/ttyUSB0"
+#     device_keys: { scale: "SCALE_LANE_1", entry_gate: "GATE_ENTRY_1", exit_gate: "GATE_EXIT_1", ... }
+#   - id: "south"
+#     lane_number: 2
+#     ...
+
+gates:
+  auto_close_seconds: 8             # cloud device configuration.autoCloseDelaySeconds wins when present
+  max_hold_open_seconds: 300
+  telemetry_max_age_seconds: 2
+  command_max_age_seconds: 30
+
+edge:
+  device_key: "EDGE_CONTROLLER"
+
+mqtt:
+  keepalive: 60
+  allow_anonymous: false
+  tls:
+    enabled: true
+  memory_buffer_limit: 1000
+
+cloud:
+  sync_interval_seconds: 30
+  heartbeat_interval_seconds: 30
+  config_refresh_seconds: 300
+  max_offline_hours: 72
+  request_timeout_seconds: 8
+  retry_base_seconds: 5
+  retry_max_seconds: 300
+
+storage:
+  sqlite_path: "/data/edge.db"
+  backup_directory: "/data/backups"
+  backup_interval_seconds: 3600
+  evidence_directory: "/data/evidence"
+
+notifications:
+  sms_enabled: false
+  operator_user_ids: []
+  admin_user_ids: []

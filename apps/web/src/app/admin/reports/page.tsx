@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatKg } from "@/lib/utils";
 import { formatSADate } from "@/lib/datetime";
 import { prisma } from "@/lib/prisma";
+import { loadAccessContext, siteWhere } from "@/lib/site-access";
 
 function isoDate(d: Date) { return formatSADate(d); }
 function selectClass() { return "h-9 rounded-sm border border-border bg-surface px-3 text-sm"; }
@@ -24,7 +25,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
   const group = params.group ?? "commodity";
   const material = params.material ?? "";
   const orderNo = params.orderNo ?? "";
-  const scope = userScope(s.user);
+  const scope = siteWhere(await loadAccessContext(s.user));
 
   const extraWhere: any = {};
   if (material) {

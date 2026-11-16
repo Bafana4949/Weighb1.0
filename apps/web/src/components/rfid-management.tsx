@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/providers";
+import { ScanCardButton } from "@/components/scan-card-button";
 
 type RfidCredential = {
   id: string;
@@ -59,7 +60,7 @@ export function RfidManagement({
       credentialType: form.get("credentialType"),
       organisationId: form.get("organisationId"),
       driverId: form.get("credentialType") === "DRIVER" ? form.get("driverId") : undefined,
-      vehicleId: form.get("credentialType") === "VEHICLE" ? form.get("vehicleId") : undefined,
+      vehicleId: form.get("credentialType") === "TRUCK" ? form.get("vehicleId") : undefined,
     };
 
     setBusy(true);
@@ -168,7 +169,7 @@ export function RfidManagement({
                 required
               >
                 <option value="DRIVER">Driver ID Card</option>
-                <option value="VEHICLE">Vehicle Windshield Tag</option>
+                <option value="TRUCK">Vehicle Windshield Tag</option>
               </select>
             </div>
             
@@ -190,7 +191,7 @@ export function RfidManagement({
               </div>
             )}
 
-            {selectedType === "VEHICLE" && (
+            {selectedType === "TRUCK" && (
               <div className="space-y-1.5">
                 <Label htmlFor="vehicleId">Vehicle</Label>
                 <select 
@@ -210,8 +211,11 @@ export function RfidManagement({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor="uid">Tag UID</Label>
-                <Input id="uid" name="uid" required minLength={4} placeholder="E2000... (Hex)" />
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="uid">Tag UID</Label>
+                  <ScanCardButton targetId="uid" />
+                </div>
+                <Input id="uid" name="uid" required minLength={4} placeholder="Tap card or enter hex" />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="displayCode">Display Code (Optional)</Label>

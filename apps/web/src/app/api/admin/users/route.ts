@@ -2,7 +2,8 @@ import bcrypt from "bcryptjs";
 import { UserRole, UserStatus } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { fail, ok, requireRole, withScopeErrors } from "@/lib/api";
+import { fail, ok, requireCompanyAdmin, requireRole, withScopeErrors } from "@/lib/api";
+import { isPlatformSuperAdmin } from "@/lib/permissions";
 import { userScope } from "@/lib/access";
 import { audit } from "@/lib/audit";
 import { rateLimitOrFail } from "@/lib/rate-limit";
@@ -19,8 +20,9 @@ export const GET = withScopeErrors(async function GET(request: Request) {
       ...(status ? { status } : {}),
       ...userScope(access.session!.user),
     },
-    include: { organisation: true, roleAssignments: { include: { role: true } } },
+    include: { organisation: true, roleAssignments: { include: { role: true } }, siteAccess: { select: { siteId: true } } },
     orderBy: { createdAt: "desc" },
+    take: 1000,
   });
   return ok(users.map(({ passwordHash, ...user }) => user));
 });
@@ -39,7 +41,7 @@ const createSchema = z.object({
 export const POST = withScopeErrors(async function POST(request: Request) {
   const limited = rateLimitOrFail(request, "admin-users-create", 20, 10 * 60 * 1000);
   if (limited) return limited;
-  const access = await requireRole([UserRole.ADMIN]);
+  const access = await requireCompanyAdmin();
   if (access.error) return access.error;
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid user", 422);
@@ -53,6 +55,15 @@ export const POST = withScopeErrors(async function POST(request: Request) {
   }
   const { password, organisationId, roleIds, ...profile } = parsed.data;
   const finalOrgId = callerOrg ?? (organisationId ?? null);
+  // Matches /admin/users/[id]/role: only the platform super admin grants Administrator.
+  if (!isPlatformSuperAdmin(access.session!.user) && parsed.data.role === "ADMIN") {
+    return fail("Only the platform administrator can create Administrator accounts", 403);
+  }
+  if (!finalOrgId) return fail("Choose the company this user belongs to", 422);
+  if (roleIds?.length) {
+    const valid = await prisma.role.count({ where: { id: { in: roleIds }, OR: [{ organisationId: null }, { organisationId: finalOrgId }] } });
+    if (valid !== new Set(roleIds).size) return fail("Roles must be built-in roles or roles of this company", 422);
+  }
 
   try {
     const user = await prisma.user.create({
@@ -66,6 +77,8 @@ export const POST = withScopeErrors(async function POST(request: Request) {
     });
     await audit({
       userId: access.session!.user.id,
+      organisationId: finalOrgId,
+      actorRole: access.session!.user.platformRole ?? access.session!.user.role,
       action: "USER_CREATED",
       entityType: "user",
       entityId: user.id,

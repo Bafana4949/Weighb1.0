@@ -11,7 +11,7 @@ export default async function ForgotPasswordPage() {
       <div className="mb-7">
         <Image src="/brand/logo-mark.png" alt="" width={44} height={44} className="mb-5 h-11 w-11 object-contain" priority />
         <h1 className="text-2xl font-semibold text-foreground">Reset your password</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Enter your email and we'll send you a reset link.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Enter your email and we’ll send you a reset link.</p>
       </div>
       <ForgotPasswordForm />
       <div className="mt-6 border-t border-border pt-4 text-xs text-muted-foreground">

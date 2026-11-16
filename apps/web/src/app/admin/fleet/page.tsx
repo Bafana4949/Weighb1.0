@@ -33,7 +33,7 @@ export default async function AdminFleet({ searchParams }: { searchParams: Promi
     prisma.driver.findMany({ where: driverWhere, include: { organisation: true }, orderBy: { lastName: "asc" }, skip: (dpage - 1) * LIMIT, take: LIMIT }),
     prisma.driver.count({ where: driverWhere }),
     prisma.trailer.findMany({ where: isSuperAdmin ? {} : { vehicle: vehicleWhere }, include: { vehicle: true }, orderBy: { trailerId: "asc" }, take: 200 }),
-    prisma.organisation.findMany({ where: { deletedAt: null, isActive: true, type: "HAULIER" }, orderBy: { name: "asc" } }),
+    prisma.organisation.findMany({ where: { deletedAt: null, isActive: true, type: "HAULIER", ...(s.user.organisationId ? { clientMiningCompanies: { some: { miningCompanyId: s.user.organisationId, status: "ACTIVE" } } } : {}) }, orderBy: { name: "asc" } }),
   ]);
 
   return (

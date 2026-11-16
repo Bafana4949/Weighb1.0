@@ -1,10 +1,8 @@
 import { UserRole } from "@prisma/client";
 import { NextRequest } from "next/server";
-import { auth } from "@/auth";
 import { activeWindowWhere } from "@/lib/booking-service";
 import { prisma } from "@/lib/prisma";
-import { fail, ok, requireSiteOrRole, withScopeErrors } from "@/lib/api";
-import { isPlatformSuperAdmin } from "@/lib/permissions";
+import { actorCanAccessSite, fail, ok, requireSiteOrRole, withScopeErrors } from "@/lib/api";
 import { normalisePlate, siteIdentifierWhere } from "@/lib/utils";
 
 export const GET = withScopeErrors(async function GET(request: NextRequest) {
@@ -21,12 +19,7 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
   });
   if (!resolvedSite) return fail("Site not found", 404);
 
-  if (a.actor?.type === "user") {
-    const session = await auth();
-    if (session?.user && !isPlatformSuperAdmin(session.user) && resolvedSite.organisationId !== session.user.organisationId) {
-      return fail("Site not found", 404);
-    }
-  }
+  if (!(await actorCanAccessSite(a.actor!, resolvedSite))) return fail("Site not found", 404);
 
   const booking = await prisma.booking.findFirst({
     where: {
@@ -38,7 +31,11 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
         { order: { status: "ACTIVE" } },
       ],
     },
-    include: { vehicle: true, driver: true, site: true },
+    include: {
+      vehicle: true,
+      site: true,
+      driver: { select: { rfidTag: true, rfidCredentials: { where: { status: "ACTIVE", credentialType: "DRIVER" }, select: { uid: true }, take: 1 } } },
+    },
     orderBy: { windowStart: "asc" },
   });
 
@@ -51,7 +48,8 @@ export const GET = withScopeErrors(async function GET(request: NextRequest) {
     vehicle_id: booking.vehicleId,
     trailer_id: booking.trailerId,
     driver_id: booking.driverId,
-    driver_rfid: booking.driver.rfidTag,
+    // Legacy driver tag first, then an issued RFID/NFC credential; null means "no card".
+    driver_rfid: booking.driver.rfidTag ?? booking.driver.rfidCredentials[0]?.uid ?? null,
     site_id: booking.site.code,
     plate: booking.vehicle.plate,
     plate_normalized: booking.vehicle.plateNormalized,

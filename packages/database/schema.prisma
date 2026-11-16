@@ -89,6 +89,14 @@ enum PlatformRole {
   PLATFORM_SUPPORT
 }
 
+/// Commercial automation tier. One platform; the tier only changes which
+/// capabilities are enabled for a site (see apps/web/src/lib/tiers.ts).
+enum OperatingTier {
+  MANUAL
+  SEMI_AUTOMATIC
+  FULLY_AUTOMATIC
+}
+
 enum WeighbridgeTopology {
   BIDIRECTIONAL_SINGLE
   DUAL_ENTRY_EXIT
@@ -336,6 +344,14 @@ enum HardwareDeviceType {
   BUZZER
   EDGE_DAEMON
   PRINTER
+  NFC_READER
+  QR_SCANNER
+  CCTV_CAMERA
+  CONTROLLER
+  KIOSK
+  NETWORK_DEVICE
+  UPS
+  OTHER
 }
 
 enum HardwareHealth {
@@ -385,6 +401,8 @@ model Organisation {
   logoUrl         String?            @map("logo_url")
   timezone        String?            @default("Africa/Johannesburg")
   defaultCurrency String?            @default("ZAR") @map("default_currency")
+  /// Highest operating tier this company's subscription permits on any of its sites.
+  licensedTier    OperatingTier      @default(MANUAL) @map("licensed_tier")
   onboardedAt     DateTime?          @map("onboarded_at")
   onboardedById   String?            @db.Uuid @map("onboarded_by_id")
   createdAt       DateTime           @default(now()) @map("created_at")
@@ -405,6 +423,7 @@ model Organisation {
   rfidCredentials RfidCredential[]
   weighbridgeInstallations WeighbridgeInstallation[]
   fleetRosters    FleetRoster[]
+  hardwareProfiles HardwareProfile[]
 
   miningCompanyTransporters   MiningCompanyTransporter[] @relation("MiningCompanyPartners")
   clientMiningCompanies       MiningCompanyTransporter[] @relation("TransporterClients")
@@ -439,6 +458,19 @@ model Site {
   timezone              String               @default("Africa/Johannesburg")
   geofenceRadiusM       Int                  @default(500) @map("geofence_radius_m")
   topology              WeighbridgeTopology  @default(BIDIRECTIONAL_SINGLE)
+  operatingTier         OperatingTier        @default(MANUAL) @map("operating_tier")
+  /// Per-site capability overrides within the tier, e.g. { "requireCardIdentification": true }.
+  featureOverrides      Json?                @map("feature_overrides")
+  /// SHA-256 of the site's edge controller API key. The key itself is shown once at issue time.
+  edgeKeyHash           String?              @unique @map("edge_key_hash")
+  edgeKeyPrefix         String?              @map("edge_key_prefix")
+  edgeKeyIssuedAt       DateTime?            @map("edge_key_issued_at")
+  edgeLastSeenAt        DateTime?            @map("edge_last_seen_at")
+  edgeVersion           String?              @map("edge_version")
+  edgePendingSync       Int?                 @map("edge_pending_sync")
+  edgeFailedSync        Int?                 @map("edge_failed_sync")
+  edgeMqttConnected     Boolean?             @map("edge_mqtt_connected")
+  edgeSimulated         Boolean?             @map("edge_simulated")
   isActive              Boolean              @default(true) @map("is_active")
   createdAt             DateTime             @default(now()) @map("created_at")
   updatedAt             DateTime             @updatedAt @map("updated_at")
@@ -502,6 +534,10 @@ model SiteConfig {
   requireInsuranceValid     Boolean  @default(true) @map("require_insurance_valid")
   requireDriverLicenceValid Boolean  @default(true) @map("require_driver_licence_valid")
   retentionYears            Int      @default(5) @map("retention_years")
+  /// Weighing flows this site permits: DISPATCH (tare then gross), RECEIPT (gross then tare),
+  /// KNOWN_TARE (weigh loaded once with the stored empty weight), SINGLE (weigh empty once
+  /// to store it). The two weigh-once options are off until an administrator enables them.
+  allowedWorkflows          String[] @default(["DISPATCH", "RECEIPT"]) @map("allowed_workflows")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @updatedAt @map("updated_at")
   site                      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
@@ -898,6 +934,9 @@ model SystemLog {
   id            String   @id @default(uuid()) @db.Uuid
   siteId        String?  @db.Uuid @map("site_id")
   userId        String?  @db.Uuid @map("user_id")
+  organisationId String? @db.Uuid @map("organisation_id")
+  actorRole     String?  @map("actor_role")
+  reason        String?
   action        String
   entityType    String   @map("entity_type")
   entityId      String?  @map("entity_id")
@@ -912,6 +951,7 @@ model SystemLog {
   @@index([entityType, entityId, occurredAt])
   @@index([userId, occurredAt])
   @@index([siteId, occurredAt])
+  @@index([organisationId, occurredAt])
   @@map("system_logs")
 }
 
@@ -925,9 +965,22 @@ model HardwareDevice {
   serialNumber           String?            @map("serial_number")
   firmwareVersion        String?            @map("firmware_version")
   configuration          Json?
+  manufacturer           String?
+  model                  String?
+  connectionType         String?            @map("connection_type")
   lastCalibrationDate    DateTime?           @db.Date @map("last_calibration_date")
   calibrationExpiryDate  DateTime?           @db.Date @map("calibration_expiry_date")
   isActive               Boolean            @default(true) @map("is_active")
+  /// Simulated devices are clearly separated from production hardware; the edge
+  /// refuses to drive them in production unless explicitly allowed.
+  isSimulated            Boolean            @default(false) @map("is_simulated")
+  maintenanceMode        Boolean            @default(false) @map("maintenance_mode")
+  /// Latest health, denormalised so dashboards don't scan hardware_status history.
+  lastHealth             HardwareHealth?    @map("last_health")
+  lastSeenAt             DateTime?          @map("last_seen_at")
+  lastMessage            String?            @map("last_message")
+  lastTestedAt           DateTime?          @map("last_tested_at")
+  lastTestResult         Json?              @map("last_test_result")
   createdAt              DateTime           @default(now()) @map("created_at")
   updatedAt              DateTime           @updatedAt @map("updated_at")
   site                   Site               @relation(fields: [siteId], references: [id])
@@ -1182,4 +1235,23 @@ model FleetRoster {
   @@unique([vehicleId, rosterDate])
   @@index([organisationId, rosterDate])
   @@map("fleet_rosters")
+}
+
+/// Reusable hardware template, e.g. "Standard Semi-Automatic Mine". organisationId
+/// null = platform-wide template visible to every company.
+model HardwareProfile {
+  id             String        @id @default(uuid()) @db.Uuid
+  organisationId String?       @db.Uuid @map("organisation_id")
+  name           String
+  description    String?
+  tier           OperatingTier
+  /// Array of { type, deviceKey, name, laneNumber?, connectionType?, manufacturer?, model?, configuration? }
+  devices        Json
+  createdById    String?       @db.Uuid @map("created_by_id")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  organisation   Organisation? @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@unique([organisationId, name])
+  @@map("hardware_profiles")
 }

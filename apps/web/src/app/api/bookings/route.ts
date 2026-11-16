@@ -10,7 +10,10 @@ import { routeNotification } from "@/lib/notifications";
 import { getOrderFulfilledKg } from "@/lib/order-fulfillment";
 import { parseSAEndOfDay, parseSAStartOfDay } from "@/lib/datetime";
 import { isPlatformSuperAdmin } from "@/lib/permissions";
-import { userScope } from "@/lib/access";
+import { audit, auditActor } from "@/lib/audit";
+import { canAccessSite, loadAccessContext, viaSiteWhere } from "@/lib/site-access";
+import { transporterServesCompany, vehicleUsableByCompany } from "@/lib/transporter-links";
+import { safeDriverSelect } from "@/lib/utils";
 
 export const GET = withScopeErrors(async function GET(request: Request) {
   const a = await requireRole([UserRole.TRANSPORTER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SECURITY]);
@@ -22,18 +25,15 @@ export const GET = withScopeErrors(async function GET(request: Request) {
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
 
-  const isSuperAdmin = isPlatformSuperAdmin(a.session!.user);
   const isTransporter = a.session!.user.role === "TRANSPORTER";
-  const tenantFilter = isSuperAdmin
-    ? {}
-    : isTransporter
-      ? { transporterOrganisationId: a.session!.user.organisationId! }
-      : { site: userScope(a.session!.user) };
+  const tenantFilter = isTransporter
+    ? { transporterOrganisationId: mineScope(a.session!.user.organisationId).organisationId }
+    : viaSiteWhere(await loadAccessContext(a.session!.user));
 
+  // AND keeps the tenant filter intact: a ?site= filter can only narrow, never replace it.
   const where = {
-    ...tenantFilter,
+    AND: [tenantFilter, site ? { site: siteIdentifierWhere(site) } : {}],
     ...(status ? { status } : {}),
-    ...(site ? { site: siteIdentifierWhere(site) } : {}),
     ...((from || to)
       ? {
           windowStart: {
@@ -44,7 +44,7 @@ export const GET = withScopeErrors(async function GET(request: Request) {
       : {}),
   };
   const [rows, total] = await Promise.all([
-    prisma.booking.findMany({ where, include: { vehicle: true, driver: true, site: true, trailer: true }, orderBy: { createdAt: "desc" }, skip, take: limit }),
+    prisma.booking.findMany({ where, include: { vehicle: true, driver: { select: safeDriverSelect }, site: true, trailer: true }, orderBy: { createdAt: "desc" }, skip, take: limit }),
     prisma.booking.count({ where }),
   ]);
   return ok(rows, 200, { page, total, limit });
@@ -115,6 +115,17 @@ export const POST = withScopeErrors(async function POST(request: Request) {
     return fail("All trailers must be linked to the selected vehicle", 422);
   }
   if (!site || !site.isActive) return fail("Destination site is unavailable", 422);
+
+  // Tenant checks: staff may only book at sites they can access; transporters only at
+  // companies they are contracted to; the vehicle and driver must belong to a
+  // transporter that serves the site's company.
+  if (a.session!.user.role === UserRole.TRANSPORTER) {
+    if (!(await transporterServesCompany(callerOrgId, site.organisationId))) return fail("Your company is not contracted to this site", 403);
+  } else {
+    if (!(await canAccessSite(a.session!.user, site))) return fail("Destination site is unavailable", 422);
+    if (!(await vehicleUsableByCompany(vehicle, site.organisationId))) return fail("Vehicle does not belong to a transporter contracted to this site", 403);
+    if (!(await transporterServesCompany(driver.organisationId, site.organisationId))) return fail("Driver does not belong to a transporter contracted to this site", 403);
+  }
   if (parsed.data.orderId) {
     if (!order || order.status !== "ACTIVE" || order.siteId !== site.id) {
       return fail("Selected order is not active for this site", 422);
@@ -137,6 +148,8 @@ export const POST = withScopeErrors(async function POST(request: Request) {
     transporterOrganisationId: bookingTransporterOrgId,
     createdById: a.session!.user.id,
   });
+
+  await audit({ ...auditActor(a.session!.user), siteId: site.id, action: "BOOKING_CREATED", entityType: "booking", entityId: booking.id, afterData: { reference: booking.reference, status: booking.status, vehicleId: vehicle.id, driverId: driver.id, orderId: booking.orderId } });
 
   if (booking.status === "APPROVED") {
     await routeNotification({

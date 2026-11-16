@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { Plus } from "lucide-react";
+import { safeDriverSelect } from "@/lib/utils";
+import { loadAccessContext, viaSiteWhere } from "@/lib/site-access";
 
 export default async function AdminBookingsPage({
   searchParams,
@@ -22,7 +24,7 @@ export default async function AdminBookingsPage({
   const params = await searchParams;
   const page = Math.max(1, Number(params.page ?? 1));
   const limit = 25;
-  const scope = userSiteScope(s.user);
+  const scope = viaSiteWhere(await loadAccessContext(s.user));
 
   const where = {
     ...scope,
@@ -44,7 +46,7 @@ export default async function AdminBookingsPage({
       where,
       include: {
         vehicle: true,
-        driver: true,
+        driver: { select: safeDriverSelect },
         site: true,
         transporterOrganisation: true,
         order: true,

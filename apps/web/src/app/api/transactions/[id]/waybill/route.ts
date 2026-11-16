@@ -6,7 +6,8 @@ import path from "path";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { fail, requirePermission, requireRole } from "@/lib/api";
-import { audit } from "@/lib/audit";
+import { audit, auditActor } from "@/lib/audit";
+import { canViewTransaction } from "@/lib/site-access";
 import { formatKg } from "@/lib/utils";
 import { rateLimitOrFail } from "@/lib/rate-limit";
 import { WaybillDocument } from "./waybill-document";
@@ -35,7 +36,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       booking: { include: { transporterOrganisation: true, order: { include: { originSite: true, destinationSite: true, productRef: true } }, additionalTrailers: { include: { trailer: true }, orderBy: { position: "asc" } } } },
     },
   });
-  if (!transaction || (access.session!.user.role === "TRANSPORTER" && transaction.booking.transporterOrganisationId !== access.session!.user.organisationId)) {
+  if (!transaction || !(await canViewTransaction(access.session!.user, transaction))) {
     return fail("Transaction not found", 404);
   }
 
@@ -52,7 +53,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     data: { printedAt: transaction.printedAt ?? new Date(), printCount: { increment: 1 }, lastPrintedById: access.session!.user.id },
   });
   await audit({
-    userId: access.session!.user.id, siteId: transaction.siteId,
+    ...auditActor(access.session!.user), siteId: transaction.siteId,
     action: isReprint ? "TRANSACTION_REPRINTED" : "TRANSACTION_PRINTED",
     entityType: "weighbridge_transaction", entityId: id,
     afterData: { copy: copyParam, printCount: updated.printCount },

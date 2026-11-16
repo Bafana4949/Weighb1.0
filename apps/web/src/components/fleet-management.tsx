@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PaginationControls } from "@/components/pagination-controls";
 import { useToast } from "@/components/providers";
+import { ScanCardButton } from "@/components/scan-card-button";
 
 type OrgOption = { id: string; name: string };
 type VehicleRow = {
@@ -589,7 +590,7 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
           <div className="space-y-1.5"><Label htmlFor="d-firstName">First name</Label><Input id="d-firstName" name="firstName" required minLength={2} /></div>
           <div className="space-y-1.5"><Label htmlFor="d-lastName">Last name</Label><Input id="d-lastName" name="lastName" required minLength={2} /></div>
           <div className="space-y-1.5"><Label htmlFor="d-idNumber">ID number</Label><Input id="d-idNumber" name="idNumber" required minLength={8} /></div>
-          <div className="space-y-1.5"><Label htmlFor="d-rfid">RFID tag <span className="text-2xs text-muted-foreground font-normal">(Optional)</span></Label><Input id="d-rfid" name="rfidTag" placeholder="Optional" /></div>
+          <div className="space-y-1.5"><div className="flex items-center justify-between gap-2"><Label htmlFor="d-rfid">RFID tag <span className="text-2xs text-muted-foreground font-normal">(Optional)</span></Label><ScanCardButton targetId="d-rfid" /></div><Input id="d-rfid" name="rfidTag" placeholder="Tap card or enter manually" /></div>
           <div className="space-y-1.5"><Label htmlFor="d-licence">Licence number</Label><Input id="d-licence" name="licenceNumber" required minLength={4} /></div>
           <div className="space-y-1.5"><Label htmlFor="d-licenceExpiry">Licence expiry</Label><Input id="d-licenceExpiry" name="licenceExpiry" type="date" required /></div>
           <p className="text-2xs text-muted-foreground md:col-span-2">By adding this driver you confirm they have consented to their ID and licence details being stored, per POPIA.</p>
@@ -622,7 +623,7 @@ function DriverSection({ initialDrivers, organisations, isAdmin, pagination }: {
         {editing && <form onSubmit={saveEdit} className="grid gap-3 md:grid-cols-2">
           <div className="space-y-1.5"><Label htmlFor="ed-firstName">First name</Label><Input id="ed-firstName" name="firstName" required minLength={2} defaultValue={editing.firstName} /></div>
           <div className="space-y-1.5"><Label htmlFor="ed-lastName">Last name</Label><Input id="ed-lastName" name="lastName" required minLength={2} defaultValue={editing.lastName} /></div>
-          <div className="space-y-1.5"><Label htmlFor="ed-rfid">RFID tag <span className="text-2xs text-muted-foreground font-normal">(Optional)</span></Label><Input id="ed-rfid" name="rfidTag" placeholder="Optional" defaultValue={editing.rfidTag ?? ""} /></div>
+          <div className="space-y-1.5"><div className="flex items-center justify-between gap-2"><Label htmlFor="ed-rfid">RFID tag <span className="text-2xs text-muted-foreground font-normal">(Optional)</span></Label><ScanCardButton targetId="ed-rfid" /></div><Input id="ed-rfid" name="rfidTag" placeholder="Tap card or enter manually" defaultValue={editing.rfidTag ?? ""} /></div>
           <div className="space-y-1.5"><Label htmlFor="ed-licence">Licence number</Label><Input id="ed-licence" name="licenceNumber" required minLength={4} defaultValue={editing.licenceNumber} /></div>
           <div className="space-y-1.5 md:col-span-2"><Label htmlFor="ed-licenceExpiry">Licence expiry</Label><Input id="ed-licenceExpiry" name="licenceExpiry" type="date" required defaultValue={dateInput(editing.licenceExpiry)} /></div>
           <div className="md:col-span-2"><Button type="submit" disabled={busy} className="w-full">{busy ? "Saving…" : "Save changes"}</Button></div>
